@@ -3,11 +3,40 @@ cli.py — Entry point with Langfuse tracing wired in.
 """
 
 import sys
+import uuid
+
 from langchain_core.messages import HumanMessage
 from langfuse import propagate_attributes
+from langgraph.types import Command
 
-from agent.graph import agent_graph
+from agent.graph import build_graph, get_checkpointer
 from agent.tracing import flush_traces, get_callback_handler, verify_connection
+
+
+def _display_interrupt(interrupt_payload: dict) -> None:
+    """Pretty-print the interrupt payload to the terminal."""
+    print("\n" + "=" * 60)
+    print("⚠️  AGENT ACTION REQUIRES YOUR APPROVAL")
+    print("=" * 60)
+    print(interrupt_payload.get("message", ""))
+    print()
+    print(interrupt_payload.get("actions", ""))
+    print()
+    print(interrupt_payload.get("instructions", "Type 'approve' or 'reject'."))
+    print("=" * 60)
+
+
+def _prompt_decision() -> str:
+    """Prompt the user until they type 'approve' or 'reject'."""
+    while True:
+        try:
+            decision = input("Your decision: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print("\nAborted.")
+            sys.exit(0)
+        if decision in ("approve", "reject"):
+            return decision
+        print("Please type 'approve' or 'reject'.")
 
 
 def main():
@@ -26,11 +55,38 @@ def main():
     # One handler per run = one trace in Langfuse.
     langfuse_handler = get_callback_handler()
 
-    with propagate_attributes(user_id="waffi", trace_name="cli-run"):
-        result = agent_graph.invoke(
-            {"messages": [HumanMessage(content=user_input)]},
-            config={"callbacks": [langfuse_handler]},
-        )
+    # Each CLI run gets a fresh thread_id so runs are independent.
+    # The checkpointer uses this to namespace the checkpoint.
+    thread_id = str(uuid.uuid4())
+    config = {
+        "callbacks": [langfuse_handler],
+        "configurable": {"thread_id": thread_id},
+    }
+
+    with get_checkpointer() as checkpointer:
+        agent_graph = build_graph(checkpointer)
+
+        with propagate_attributes(user_id="waffi", trace_name="cli-run"):
+            result = agent_graph.invoke(
+                {"messages": [HumanMessage(content=user_input)]},
+                config=config,
+            )
+
+            # HITL loop — handle zero or more interrupts per run.
+            # The graph pauses at human_review_node whenever a write tool
+            # is about to execute. We display the payload, collect the
+            # decision, and resume with the same thread_id.
+            while "__interrupt__" in result:
+                for interrupt_obj in result["__interrupt__"]:
+                    _display_interrupt(interrupt_obj.value)
+
+                decision = _prompt_decision()
+                print(f"\nResuming with: {decision}\n")
+
+                result = agent_graph.invoke(
+                    Command(resume=decision),
+                    config=config,
+                )
 
     last = result["messages"][-1]
     if isinstance(last.content, str):
@@ -43,6 +99,7 @@ def main():
         print(text)
 
     flush_traces()
+
 
 if __name__ == "__main__":
     main()

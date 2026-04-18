@@ -33,15 +33,19 @@ Error handling strategy — two distinct mechanisms:
      message history stays well-formed and the LLM can respond gracefully.
 """
 
-from typing import Annotated
+import sqlite3
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Annotated, Literal
 
 from googleapiclient.errors import HttpError
 from langchain_core.messages import BaseMessage, SystemMessage, ToolMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
-from langgraph.types import RetryPolicy
+from langgraph.types import Command, RetryPolicy, interrupt
 from typing_extensions import TypedDict
 
 from agent.config import settings
@@ -81,6 +85,16 @@ llm = ChatGoogleGenerativeAI(
 # - wraps the result in a ToolMessage (which the LLM reads on the next step)
 # - handles parallel tool calls if the LLM calls multiple tools at once
 tool_node = ToolNode(TOOLS)
+
+# Tools that require explicit human approval before execution.
+# Read-only tools are NOT listed here — they pass through silently.
+# Add write tools here as they are implemented.
+TOOLS_REQUIRING_APPROVAL: set[str] = {
+    "create_draft_email",    # saves a draft to Gmail
+    "send_email",            # future — sends immediately, irreversible
+    "create_calendar_event", # future — creates a calendar event
+    "delete_file",           # future — destructive filesystem operation
+}
 
 
 # ---------------------------------------------------------------------------
@@ -158,6 +172,73 @@ def agent_node(state: AgentState) -> dict:
     return {"messages": [response]}
 
 
+def human_review_node(state: AgentState) -> Command[Literal["tools", "agent"]]:
+    """
+    Human-in-the-loop gate between agent and tools.
+
+    Inspects pending tool calls on the last AIMessage.
+    - If none require approval → proceeds to tools automatically (no interrupt).
+    - If any require approval → calls interrupt() to pause the graph.
+
+    The interrupt payload is displayed by the CLI (or any frontend).
+    When the user responds, the graph resumes with their decision.
+
+    On 'approve': routes to tools, execution continues normally.
+    On 'reject':  injects a ToolMessage for each pending tool call so the
+                  message history stays well-formed, then routes back to
+                  agent so the LLM can acknowledge the cancellation.
+
+    Why Command instead of a plain dict return?
+    Command lets a node specify both a state update AND the next node to
+    route to dynamically. This avoids a conditional edge whose logic would
+    duplicate what is already in this node.
+    """
+    last_message = state["messages"][-1]
+    tool_calls = getattr(last_message, "tool_calls", [])
+
+    # Identify which pending calls need approval
+    calls_needing_approval = [
+        tc for tc in tool_calls
+        if tc["name"] in TOOLS_REQUIRING_APPROVAL
+    ]
+
+    if not calls_needing_approval:
+        # All tools are read-only — proceed without interrupting
+        return Command(goto="tools")
+
+    # Build a human-readable summary of what is about to happen
+    action_summary = "\n".join(
+        f"  • {tc['name']}({tc['args']})"
+        for tc in calls_needing_approval
+    )
+
+    # Pause here — the CLI displays this payload and prompts the user.
+    # interrupt() raises internally; execution resumes from this exact point
+    # when Command(resume=...) is passed with the same thread_id.
+    decision = interrupt({
+        "message": "The agent wants to perform the following action(s):",
+        "actions": action_summary,
+        "instructions": "Type 'approve' to proceed or 'reject' to cancel.",
+    })
+
+    if decision == "approve":
+        return Command(goto="tools")
+
+    # Rejected — inject a ToolMessage for every pending tool call so the
+    # message history stays well-formed, then route back to agent.
+    rejection_messages = [
+        ToolMessage(
+            content=(
+                f"Action '{tc['name']}' was rejected by the user. "
+                "Do not retry this action. Acknowledge the cancellation."
+            ),
+            tool_call_id=tc["id"],
+        )
+        for tc in tool_calls  # ALL tool calls, not just those needing approval
+    ]
+    return Command(goto="agent", update={"messages": rejection_messages})
+
+
 def tools_with_fallback(state: AgentState) -> dict:
     """
     Wrapper around ToolNode that catches exhausted-retry exceptions.
@@ -206,31 +287,70 @@ def tools_with_fallback(state: AgentState) -> dict:
 def should_continue(state: AgentState) -> str:
     """
     Inspect the last message to decide what happens next.
-    Tool call present → go to tools. Final answer → END.
+    Tool call present → human_review (which routes to tools or back to agent).
+    Final answer → END.
     This is the hinge of the ReAct loop.
     """
     last_message = state["messages"][-1]
     if last_message.tool_calls:
-        return "tools"
+        return "human_review"
     return END
 
 
 # ---------------------------------------------------------------------------
-# 6. Graph assembly
+# 6. Checkpointer
+# ---------------------------------------------------------------------------
+# SqliteSaver persists graph state to disk so interrupted runs survive
+# process restarts. We expose a context manager so callers (CLI, tests)
+# own the connection lifecycle explicitly.
+#
+# check_same_thread=False is required because LangGraph may access the
+# connection from background threads during graph execution.
+#
+# Switching to PostgresSaver for production requires changing one line here.
+
+_CHECKPOINT_DIR = Path(__file__).resolve().parents[3] / "checkpoints"
+_CHECKPOINT_DIR.mkdir(exist_ok=True)
+CHECKPOINT_DB = str(_CHECKPOINT_DIR / "hitl.db")
+
+
+@contextmanager
+def get_checkpointer():
+    """
+    Context manager that opens a SqliteSaver, yields it, then closes the
+    underlying sqlite3 connection when the caller's `with` block exits.
+
+    Usage:
+        with get_checkpointer() as checkpointer:
+            graph = build_graph(checkpointer)
+            graph.invoke(...)
+    """
+    conn = sqlite3.connect(CHECKPOINT_DB, check_same_thread=False)
+    try:
+        yield SqliteSaver(conn)
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# 7. Graph assembly
 # ---------------------------------------------------------------------------
 
-def build_graph():
+def build_graph(checkpointer=None):
     """
     Wire nodes and edges into a compiled graph.
 
-    The tools node uses tools_with_fallback as its function (catches
-    exhausted-retry exceptions) and gets TOOL_RETRY_POLICY for automatic
-    retries on transient failures. LangGraph applies the retry policy to
-    whatever function is registered as the node, including wrappers.
+    Pass a checkpointer (from get_checkpointer()) to enable HITL interrupts
+    and persistent state. Without a checkpointer, interrupt() will raise.
+
+    Topology:
+      agent → [should_continue] → human_review → [Command] → tools → agent
+                                ↘ END                       ↘ agent (rejected)
     """
     graph = StateGraph(AgentState)
 
     graph.add_node("agent", agent_node)
+    graph.add_node("human_review", human_review_node)
     graph.add_node(
         "tools",
         tools_with_fallback,
@@ -243,15 +363,18 @@ def build_graph():
         "agent",
         should_continue,
         {
-            "tools": "tools",
+            "human_review": "human_review",
             END: END,
         },
     )
 
+    # human_review routes itself via Command — no explicit edge needed from it
+    # tools always loops back to agent
     graph.add_edge("tools", "agent")
 
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer)
 
 
-# Module-level compiled graph — import this from other modules
+# Module-level compiled graph for backwards compatibility (no checkpointer).
+# Use build_graph(checkpointer) via get_checkpointer() when HITL is needed.
 agent_graph = build_graph()

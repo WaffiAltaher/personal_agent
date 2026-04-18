@@ -39,7 +39,11 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 # Important: changing scopes requires deleting token.json and re-authenticating.
 SCOPES = [
     "https://www.googleapis.com/auth/calendar.readonly",
-    "https://www.googleapis.com/auth/gmail.readonly",
+    # gmail.modify covers read + drafts + labels. We use this instead of
+    # gmail.readonly now that we have create_draft_email (a write operation).
+    # If you only ever need read access, gmail.readonly is more restrictive.
+    # Note: changing scopes requires deleting credentials/token.json and re-authing.
+    "https://www.googleapis.com/auth/gmail.modify",
 ]
 
 # ---------------------------------------------------------------------------

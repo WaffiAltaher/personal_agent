@@ -25,6 +25,8 @@ receives readable content rather than raw MIME.
 """
 
 import base64
+import email as email_lib
+from email.mime.text import MIMEText
 
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -181,6 +183,77 @@ def search_gmail(query: str, max_results: int = 10) -> str:
             lines.append("")
 
         return "\n".join(lines).rstrip()
+
+    except HttpError as e:
+        return f"Error: Gmail API error {e.status_code}: {e.reason}"
+    except Exception as e:
+        return f"Error: {type(e).__name__}: {e}"
+
+
+# ---------------------------------------------------------------------------
+# create_draft_email
+# ---------------------------------------------------------------------------
+# This is a WRITE operation — it is listed in TOOLS_REQUIRING_APPROVAL in
+# graph.py, so the agent will always pause for human confirmation before
+# this tool executes.
+
+class CreateDraftEmailInput(BaseModel):
+    to: str = Field(
+        description="Recipient email address."
+    )
+    subject: str = Field(
+        description="Email subject line."
+    )
+    body: str = Field(
+        description="Plain text body of the email."
+    )
+    cc: str = Field(
+        default="",
+        description="Optional CC recipients, comma-separated. Leave empty if not needed."
+    )
+
+
+@tool("create_draft_email", args_schema=CreateDraftEmailInput)
+def create_draft_email(to: str, subject: str, body: str, cc: str = "") -> str:
+    """
+    Create a draft email in Gmail. The draft is saved but NOT sent —
+    the user can review and send it manually from Gmail, or a future
+    send_email tool (with its own HITL approval) can send it.
+
+    This tool requires human approval before execution (see TOOLS_REQUIRING_APPROVAL).
+
+    On success returns a confirmation with the draft ID.
+    On failure returns a string beginning with "Error:".
+    """
+    try:
+        service = _get_gmail_service()
+
+        # Build a MIME message — the Gmail API requires base64url-encoded RFC 2822
+        mime_message = MIMEText(body, "plain", "utf-8")
+        mime_message["to"] = to
+        mime_message["subject"] = subject
+        if cc:
+            mime_message["cc"] = cc
+
+        # Encode to base64url as required by the Gmail API
+        raw = base64.urlsafe_b64encode(mime_message.as_bytes()).decode("utf-8")
+
+        draft = (
+            service.users()
+            .drafts()
+            .create(userId="me", body={"message": {"raw": raw}})
+            .execute()
+        )
+
+        draft_id = draft.get("id", "unknown")
+        return (
+            f"Draft created successfully.\n"
+            f"Draft ID: {draft_id}\n"
+            f"To:       {to}\n"
+            f"Subject:  {subject}\n"
+            "The draft is saved in your Gmail Drafts folder. "
+            "It has NOT been sent."
+        )
 
     except HttpError as e:
         return f"Error: Gmail API error {e.status_code}: {e.reason}"
