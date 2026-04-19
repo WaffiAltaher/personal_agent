@@ -9,7 +9,7 @@ from langchain_core.messages import HumanMessage
 from langfuse import propagate_attributes
 from langgraph.types import Command
 
-from agent.graph import build_graph, get_checkpointer
+from agent.graph import build_graph, get_checkpointer, log_run_to_memory
 from agent.tracing import flush_traces, get_callback_handler, verify_connection
 
 
@@ -98,6 +98,7 @@ def main():
         )
         print(text)
 
+    log_run_to_memory(result, user_input)
     flush_traces()
 
 

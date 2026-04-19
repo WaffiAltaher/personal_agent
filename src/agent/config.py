@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     model_name: str = "gemini-2.0-flash"
     max_iterations: int = 10
 
+    # Memory layer
+    sqlite_path: str = "data/episodic.db"
+    chroma_path: str = "data/chroma"
+    chroma_embedding_model: str = "models/gemini-embedding-001"
+    memory_score_threshold: float = 0.7
+    memory_top_k: int = 5
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

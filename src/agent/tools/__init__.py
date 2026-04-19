@@ -2,6 +2,7 @@
 from agent.tools.filesystem import list_directory, read_file
 from agent.tools.gmail import create_draft_email, get_gmail_message, search_gmail
 from agent.tools.google_calendar import get_calendar_event, list_calendar_events
+from agent.tools.memory import retrieve_episodic_memory, retrieve_memory
 from agent.tools.web import web_search
 
 ALL_TOOLS = [
@@ -13,4 +14,6 @@ ALL_TOOLS = [
     search_gmail,
     get_gmail_message,
     create_draft_email,
+    retrieve_memory,
+    retrieve_episodic_memory,
 ]

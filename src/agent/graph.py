@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 from googleapiclient.errors import HttpError
-from langchain_core.messages import BaseMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, StateGraph
@@ -49,6 +49,7 @@ from langgraph.types import Command, RetryPolicy, interrupt
 from typing_extensions import TypedDict
 
 from agent.config import settings
+from agent.memory import RunRecord, get_episodic_memory, get_semantic_memory
 from agent.tools import ALL_TOOLS
 
 
@@ -378,3 +379,71 @@ def build_graph(checkpointer=None):
 # Module-level compiled graph for backwards compatibility (no checkpointer).
 # Use build_graph(checkpointer) via get_checkpointer() when HITL is needed.
 agent_graph = build_graph()
+
+
+# ---------------------------------------------------------------------------
+# 8. Post-run memory logging
+# ---------------------------------------------------------------------------
+
+def log_run_to_memory(result: dict, user_input: str) -> None:
+    """
+    Extract run data from a completed graph result dict and persist it to both
+    episodic memory (SQLite) and semantic memory (Chroma interactions).
+
+    Call this after agent_graph.invoke() returns (outside any interrupt loop).
+    Failures are silently caught so memory issues never break the main flow.
+    """
+    try:
+        messages: list[BaseMessage] = result.get("messages", [])
+
+        # Final answer: last AIMessage without pending tool calls
+        final_output = ""
+        for msg in reversed(messages):
+            if isinstance(msg, AIMessage) and not getattr(msg, "tool_calls", None):
+                if isinstance(msg.content, str):
+                    final_output = msg.content
+                elif isinstance(msg.content, list):
+                    final_output = " ".join(
+                        block["text"]
+                        for block in msg.content
+                        if isinstance(block, dict) and block.get("type") == "text"
+                    )
+                break
+
+        # All tool names called during the run
+        tools_called: list[str] = [
+            tc["name"]
+            for msg in messages
+            if isinstance(msg, AIMessage)
+            for tc in getattr(msg, "tool_calls", [])
+        ]
+
+        # Token usage from the last AI message that carries usage_metadata
+        token_usage: dict | None = None
+        for msg in reversed(messages):
+            if isinstance(msg, AIMessage):
+                meta = getattr(msg, "usage_metadata", None)
+                if meta:
+                    token_usage = {
+                        "prompt": meta.get("input_tokens", 0),
+                        "completion": meta.get("output_tokens", 0),
+                        "total": meta.get("total_tokens", 0),
+                    }
+                    break
+
+        run = RunRecord(
+            user_input=user_input,
+            final_output=final_output,
+            tools_called=tools_called,
+            token_usage=token_usage,
+            success=True,
+        )
+
+        run_id = get_episodic_memory().log_run(run)
+
+        if final_output:
+            get_semantic_memory().ingest_interaction(user_input, final_output, run_id)
+
+    except Exception:
+        # Memory failures must not crash the agent
+        pass

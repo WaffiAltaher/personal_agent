@@ -17,6 +17,10 @@ dependencies = [
     "pydantic-settings>=2.13.1",
     "python-dotenv>=1.2.2",
     "tavily-python>=0.5.0",
+    "chromadb>=0.6.0",
+    "langchain-chroma>=0.2.0",
+    "langchain-text-splitters>=1.1.2",
+    "langgraph-checkpoint-sqlite>=3.0.3",
 ]
 
 [dependency-groups]
