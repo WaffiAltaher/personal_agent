@@ -1,5 +1,5 @@
 # src/agent/memory/__init__.py
-from agent.memory.budget import ContextBudgetManager
+from agent.memory.budget import ContextBudgetManager, TokenCounter
 from agent.memory.episodic import EpisodicMemory, RunRecord
 from agent.memory.semantic import MemoryChunk, SemanticMemory
 
@@ -7,6 +7,7 @@ __all__ = [
     "EpisodicMemory",
     "SemanticMemory",
     "ContextBudgetManager",
+    "TokenCounter",
     "RunRecord",
     "MemoryChunk",
     "get_episodic_memory",

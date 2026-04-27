@@ -51,13 +51,18 @@ def main():
         # We continue anyway — observability failing shouldn't block the agent.
 
     user_input = sys.argv[1]
-
-    # One handler per run = one trace in Langfuse.
-    langfuse_handler = get_callback_handler()
-
+    
     # Each CLI run gets a fresh thread_id so runs are independent.
     # The checkpointer uses this to namespace the checkpoint.
     thread_id = str(uuid.uuid4())
+
+    # Langfuse v4 (OTel-based) requires a 32 lowercase hex char trace ID — no dashes.
+    # We derive it from thread_id so the two IDs stay linked.
+    langfuse_trace_id = thread_id.replace("-", "")
+
+    # One handler per run = one trace in Langfuse.
+    langfuse_handler = get_callback_handler(trace_id=langfuse_trace_id)
+
     config = {
         "callbacks": [langfuse_handler],
         "configurable": {"thread_id": thread_id},
@@ -69,9 +74,8 @@ def main():
         with propagate_attributes(user_id="waffi", trace_name="cli-run"):
             result = agent_graph.invoke(
                 {"messages": [HumanMessage(content=user_input)]},
-                config=config,
+                config=config
             )
-
             # HITL loop — handle zero or more interrupts per run.
             # The graph pauses at human_review_node whenever a write tool
             # is about to execute. We display the payload, collect the

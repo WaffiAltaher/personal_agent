@@ -46,7 +46,7 @@ def test_should_continue_routes_to_tools_when_tool_call_present():
     )
     state: AgentState = {"messages": [message_with_tool_call]}
 
-    assert should_continue(state) == "tools"
+    assert should_continue(state) == "human_review"
 
 
 def test_should_continue_routes_to_end_when_no_tool_call():

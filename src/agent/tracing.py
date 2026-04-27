@@ -9,7 +9,7 @@ Credentials come from `agent.config` (Pydantic loads `.env`). The Langfuse SDK
 reads LANGFUSE_* from `os.environ` only; it does not see Pydantic-loaded
 values unless we pass them into `Langfuse(...)`, which we do in `_get_langfuse()`.
 """
-
+from langfuse.types import TraceContext
 from langfuse import Langfuse
 from langfuse.langchain import CallbackHandler
 
@@ -43,7 +43,7 @@ def verify_connection() -> bool:
     return _get_langfuse().auth_check()
 
 
-def get_callback_handler() -> CallbackHandler:
+def get_callback_handler(trace_id: str) -> CallbackHandler:
     """
     Return a configured Langfuse CallbackHandler for a single agent run.
 
@@ -55,7 +55,7 @@ def get_callback_handler() -> CallbackHandler:
     around the graph `invoke` (see cli.py).
     """
     _get_langfuse()
-    return CallbackHandler(public_key=settings.langfuse_public_key)
+    return CallbackHandler(public_key=settings.langfuse_public_key, trace_context=TraceContext(trace_id=trace_id))
 
 
 def flush_traces() -> None:

@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     memory_score_threshold: float = 0.7
     memory_top_k: int = 5
 
+    # Context window pressure limits
+    context_warning_threshold: int = 100_000
+    context_hard_limit: int = 800_000
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

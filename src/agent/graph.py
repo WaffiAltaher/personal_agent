@@ -33,13 +33,14 @@ Error handling strategy — two distinct mechanisms:
      message history stays well-formed and the LLM can respond gracefully.
 """
 
+import logging
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated, Literal
 
 from googleapiclient.errors import HttpError
-from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, RemoveMessage, SystemMessage, ToolMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, StateGraph
@@ -49,8 +50,10 @@ from langgraph.types import Command, RetryPolicy, interrupt
 from typing_extensions import TypedDict
 
 from agent.config import settings
-from agent.memory import RunRecord, get_episodic_memory, get_semantic_memory
+from agent.memory import ContextBudgetManager, RunRecord, TokenCounter, get_episodic_memory, get_semantic_memory
 from agent.tools import ALL_TOOLS
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -63,8 +66,9 @@ from agent.tools import ALL_TOOLS
 # on each node return, it *appends* the new messages to the existing list.
 # This is what gives the agent its memory within a single run.
 
-class AgentState(TypedDict):
+class AgentState(TypedDict, total=False):
     messages: Annotated[list[BaseMessage], add_messages]
+    token_usage_estimate: dict | None  # set by check_context_budget each iteration
 
 
 # ---------------------------------------------------------------------------
@@ -160,6 +164,47 @@ Operating guidelines:
 - When you answer, be concise and cite which files or sources the answer
   came from.
 """
+
+
+def check_context_budget(state: AgentState) -> dict:
+    """Monitor context window usage before each LLM call.
+
+    - Logs a DEBUG budget report every iteration (zero overhead in normal operation).
+    - Logs a WARNING if the warning threshold is exceeded.
+    - If the hard limit is exceeded, removes old messages from state via RemoveMessage
+      so the LLM never receives a context that would cause an API error.
+    - Always writes token_usage_estimate into state for downstream inspection.
+    The node itself is visible in Langfuse as a span — no separate event needed.
+    """
+    counter = TokenCounter()
+    counts = counter.count_messages(state.get("messages", []))
+    report = counter.build_budget_report(state.get("messages", []), [])
+    total = counts["total"]
+
+    if total > settings.context_hard_limit:
+        logger.warning(
+            "Context hard limit exceeded (%d tokens). Trimming messages.\n%s",
+            total,
+            report,
+        )
+        cbm = ContextBudgetManager()
+        trimmed = cbm.trim_messages(state.get("messages", []), settings.context_hard_limit)
+        kept_ids = {m.id for m in trimmed if getattr(m, "id", None)}
+        to_remove = [
+            RemoveMessage(id=m.id)
+            for m in state.get("messages", [])
+            if getattr(m, "id", None) and m.id not in kept_ids
+        ]
+        update: dict = {"token_usage_estimate": counts}
+        if to_remove:
+            update["messages"] = to_remove
+        return update
+    elif total > settings.context_warning_threshold:
+        logger.warning("Context warning threshold exceeded (%d tokens).\n%s", total, report)
+    else:
+        logger.debug("Context budget check:\n%s", report)
+
+    return {"token_usage_estimate": counts}
 
 
 def agent_node(state: AgentState) -> dict:
@@ -345,11 +390,12 @@ def build_graph(checkpointer=None):
     and persistent state. Without a checkpointer, interrupt() will raise.
 
     Topology:
-      agent → [should_continue] → human_review → [Command] → tools → agent
-                                ↘ END                       ↘ agent (rejected)
+      budget → agent → [should_continue] → human_review → [Command] → tools → budget
+                                         ↘ END                       ↘ agent (rejected)
     """
     graph = StateGraph(AgentState)
 
+    graph.add_node("check_context_budget", check_context_budget)
     graph.add_node("agent", agent_node)
     graph.add_node("human_review", human_review_node)
     graph.add_node(
@@ -358,7 +404,10 @@ def build_graph(checkpointer=None):
         retry=TOOL_RETRY_POLICY,
     )
 
-    graph.set_entry_point("agent")
+    graph.set_entry_point("check_context_budget")
+
+    # Budget check always feeds into agent
+    graph.add_edge("check_context_budget", "agent")
 
     graph.add_conditional_edges(
         "agent",
@@ -370,8 +419,8 @@ def build_graph(checkpointer=None):
     )
 
     # human_review routes itself via Command — no explicit edge needed from it
-    # tools always loops back to agent
-    graph.add_edge("tools", "agent")
+    # tools loops back through budget check before each new LLM call
+    graph.add_edge("tools", "check_context_budget")
 
     return graph.compile(checkpointer=checkpointer)
 

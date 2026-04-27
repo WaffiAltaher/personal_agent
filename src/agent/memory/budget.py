@@ -70,3 +70,76 @@ class ContextBudgetManager:
             remaining -= tokens
 
         return system_msgs + list(reversed(kept))
+
+
+class TokenCounter:
+    """Estimates token usage by message type and memory chunks.
+
+    Uses len(str(content)) // 4 as a fast token approximation (~4 chars/token).
+    Classifies messages into three buckets: system, conversation, tool_results.
+    """
+
+    def count_messages(self, messages: list) -> dict:
+        """Break down token estimates by message type.
+
+        Returns:
+            {
+                "system": int,
+                "conversation": int,
+                "tool_results": int,
+                "total": int,
+                "message_count": int,
+            }
+        """
+        from langchain_core.messages import SystemMessage, ToolMessage
+
+        system = conversation = tool_results = 0
+        for msg in messages:
+            tokens = len(str(msg.content)) // 4
+            if isinstance(msg, SystemMessage):
+                system += tokens
+            elif isinstance(msg, ToolMessage):
+                tool_results += tokens
+            else:
+                conversation += tokens
+        total = system + conversation + tool_results
+        return {
+            "system": system,
+            "conversation": conversation,
+            "tool_results": tool_results,
+            "total": total,
+            "message_count": len(messages),
+        }
+
+    def count_memory_chunks(self, chunks: list) -> int:
+        """Sum token estimates across all MemoryChunk content strings."""
+        return sum(len(c.content) // 4 for c in chunks)
+
+    def build_budget_report(self, messages: list, memory_chunks: list) -> str:
+        """Format a human-readable context budget report.
+
+        Args:
+            messages: message list (same format as AgentState["messages"])
+            memory_chunks: list of MemoryChunk objects retrieved for this turn
+
+        Returns:
+            Multi-line string report showing each bucket vs. its limit.
+        """
+        cbm = ContextBudgetManager()
+        counts = self.count_messages(messages)
+        memory_tokens = self.count_memory_chunks(memory_chunks)
+        total = counts["total"] + memory_tokens
+        headroom = cbm.MAX_CONTEXT_TOKENS - total
+        pct = headroom / cbm.MAX_CONTEXT_TOKENS * 100
+
+        sep = "─" * 29
+        return "\n".join([
+            "=== Context Budget Report ===",
+            f"System prompt:    {counts['system']:>8,} tokens  (budget: {cbm.SYSTEM_PROMPT_BUDGET:,})",
+            f"Conversation:     {counts['conversation']:>8,} tokens  (budget: {cbm.CONVERSATION_BUDGET:,})",
+            f"Tool results:     {counts['tool_results']:>8,} tokens  (budget: {cbm.TOOL_RESULTS_BUDGET:,})",
+            f"Memory injection: {memory_tokens:>8,} tokens  (budget: {cbm.MEMORY_BUDGET:,})",
+            sep,
+            f"Total:            {total:>8,} tokens  (limit: {cbm.MAX_CONTEXT_TOKENS:,})",
+            f"Headroom:         {headroom:>8,} tokens  ({pct:.1f}%)",
+        ])
