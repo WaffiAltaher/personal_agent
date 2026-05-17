@@ -355,7 +355,7 @@ def should_continue(state: AgentState) -> str:
 #
 # Switching to PostgresSaver for production requires changing one line here.
 
-_CHECKPOINT_DIR = Path(__file__).resolve().parents[3] / "checkpoints"
+_CHECKPOINT_DIR = Path(__file__).resolve().parents[2] / "checkpoints"
 _CHECKPOINT_DIR.mkdir(exist_ok=True)
 CHECKPOINT_DB = str(_CHECKPOINT_DIR / "hitl.db")
 
