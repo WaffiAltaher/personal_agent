@@ -33,4 +33,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
     )
 
+    prompt_version: str = "v2"
+
+
 settings = Settings()

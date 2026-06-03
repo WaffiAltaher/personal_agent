@@ -11,6 +11,7 @@ from langgraph.types import Command
 
 from agent.graph import build_graph, get_checkpointer, log_run_to_memory
 from agent.tracing import flush_traces, get_callback_handler, verify_connection
+from agent.config import settings
 
 
 def _display_interrupt(interrupt_payload: dict) -> None:
@@ -71,7 +72,11 @@ def main():
     with get_checkpointer() as checkpointer:
         agent_graph = build_graph(checkpointer)
 
-        with propagate_attributes(user_id="waffi", trace_name="cli-run"):
+        with propagate_attributes(
+            user_id="waffi",
+            trace_name="cli-run",
+            metadata={"prompt-version": settings.prompt_version},
+        ):
             result = agent_graph.invoke(
                 {"messages": [HumanMessage(content=user_input)]},
                 config=config
