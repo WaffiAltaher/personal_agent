@@ -1,0 +1,57 @@
+[
+  {
+    "id": "AAMkAGZpeHR1cmUACONTACT01",
+    "displayName": "Jan de Bakker",
+    "givenName": "Jan",
+    "surname": "de Bakker",
+    "jobTitle": "Directeur",
+    "companyName": "Bakkerij De Gouden Bol B.V.",
+    "emailAddresses": [{"name": "Jan de Bakker", "address": "jan@goudenbol.example"}],
+    "businessPhones": ["020-1234567"],
+    "mobilePhone": "06-12345678"
+  },
+  {
+    "id": "AAMkAGZpeHR1cmUACONTACT02",
+    "displayName": "Pieter van Dijk",
+    "givenName": "Pieter",
+    "surname": "van Dijk",
+    "jobTitle": "Operations manager",
+    "companyName": "Van Dijk Logistiek B.V.",
+    "emailAddresses": [{"name": "Pieter van Dijk", "address": "pieter@vandijklogistiek.example"}],
+    "businessPhones": ["010-7654321"],
+    "mobilePhone": null
+  },
+  {
+    "id": "AAMkAGZpeHR1cmUACONTACT03",
+    "displayName": "Eva Jansen",
+    "givenName": "Eva",
+    "surname": "Jansen",
+    "jobTitle": "IT coordinator",
+    "companyName": "Van Dijk Logistiek B.V.",
+    "emailAddresses": [{"name": "Eva Jansen", "address": "eva.jansen@vandijklogistiek.example"}],
+    "businessPhones": [],
+    "mobilePhone": "06-87654321"
+  },
+  {
+    "id": "AAMkAGZpeHR1cmUACONTACT04",
+    "displayName": "Sanne de Vries",
+    "givenName": "Sanne",
+    "surname": "de Vries",
+    "jobTitle": "Eigenaar",
+    "companyName": null,
+    "emailAddresses": [{"name": "Sanne de Vries", "address": "sanne@devries.example"}],
+    "businessPhones": [],
+    "mobilePhone": "06-11223344"
+  },
+  {
+    "id": "AAMkAGZpeHR1cmUACONTACT05",
+    "displayName": "Mark Visser",
+    "givenName": "Mark",
+    "surname": "Visser",
+    "jobTitle": "Partner",
+    "companyName": "Noordzee Advies",
+    "emailAddresses": [{"name": "Mark Visser", "address": "mark@noordzeeadvies.example"}],
+    "businessPhones": ["070-5550100"],
+    "mobilePhone": null
+  }
+]

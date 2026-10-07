@@ -193,9 +193,9 @@ def search_gmail(query: str, max_results: int = 10) -> str:
 # ---------------------------------------------------------------------------
 # create_draft_email
 # ---------------------------------------------------------------------------
-# This is a WRITE operation — it is listed in TOOLS_REQUIRING_APPROVAL in
-# graph.py, so the agent will always pause for human confirmation before
-# this tool executes.
+# This is a WRITE operation — it is declared a Write action in LOCAL_TOOLS
+# (agent/tools/__init__.py), so the agent will always pause for human
+# confirmation before this tool executes.
 
 class CreateDraftEmailInput(BaseModel):
     to: str = Field(
@@ -220,7 +220,7 @@ def create_draft_email(to: str, subject: str, body: str, cc: str = "") -> str:
     the user can review and send it manually from Gmail, or a future
     send_email tool (with its own HITL approval) can send it.
 
-    This tool requires human approval before execution (see TOOLS_REQUIRING_APPROVAL).
+    This tool requires human approval before execution (it is a Write action).
 
     On success returns a confirmation with the draft ID.
     On failure returns a string beginning with "Error:".

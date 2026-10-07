@@ -1,40 +1,73 @@
-from langchain_mcp_adapters.client import MultiServerMCPClient
-from agent.config import settings
+# src/agent/tools/ms365_mcp.py
+"""The MS365 MCP server: the real one (@softeria/ms-365-mcp-server) or its Fixture world stand-in.
+
+Both are loaded under the same name ("ms365"), with the same hidden tools and the same
+classification, so the agent sees the same tools against either.
+"""
+
 import os
+import sys
+
+from agent.config import Settings, settings as default_settings
+from agent.tools.mcp_loader import McpServer
+
+NAME = "ms365"
+
+# Login and account management stay out of the model's reach.
+HIDDEN_TOOLS = frozenset({
+    "login",
+    "logout",
+    "remove-account",
+    "select-account",
+    "verify-login",
+    "list-accounts",
+})
 
 
-async def load_ms365_tools():
-    mcp_env = {
-        **os.environ,
-        "MS365_MCP_CLIENT_ID": settings.ms365_mcp_client_id,
-        "MS365_MCP_TENANT_ID": settings.ms365_mcp_tenant_id,
-    }
-
-    client = MultiServerMCPClient(
-        {
-            "ms365": {
-                "command": "npx",
-                "args": [
-                    "-y",
-                    "@softeria/ms-365-mcp-server@0.119.0",
-                    "--preset",
-                    "outlook",
-                    "--read-only",
-                ],
-                "transport": "stdio",
-                "env": mcp_env,
-            }
+def ms365_server(settings: Settings = default_settings) -> McpServer:
+    """The real server, through npx, against the ITtopia tenant."""
+    if not (settings.ms365_mcp_client_id and settings.ms365_mcp_tenant_id):
+        return McpServer(
+            name=NAME,
+            connection=None,
+            unavailable_reason="MS365_MCP_CLIENT_ID and MS365_MCP_TENANT_ID are not set",
+        )
+    return McpServer(
+        name=NAME,
+        connection={
+            "command": "npx",
+            "args": [
+                "-y",
+                "@softeria/ms-365-mcp-server@0.119.0",
+                "--preset",
+                "outlook",
+                "--read-only",
+            ],
+            "transport": "stdio",
+            "env": {
+                **os.environ,
+                "MS365_MCP_CLIENT_ID": settings.ms365_mcp_client_id,
+                "MS365_MCP_TENANT_ID": settings.ms365_mcp_tenant_id,
+            },
         },
-        tool_name_prefix=True,
+        hidden_tools=HIDDEN_TOOLS,
+        # Fail-closed classification: the pinned server marks GET tools readOnlyHint,
+        # so we trust that annotation; every other tool is a Write action.
+        trust_read_only_hint=True,
     )
-    tools = await client.get_tools()
-    return [
-        tool for tool in tools
-        if tool.name not in {
-            "ms365_login",
-            "ms365_logout",
-            "ms365_remove-account",
-            "ms365_select-account",
-            "ms365_verify-login",
-        }
-    ]
+
+
+def ms365_fixture_server() -> McpServer:
+    """The Fixture world's stand-in (fixture_world.ms365), over stdio like the real one."""
+    return McpServer(
+        name=NAME,
+        connection={
+            "command": sys.executable,
+            "args": ["-m", "fixture_world.ms365"],
+            "transport": "stdio",
+            # Passes FIXTURE_WORLD_TODAY through when set (the stdio client's default env drops it).
+            "env": {**os.environ},
+        },
+        hidden_tools=HIDDEN_TOOLS,
+        trust_read_only_hint=True,
+    )
