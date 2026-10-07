@@ -221,6 +221,21 @@ async def test_summary_totals_tokens_and_cost(evaluate):
 
 
 @pytest.mark.asyncio
+async def test_the_model_under_test_is_told_the_fixture_worlds_date(scripted_model, monkeypatch):
+    monkeypatch.setenv("FIXTURE_WORLD_TODAY", "2027-01-01")  # an eval ignores the knob: always the seeded date
+    seen = []
+
+    def reply(messages):
+        seen.append(messages[0].content)
+        return _answer("Nothing to do.")
+
+    await run_eval(load_dataset(DATASET), model_name="scripted",
+                   model_factory=lambda scenario: scripted_model([reply]), scenario_filter="reply")
+
+    assert "Current date/time: 2026-10-07T09:00:00+02:00" in seen[0]
+
+
+@pytest.mark.asyncio
 async def test_usage_from_a_model_without_a_price_has_no_cost(scripted_model):
     unpriced = [AIMessage(content="Nothing to do.", usage_metadata=USAGE, response_metadata={"model_name": "gpt-9"})]
     results = await run_eval(load_dataset(DATASET), model_name="scripted",

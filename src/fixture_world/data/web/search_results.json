@@ -1,0 +1,35 @@
+{
+  "_comment": "Seeded web pages for the Fixture world's web search. A page is a result for a query that contains any of its keywords (case-insensitive). Domains end in .example: these are not real sites.",
+  "pages": [
+    {
+      "keywords": ["route plan", "routeplan", "route optimi", "vehicle routing", "fleet", "logistics software"],
+      "url": "https://routewise.example/small-fleets",
+      "title": "RouteWise: route planning for small fleets",
+      "content": "RouteWise plans daily delivery routes for fleets of 5 to 50 vehicles. It imports orders from a CSV or ERP order export and connects to common fleet-tracking systems. It is a hosted (SaaS) service, priced per vehicle per month, with a 30-day trial."
+    },
+    {
+      "keywords": ["route plan", "routeplan", "route optimi", "vehicle routing", "fleet", "logistics software"],
+      "url": "https://fleetplanner.example/pro",
+      "title": "FleetPlanner Pro: vehicle routing for carriers",
+      "content": "FleetPlanner Pro is an on-premise vehicle routing system for mid-sized carriers, with delivery time windows, driver shifts and a planning API. It is licensed per year and usually needs an implementation partner."
+    },
+    {
+      "keywords": ["route plan", "routeplan", "route optimi", "vehicle routing", "logistics software", "build or buy"],
+      "url": "https://logistiekvakblad.example/route-planning-sme",
+      "title": "Route planning in SME logistics: build or buy?",
+      "content": "Most small carriers start with a hosted route planner; a custom planner pays off only when the planning rules are unusual. In either case the main integration work is getting clean order data and fleet data into the planner."
+    },
+    {
+      "keywords": ["payment term", "betalingstermijn", "pay within", "b2b invoice", "business customer", "late payment", "overdue invoice"],
+      "url": "https://ondernemersplein.example/payment-terms",
+      "title": "Payment terms for business customers",
+      "content": "In the Netherlands, when no payment term has been agreed, a business customer must pay an invoice within 30 days. Businesses may agree a term of up to 60 days; a large company paying a small business may agree at most 30 days."
+    },
+    {
+      "keywords": ["late payment", "overdue invoice", "pays late", "payment reminder", "collection cost", "handelsrente", "commercial interest"],
+      "url": "https://ondernemersplein.example/late-payment",
+      "title": "When a business customer pays late",
+      "content": "Once the payment term has passed, a business customer is in default without a reminder, and you may charge the statutory commercial interest (wettelijke handelsrente) and collection costs. Sending a friendly payment reminder first is customary."
+    }
+  ]
+}

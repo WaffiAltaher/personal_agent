@@ -16,6 +16,7 @@ from agent.graph import build_graph, get_checkpointer, log_run_to_memory
 from agent.tracing import flush_traces, get_callback_handler, verify_connection
 from agent.config import settings
 from agent.tools import load_all_tools
+from fixture_world import clock
 
 
 def _parse_args(argv: list[str]) -> tuple[bool, bool, str]:
@@ -157,14 +158,17 @@ async def main():
         "recursion_limit": 40,
     }
 
+    # Against the Fixture world, "today" is its pinned date, for the model and the stand-ins alike.
+    today = clock.pin_today() if fixtures else None
+
     async with get_checkpointer() as checkpointer:
         tools, notices = await load_all_tools(fixtures=fixtures)
         if fixtures:
-            print("Running against the Fixture world (seeded MS365 stand-in and fake Informer API).")
+            print(f"Running against the Fixture world (seeded MS365 stand-in and fake Informer API), today {today}.")
         # An unavailable integration doesn't stop the run; say which one and why.
         for notice in notices:
             print(f"Notice: {notice}")
-        agent_graph = build_graph(checkpointer, tools, model)
+        agent_graph = build_graph(checkpointer, tools, model, today=today)
 
         with propagate_attributes(
             user_id="waffi",

@@ -6,7 +6,7 @@ from agent.tools.filesystem import list_directory, read_file
 from agent.tools.gmail import create_draft_email, get_gmail_message, search_gmail
 from agent.tools.google_calendar import get_calendar_event, list_calendar_events
 from agent.tools.memory import retrieve_episodic_memory, retrieve_memory
-from agent.tools.web import web_search
+from agent.tools.web import fixture_web_search, web_search
 from agent.tools.mcp_loader import McpServer, load_mcp_tools
 from agent.tools.ms365_mcp import ms365_fixture_server, ms365_server
 from agent.tools.informer import informer_fixture_server, informer_server
@@ -27,6 +27,11 @@ LOCAL_TOOLS = [
 ]
 
 
+# In Fixture-world mode the web search is the Fixture world's (seeded results, same name and
+# arguments); the other local tools are unchanged.
+FIXTURE_LOCAL_TOOLS = [read_tool(fixture_web_search) if t is web_search else t for t in LOCAL_TOOLS]
+
+
 def mcp_servers(*, fixtures: bool = False) -> list[McpServer]:
     """The MCP servers the agent loads tools from: the real ones, or the Fixture world's."""
     if fixtures:
@@ -38,6 +43,6 @@ async def load_all_tools(*, fixtures: bool = False) -> tuple[list[BaseTool], lis
     """Local tools plus every available MCP server's tools, and notices about unavailable servers."""
     mcp_tools, notices = await load_mcp_tools(mcp_servers(fixtures=fixtures))
     return [
-        *LOCAL_TOOLS,
+        *(FIXTURE_LOCAL_TOOLS if fixtures else LOCAL_TOOLS),
         *mcp_tools,
     ], notices

@@ -47,7 +47,7 @@ import logging
 import operator
 import random
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import date, datetime, time
 from pathlib import Path
 from typing import Annotated, Literal
 from zoneinfo import ZoneInfo
@@ -205,9 +205,20 @@ SYSTEM_PROMPT = get_prompt(settings.prompt_version)
 LOCAL_TIMEZONE = ZoneInfo("Europe/Amsterdam")
 
 
-def build_runtime_context() -> str:
-    """Return runtime facts the model needs but cannot infer reliably."""
-    now = datetime.now(LOCAL_TIMEZONE)
+# The time of day the model is told on a pinned date (see build_graph's `today`).
+PINNED_TIME_OF_DAY = time(9, 0)
+
+
+def build_runtime_context(today: date | None = None) -> str:
+    """Return runtime facts the model needs but cannot infer reliably.
+
+    With `today` (a run against the Fixture world), the date is that day at 09:00 local
+    time, so the model's "today" is the Fixture world's and a run is repeatable.
+    """
+    if today is None:
+        now = datetime.now(LOCAL_TIMEZONE)
+    else:
+        now = datetime.combine(today, PINNED_TIME_OF_DAY, tzinfo=LOCAL_TIMEZONE)
     return (
         f"Current date/time: {now.isoformat()}\n"
         "Timezone: Europe/Amsterdam\n"
@@ -382,7 +393,12 @@ async def get_checkpointer():
 # 7. Graph assembly
 # ---------------------------------------------------------------------------
 
-def build_graph(checkpointer=None, tools: list[BaseTool] | None = None, model: BaseChatModel | None = None):
+def build_graph(
+    checkpointer=None,
+    tools: list[BaseTool] | None = None,
+    model: BaseChatModel | None = None,
+    today: date | None = None,
+):
     """
     Wire nodes and edges into a compiled graph.
 
@@ -392,6 +408,9 @@ def build_graph(checkpointer=None, tools: list[BaseTool] | None = None, model: B
 
     Pass a chat model to use it instead of the one configured in settings
     (tests and the eval harness inject a scripted fake model this way).
+
+    Pass `today` to pin the date the model is told (runs against the Fixture world pass
+    its date, fixture_world.clock.today()); without it the model is told the real date.
 
     Topology:
       budget → agent → [should_continue] → human_review → [Command] → tools → budget
@@ -423,7 +442,7 @@ def build_graph(checkpointer=None, tools: list[BaseTool] | None = None, model: B
         it to state rather than overwriting.
         """
         messages = [
-            SystemMessage(content=f"{SYSTEM_PROMPT}\n\n{build_runtime_context()}")
+            SystemMessage(content=f"{SYSTEM_PROMPT}\n\n{build_runtime_context(today)}")
         ] + state["messages"]
         response = await llm.ainvoke(messages)
         return {"messages": [response]}

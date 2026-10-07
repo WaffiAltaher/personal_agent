@@ -1,14 +1,14 @@
 # src/agent/evals/harness.py
 """Runs scenarios through the agent graph against the Fixture world and scores them.
 
-Each scenario run gets a fresh Fixture world: the clock pinned to the seeded week, its own
-Drafts file, and the scenario's injected failure. The tools are loaded as `--fixtures` loads
+Each scenario run gets a fresh Fixture world: the clock pinned to the seeded date (which the
+model is told as "today" too), its own Drafts file, and the scenario's injected failure. The tools are loaded as `--fixtures` loads
 them, the chat model is injected into the graph, and every approval prompt is answered with
 the scenario's approval policy by resuming with `Command(resume=...)`, as the CLI does with
 the owner's answer.
 
 Only tools that stay inside the Fixture world are bound: the Fixture world's MCP tools plus
-the local tools in EVAL_LOCAL_TOOLS. The other local tools reach the owner's real Gmail,
+the local tools in EVAL_LOCAL_TOOLS (the seeded web search). The other local tools reach the owner's real Gmail,
 Google Calendar, memory store or files, and an auto-approved Write action there would be real.
 """
 
@@ -39,13 +39,15 @@ from agent.evals.trajectory import score_facts, score_trajectory, summarise
 from agent.graph import build_graph
 from agent.tracing import TraceAttributes
 from agent.tools import LOCAL_TOOLS, load_all_tools
+from agent.tools.web import web_search
 from fixture_world import clock, informer as fixture_informer, ms365 as fixture_ms365
 
 # One tool round is 4 super-steps, so 40 caps a run at ~10 tool rounds (as in the CLI).
 RECURSION_LIMIT = 40
 
-# Local tools that touch nothing real: safe to bind in an eval.
-EVAL_LOCAL_TOOLS = frozenset({"web_search"})
+# Local tools that touch nothing real in Fixture-world mode: safe to bind in an eval. (The web
+# search is the Fixture world's seeded one there, under the real tool's name.)
+EVAL_LOCAL_TOOLS = frozenset({web_search.name})
 
 ModelFactory = Callable[[Scenario], BaseChatModel]
 ToolLoader = Callable[[], Awaitable[tuple[list[BaseTool], list[str]]]]
@@ -157,7 +159,7 @@ async def run_scenario(
         drafts_path = Path(workdir) / "drafts.jsonl"
         switch = fixture_ms365.FailureSwitch(Path(workdir) / "ms365-failure")
         env = {
-            "FIXTURE_WORLD_TODAY": clock.SEED_TODAY.isoformat(),
+            clock.TODAY_ENV: clock.SEED_TODAY.isoformat(),
             fixture_ms365.DRAFTS_ENV: str(drafts_path),
             fixture_ms365.DRAFT_FAILURE_ENV: None,
             fixture_ms365.FAILURE_ENV: None,
@@ -170,7 +172,7 @@ async def run_scenario(
             if failure and failure.server == "ms365":
                 switch.set(failure.mode, failure.times)  # after loading: it hits the run, not startup
 
-            graph = build_graph(checkpointer=InMemorySaver(), tools=tools, model=model)
+            graph = build_graph(checkpointer=InMemorySaver(), tools=tools, model=model, today=clock.today())
             trace = trace_attributes(scenario, model_name=model_name, eval_run_id=eval_run_id, repeat=repeat)
             usage = UsageMetadataCallbackHandler()
             interrupts: list[InterruptRecord] = []
