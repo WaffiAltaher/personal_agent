@@ -4,13 +4,11 @@
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
-from informer_mcp.client import InformerClient
+from informer_mcp.client import InformerClient, RateLimiter
 from informer_mcp.config import InformerSettings
+from informer_mcp.sales import register_sales_tools
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=True)
-
-# Single page for now; paging with a cap and a truncation notice is ticket 09.
-RELATIONS_PER_REQUEST = 100
 
 
 def _person_name(*parts: str | None) -> str:
@@ -46,8 +44,8 @@ def _relation(raw: dict) -> dict:
     }
 
 
-def create_server(settings: InformerSettings) -> FastMCP:
-    informer = InformerClient(settings)
+def create_server(settings: InformerSettings, rate_limiter: RateLimiter | None = None) -> FastMCP:
+    informer = InformerClient(settings, rate_limiter)
     mcp = FastMCP(
         "informer",
         instructions=(
@@ -61,16 +59,18 @@ def create_server(settings: InformerSettings) -> FastMCP:
         """List Relations (customers and suppliers alike). `search` matches name, email,
         city, zip code, street or Chamber of Commerce number partially, and the relation
         number exactly when numeric. Leave it empty to list all Relations."""
-        params = {"records": RELATIONS_PER_REQUEST}
+        params = {}
         if search:
             params["search"] = search
-        data = await informer.get("/relations", params)
-        return {"relations": [_relation(r) for r in data["relations"]]}
+        paged = await informer.get_pages("/relations", "relations", params)
+        return {"relations": [_relation(r) for r in paged.items], **paged.notice("relations")}
 
     @mcp.tool(annotations=READ_ONLY)
     async def get_relation(relation_id: int) -> dict:
         """Get one Relation by its Informer id (the `id` from list_relations)."""
         return _relation(await informer.get(f"/relations/{relation_id}"))
+
+    register_sales_tools(mcp, informer, settings, READ_ONLY, _relation)
 
     return mcp
 

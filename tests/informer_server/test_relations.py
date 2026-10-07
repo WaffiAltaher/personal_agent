@@ -8,7 +8,7 @@ async def test_server_exposes_read_only_relation_tools(connect):
         listed = await session.list_tools()
 
     tools = {t.name: t for t in listed.tools}
-    assert set(tools) == {"list_relations", "get_relation"}
+    assert {"list_relations", "get_relation"} <= set(tools)
     assert all(t.annotations and t.annotations.readOnlyHint for t in tools.values())
 
 
