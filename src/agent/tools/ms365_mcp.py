@@ -16,7 +16,7 @@ import os
 import sys
 
 from agent.config import Settings, settings as default_settings
-from agent.tools.mcp_loader import McpServer
+from agent.tools.mcp_loader import LoginCheck, McpServer
 
 NAME = "ms365"
 PACKAGE = "@softeria/ms-365-mcp-server@0.159.1"  # exact pin; review the release diff before bumping (ADR-005)
@@ -74,6 +74,24 @@ HIDDEN_TOOLS = frozenset({
     "list-accounts",
 })
 
+# A missing or expired login: checked at startup with verify-login, and recognised in
+# tool errors by the real server's wording (a token error, or Graph answering 401).
+LOGIN = LoginCheck(
+    service="Microsoft 365",
+    command=f"npx -y {PACKAGE} --login (with MS365_MCP_CLIENT_ID and MS365_MCP_TENANT_ID set)",
+    check_tool="verify-login",
+    error_patterns=(
+        r"No valid token found",
+        r"No access token available",
+        r"token may have expired",
+        r"Microsoft Graph API error: 401\b",
+    ),
+)
+
+# The real server reports Graph errors as tool errors worded
+# "Microsoft Graph API error: <status> <reason> - <body>"; 429 and 5xx are transient.
+TRANSIENT_ERRORS = (r"Microsoft Graph API error: (429|5\d\d)\b",)
+
 
 # Which tools the model sees and how they are classified, identical for the real server and the
 # stand-in. Reads are classified by name, not by readOnlyHint, so no annotation can turn a
@@ -82,6 +100,8 @@ _TOOL_POLICY = dict(
     hidden_tools=HIDDEN_TOOLS,
     exposed_tools=EXPOSED_TOOLS,
     read_allowlist=READ_TOOLS,
+    login=LOGIN,
+    transient_errors=TRANSIENT_ERRORS,
 )
 
 

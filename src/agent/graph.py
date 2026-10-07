@@ -18,6 +18,8 @@ Error handling strategy — two layers plus a safety net:
      Only retries on genuinely transient errors:
        - ConnectionError / TimeoutError: network-level blips
        - HttpError 429 or 5xx: rate limits and server-side failures
+       - TransientMcpError: an MCP server that closed the connection mid-call,
+         or a tool error its server config marks transient (agent/tools/mcp_loader.py)
      Does NOT retry on:
        - HttpError 4xx (except 429): auth/not-found — retrying won't help
        - ValueError / TypeError: bad args — the LLM should fix these
@@ -67,6 +69,7 @@ from agent.config import settings
 from agent.memory import ContextBudgetManager, RunRecord, TokenCounter, get_episodic_memory, get_semantic_memory
 from agent.tools import LOCAL_TOOLS
 from agent.tools.classification import is_read
+from agent.tools.mcp_loader import TransientMcpError
 from agent.prompts import get_prompt
 
 logger = logging.getLogger(__name__)
@@ -113,6 +116,10 @@ def _should_retry(exc: Exception) -> bool:
     False so we don't waste time retrying something that will never work.
     """
     if isinstance(exc, (ConnectionError, TimeoutError)):
+        return True
+    if isinstance(exc, TransientMcpError):
+        # Mapped at the MCP boundary (agent/tools/mcp_loader.py): a server that
+        # closed the connection, or a tool error its server config marks transient.
         return True
     if isinstance(exc, HttpError):
         # 429 Too Many Requests and 5xx server errors are transient.
