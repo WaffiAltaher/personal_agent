@@ -2,14 +2,15 @@
 """Runs scenarios through the agent graph against the Fixture world and scores them.
 
 Each scenario run gets a fresh Fixture world: the clock pinned to the seeded date (which the
-model is told as "today" too), its own Drafts file, and the scenario's injected failure. The tools are loaded as `--fixtures` loads
-them, the chat model is injected into the graph, and every approval prompt is answered with
-the scenario's approval policy by resuming with `Command(resume=...)`, as the CLI does with
-the owner's answer.
+model is told as "today" too), its own Drafts file, and the scenario's injected failure. The
+tools are loaded as `--fixtures` loads them, the chat model is injected into the graph, and
+every approval prompt is answered with the scenario's approval policy by resuming with
+`Command(resume=...)`, as the CLI does with the owner's answer.
 
 Only tools that stay inside the Fixture world are bound: the Fixture world's MCP tools plus
-the local tools in EVAL_LOCAL_TOOLS (the seeded web search). The other local tools reach the owner's real Gmail,
-Google Calendar, memory store or files, and an auto-approved Write action there would be real.
+the local tools in EVAL_LOCAL_TOOLS (the seeded web search). The other local tools reach the
+owner's real Gmail, Google Calendar, memory store or files, and an auto-approved Write action
+there would be real.
 """
 
 import os
