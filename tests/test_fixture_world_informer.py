@@ -87,3 +87,23 @@ async def test_informer_tools_are_bound_with_the_prefix_and_all_read(fixture_too
         "informer_trial_balance",
     ]
     assert all(is_read(t) for t in informer_tools)
+
+
+@pytest.mark.asyncio
+async def test_informer_follows_a_pinned_date_outside_the_seeded_week(monkeypatch, scripted_model):
+    """One "today": pinned two weeks after the seeded week, Informer's as-of date is the pinned
+    date (as the model and MS365 see it), and seeded dates move along by the same two weeks,
+    so the same invoices are overdue by the same number of days."""
+    monkeypatch.setenv("FIXTURE_WORLD_TODAY", "2026-10-21")
+    tools, notices = await load_all_tools(fixtures=True)
+    assert notices == []
+    model = scripted_model([_call("informer_list_overdue_invoices", {}, "overdue"), AIMessage(content="Done.")])
+
+    result = await build_graph(model=model, tools=tools).ainvoke({"messages": [HumanMessage(content="Overdue?")]})
+
+    payload = _payload(_tool_results(result)["overdue"])
+    assert (payload["as_of"], payload["total_open_amount"]) == ("2026-10-21", "2265.30")
+    invoices = {i["number"]: i for c in payload["clients"] for i in c["invoices"]}
+    # seeded: invoiced 2026-08-01, due 2026-08-31, 37 days overdue on 2026-10-07
+    assert (invoices["2026-0101"]["invoice_date"], invoices["2026-0101"]["due_date"],
+            invoices["2026-0101"]["days_overdue"]) == ("2026-08-15", "2026-09-14", 37)
