@@ -10,7 +10,7 @@ The ITtopia personal data agent is half built. It can read files, search the web
 
 Its configured model is `gemini-2.5-flash`, and its built-in default is `gemini-2.0-flash`, which Google has already shut down. Both are near or past end of life. Memory search is literal keyword matching, so natural phrasings miss runs that are relevant.
 
-The owner wants to run ITtopia with this agent every day: triage the inbox, chase overdue invoices, answer finance questions. They also want to use it as a portfolio piece and a learning vehicle for agentic engineering. For that, every phase has to come with material they can study and explain in an interview.
+The owner wants to run ITtopia with this agent every day: triage the inbox, chase overdue invoices, answer finance questions. They also want to use it as a portfolio piece and a learning vehicle for agentic engineering. For that, every decision has to be recorded so they can study it and explain it in an interview.
 
 ## Solution
 
@@ -293,7 +293,7 @@ Learning materials (notebooks, checkpoint answers) are written by the owner afte
 
 ## Further Notes
 
-- **Order of work.** Everything else assumes the new model and dependencies, so the model and dependency update comes first. Retiring Google comes early, to shrink the surface area. The fail-closed classification must land before any MS365 write tool is enabled.
+- **Order of work.** Everything else assumes the new model and dependencies, so the model and dependency update comes first. The fail-closed classification must land before any MS365 write tool is enabled.
 - **Build vs live use.** The build needs no credentials, because every test and eval runs on the Fixture world. The owner's one manual task (the setup wizard) can run before or after the build. It must run before the live smoke check and before daily use.
 - **Facts from the 2026-10-07 research** (recheck when implementing):
   - Informer API v2 base `https://api.informer.eu/v2`, `Apikey` + `Securitycode` headers, 60/min and 5000/day, `page`/`records` pagination with a `pagination` object.
