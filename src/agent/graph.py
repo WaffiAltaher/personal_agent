@@ -12,8 +12,9 @@ Error handling strategy — two layers plus a safety net:
      Handles exceptions raised by a single tool call (network blips, unexpected crashes).
      Only the failing call is re-executed, up to TOOL_RETRY_POLICY.max_attempts
      times with exponential backoff; siblings in a parallel batch are not re-run.
-     Write tools (TOOLS_REQUIRING_APPROVAL) are never retried, since a transient
-     error on a write is ambiguous — it may have gone through.
+     Write actions (any tool not classified as read, see agent/tools/classification.py)
+     are never retried, since a transient error on a write is ambiguous — it may
+     have gone through.
      Only retries on genuinely transient errors:
        - ConnectionError / TimeoutError: network-level blips
        - HttpError 429 or 5xx: rate limits and server-side failures
@@ -65,6 +66,7 @@ from agent.chat_model import create_chat_model
 from agent.config import settings
 from agent.memory import ContextBudgetManager, RunRecord, TokenCounter, get_episodic_memory, get_semantic_memory
 from agent.tools import LOCAL_TOOLS
+from agent.tools.classification import is_read
 from agent.prompts import get_prompt
 
 logger = logging.getLogger(__name__)
@@ -90,18 +92,12 @@ class AgentState(TypedDict, total=False):
 # 2. Tools and LLM
 # ---------------------------------------------------------------------------
 
-# Tools that require explicit human approval before execution.
-# Read-only tools are NOT listed here — they pass through silently.
-# Add write tools here as they are implemented.
-# Also used by retry_tool_call: tools listed here are never auto-retried.
-# TODO(Phase 5): MS365 tools are named "ms365_<tool>" (tool_name_prefix=True).
-# Add their write tools here before dropping --read-only (see docs/known_issues.md).
-TOOLS_REQUIRING_APPROVAL: set[str] = {
-    "create_draft_email",    # saves a draft to Gmail
-    "send_email",            # future — sends immediately, irreversible
-    "create_calendar_event", # future — creates a calendar event
-    "delete_file",           # future — destructive filesystem operation
-}
+# Which tools require explicit human approval before execution is no longer a
+# hand-maintained list of names. Every tool is classified as read or Write action
+# when tools are loaded (agent/tools/classification.py), and the graph fails
+# closed: a tool call is read only if its bound tool is classified read. Anything
+# else (a Write action, an unclassified tool, an unknown tool name) needs approval
+# in human_review_node and is never auto-retried by retry_tool_call.
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +157,7 @@ async def retry_tool_call(request, execute):
             raise
         except Exception as exc:
             transient = policy.retry_on(exc)
-            is_write = tool_call["name"] in TOOLS_REQUIRING_APPROVAL
+            is_write = not is_read(request.tool)  # fails closed: unknown tool → write
             if transient and not is_write and attempt < policy.max_attempts:
                 await asyncio.sleep(interval + (random.uniform(0, 1) if policy.jitter else 0))
                 interval = min(interval * policy.backoff_factor, policy.max_interval)
@@ -255,13 +251,15 @@ def check_context_budget(state: AgentState) -> dict:
     return {"token_usage_estimate": counts}
 
 
-def human_review_node(state: AgentState) -> Command[Literal["tools", "agent"]]:
+def human_review_node(state: AgentState, read_tool_names: frozenset[str]) -> Command[Literal["tools", "agent"]]:
     """
     Human-in-the-loop gate between agent and tools.
 
     Inspects pending tool calls on the last AIMessage.
-    - If none require approval → proceeds to tools automatically (no interrupt).
-    - If any require approval → calls interrupt() to pause the graph.
+    - If all are read tools (names in read_tool_names) → proceeds to tools
+      automatically (no interrupt).
+    - If any is a Write action (anything not read, including an unknown tool
+      name) → calls interrupt() to pause the graph.
 
     The interrupt payload is displayed by the CLI (or any frontend).
     When the user responds, the graph resumes with their decision.
@@ -282,7 +280,7 @@ def human_review_node(state: AgentState) -> Command[Literal["tools", "agent"]]:
     # Identify which pending calls need approval
     calls_needing_approval = [
         tc for tc in tool_calls
-        if tc["name"] in TOOLS_REQUIRING_APPROVAL
+        if tc["name"] not in read_tool_names
     ]
 
     if not calls_needing_approval:
@@ -394,6 +392,8 @@ def build_graph(checkpointer=None, tools: list[BaseTool] | None = None, model: B
     """
 
     tools = tools or LOCAL_TOOLS
+    # Classification is read once, from the tools actually bound to the graph.
+    read_tool_names = frozenset(t.name for t in tools if is_read(t))
 
     # bind_tools serialises Pydantic schemas and docstrings into the JSON format
     # the model API expects, so the model knows what tools it can call and how.
@@ -497,7 +497,10 @@ def build_graph(checkpointer=None, tools: list[BaseTool] | None = None, model: B
 
     graph.add_node("check_context_budget", check_context_budget)
     graph.add_node("agent", agent_node)
-    graph.add_node("human_review", human_review_node)
+    def human_review(state: AgentState) -> Command[Literal["tools", "agent"]]:
+        return human_review_node(state, read_tool_names)
+
+    graph.add_node("human_review", human_review)
     # No node-level retry: retrying here would re-run every tool call in the
     # batch (duplicating writes). Retry happens per call in retry_tool_call.
     graph.add_node("tools", tools_with_fallback)

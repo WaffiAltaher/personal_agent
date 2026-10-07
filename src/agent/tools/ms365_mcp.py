@@ -1,5 +1,6 @@
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from agent.config import settings
+from agent.tools.classification import classify_mcp_tools
 import os
 
 
@@ -28,13 +29,18 @@ async def load_ms365_tools():
         tool_name_prefix=True,
     )
     tools = await client.get_tools()
-    return [
-        tool for tool in tools
-        if tool.name not in {
-            "ms365_login",
-            "ms365_logout",
-            "ms365_remove-account",
-            "ms365_select-account",
-            "ms365_verify-login",
-        }
-    ]
+    # Fail-closed classification: the pinned server marks GET tools readOnlyHint,
+    # so we trust that annotation; every other tool is a Write action.
+    return classify_mcp_tools(
+        [
+            tool for tool in tools
+            if tool.name not in {
+                "ms365_login",
+                "ms365_logout",
+                "ms365_remove-account",
+                "ms365_select-account",
+                "ms365_verify-login",
+            }
+        ],
+        trust_read_only_hint=True,
+    )
