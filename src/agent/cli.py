@@ -201,7 +201,9 @@ async def main():
     if debug:
         _display_debug_trace(result)
 
-    log_run_to_memory(result, user_input)
+    # A Fixture-world run is about seeded stand-in data, not the owner's: keep it out of real memory.
+    if not fixtures:
+        log_run_to_memory(result, user_input)
     flush_traces()
 
 

@@ -263,6 +263,20 @@ async def test_command_runs_the_given_number_of_repeats(scripted_model, tmp_path
 
 
 @pytest.mark.asyncio
+async def test_eval_runs_write_nothing_to_the_owners_memory(evaluate, monkeypatch):
+    from agent.memory.episodic import EpisodicMemory
+    from agent.memory.semantic import SemanticMemory
+
+    written = []
+    monkeypatch.setattr(EpisodicMemory, "log_run", lambda self, run: written.append(run))
+    monkeypatch.setattr(SemanticMemory, "ingest_interaction", lambda self, *a, **k: written.append(a))
+
+    await evaluate("reply-flaky-mailbox")
+
+    assert written == []
+
+
+@pytest.mark.asyncio
 async def test_the_model_under_test_is_told_the_fixture_worlds_date(scripted_model, monkeypatch):
     monkeypatch.setenv("FIXTURE_WORLD_TODAY", "2027-01-01")  # an eval ignores the knob: always the seeded date
     seen = []

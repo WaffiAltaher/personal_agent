@@ -23,7 +23,7 @@ import agent.cli as cli
 @pytest.fixture
 def run_cli(monkeypatch, scripted_model):
     """Run the CLI's main() with the given arguments; returns what the run saw."""
-    seen = {"system": [], "env_today_at_tool_load": []}
+    seen = {"system": [], "env_today_at_tool_load": [], "logged_to_memory": []}
 
     def reply(messages):
         seen["system"].append(messages[0].content)
@@ -42,7 +42,7 @@ def run_cli(monkeypatch, scripted_model):
     monkeypatch.setattr(cli, "get_callback_handler", lambda **kwargs: BaseCallbackHandler())
     monkeypatch.setattr(cli, "load_all_tools", load_all_tools)
     monkeypatch.setattr(cli, "get_checkpointer", get_checkpointer)
-    monkeypatch.setattr(cli, "log_run_to_memory", lambda result, user_input: None)
+    monkeypatch.setattr(cli, "log_run_to_memory", lambda result, user_input: seen["logged_to_memory"].append(user_input))
     monkeypatch.setattr(cli, "flush_traces", lambda: None)
     # Start without a pinned date, and restore the environment afterwards.
     monkeypatch.setenv("FIXTURE_WORLD_TODAY", "")
@@ -79,3 +79,17 @@ async def test_without_fixtures_the_date_is_not_pinned(run_cli):
 
     assert "T09:00:00+02:00" not in seen["system"][0]  # the real time, to the microsecond
     assert seen["env_today_at_tool_load"] == [None]
+
+
+@pytest.mark.asyncio
+async def test_fixtures_mode_writes_nothing_to_the_owners_memory(run_cli):
+    seen = await run_cli("--fixtures", "What day is it?")
+
+    assert seen["logged_to_memory"] == []
+
+
+@pytest.mark.asyncio
+async def test_without_fixtures_the_run_is_logged_to_memory(run_cli):
+    seen = await run_cli("What day is it?")
+
+    assert seen["logged_to_memory"] == ["What day is it?"]
