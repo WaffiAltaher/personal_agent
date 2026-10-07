@@ -1,0 +1,27 @@
+{
+  "format_version": 1,
+  "dataset_version": "test-2026-10-07",
+  "scenarios": [
+    {
+      "id": "reply-flaky-mailbox",
+      "workflow": "inbox triage",
+      "input": "Find Jan's mail about invoice 2026-031 and draft a reply saying I'll go through the hours with him on Tuesday.",
+      "approval": "approve",
+      "inject_failure": {"server": "ms365", "mode": "transient", "times": 1},
+      "required_tools": ["ms365_list-mail-messages", "ms365_create-reply-draft"],
+      "ordering": [{"before": "ms365_list-mail-messages", "after": "ms365_create-reply-draft"}],
+      "forbidden_tools": ["create_draft_email", "ms365_send-mail"],
+      "expected_facts": ["Tuesday", "Drafts"]
+    },
+    {
+      "id": "overdue-reminders-rejected",
+      "workflow": "overdue-invoice capstone",
+      "input": "Which clients are overdue on payment? Draft reminder emails.",
+      "approval": "reject",
+      "required_tools": ["informer_list_overdue_invoices", "ms365_create-draft-email"],
+      "ordering": [{"before": "informer_list_overdue_invoices", "after": "ms365_create-draft-email"}],
+      "forbidden_tools": ["create_draft_email", "ms365_send-mail"],
+      "expected_facts": ["Noordzee Advies"]
+    }
+  ]
+}
