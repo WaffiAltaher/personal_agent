@@ -160,7 +160,7 @@ async def main():
     async with get_checkpointer() as checkpointer:
         tools, notices = await load_all_tools(fixtures=fixtures)
         if fixtures:
-            print("Running against the Fixture world (seeded MS365 stand-in).")
+            print("Running against the Fixture world (seeded MS365 stand-in and fake Informer API).")
         # An unavailable integration doesn't stop the run; say which one and why.
         for notice in notices:
             print(f"Notice: {notice}")

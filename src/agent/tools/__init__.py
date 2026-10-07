@@ -9,6 +9,7 @@ from agent.tools.memory import retrieve_episodic_memory, retrieve_memory
 from agent.tools.web import web_search
 from agent.tools.mcp_loader import McpServer, load_mcp_tools
 from agent.tools.ms365_mcp import ms365_fixture_server, ms365_server
+from agent.tools.informer import informer_fixture_server, informer_server
 
 # Every local tool declares its class explicitly: read, or Write action.
 # An undeclared tool is treated as a Write action (see classification.py).
@@ -29,8 +30,8 @@ LOCAL_TOOLS = [
 def mcp_servers(*, fixtures: bool = False) -> list[McpServer]:
     """The MCP servers the agent loads tools from: the real ones, or the Fixture world's."""
     if fixtures:
-        return [ms365_fixture_server()]
-    return [ms365_server()]
+        return [ms365_fixture_server(), informer_fixture_server()]
+    return [ms365_server(), informer_server()]
 
 
 async def load_all_tools(*, fixtures: bool = False) -> tuple[list[BaseTool], list[str]]:
