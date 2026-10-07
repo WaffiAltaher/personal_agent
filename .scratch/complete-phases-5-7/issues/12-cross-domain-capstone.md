@@ -12,5 +12,9 @@ The whole run is one Langfuse trace.
 
 **Status:** ready-for-agent
 
-- [ ] New prompt version, tagged in Langfuse as today
-- [ ] A seam-A test of the capstone against the Fixture world: one Draft per Client with the right invoices and amounts, recorded only after approval; Clients without an email address are reported; nothing is created when rejected
+- [x] New prompt version, tagged in Langfuse as today
+- [x] A seam-A test of the capstone against the Fixture world: one Draft per Client with the right invoices and amounts, recorded only after approval; Clients without an email address are reported; nothing is created when rejected
+
+## Comments
+
+- 2026-10-07: Prompt `v3` (`agent.prompts.PROMPT_V3`, built on v2) is now the default `PROMPT_VERSION`; the CLI already tags each run's single Langfuse trace with `prompt-version` metadata, and resumes after approval reuse the same handler, so the capstone stays one trace. v3 adds a rule the glossary leaves open: a Payment reminder goes to the Client's invoice address (`email_invoice`), else its general `email`. The seed data already had what the test needs (Gouden Bol: 2 Overdue invoices incl. a partially paid one plus one due today; Van Dijk: 2 + a paid one; Noordzee Advies without email), so it is unchanged. `tests/test_capstone.py` runs the flow over real MCP; `ScriptedChatModel` now also accepts a reply that is a function of the messages shown, so the scripted reminders are composed from the Informer result the model actually saw and asserted against seeded literals.
