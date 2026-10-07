@@ -50,9 +50,9 @@ from typing import Annotated, Literal
 from zoneinfo import ZoneInfo
 
 from googleapiclient.errors import HttpError
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, RemoveMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.errors import GraphBubbleUp
 from langgraph.graph import END, StateGraph
@@ -61,6 +61,7 @@ from langgraph.prebuilt import ToolNode
 from langgraph.types import Command, RetryPolicy, interrupt
 from typing_extensions import TypedDict
 
+from agent.chat_model import create_chat_model
 from agent.config import settings
 from agent.memory import ContextBudgetManager, RunRecord, TokenCounter, get_episodic_memory, get_semantic_memory
 from agent.tools import LOCAL_TOOLS
@@ -376,13 +377,16 @@ async def get_checkpointer():
 # 7. Graph assembly
 # ---------------------------------------------------------------------------
 
-def build_graph(checkpointer=None, tools: list[BaseTool] | None = None):
+def build_graph(checkpointer=None, tools: list[BaseTool] | None = None, model: BaseChatModel | None = None):
     """
     Wire nodes and edges into a compiled graph.
 
     Pass a checkpointer (from get_checkpointer()) to enable HITL interrupts
     and persistent state. Without a checkpointer, interrupt() still pauses,
     but resuming with Command(resume=...) raises RuntimeError: nothing was saved.
+
+    Pass a chat model to use it instead of the one configured in settings
+    (tests and the eval harness inject a scripted fake model this way).
 
     Topology:
       budget → agent → [should_continue] → human_review → [Command] → tools → budget
@@ -392,11 +396,10 @@ def build_graph(checkpointer=None, tools: list[BaseTool] | None = None):
     tools = tools or LOCAL_TOOLS
 
     # bind_tools serialises Pydantic schemas and docstrings into the JSON format
-    # the model API expects, so Gemini knows what tools it can call and how.
-    llm = ChatGoogleGenerativeAI(
-        model=settings.model_name,
-        google_api_key=settings.google_api_key,
-    ).bind_tools(tools)
+    # the model API expects, so the model knows what tools it can call and how.
+    if model is None:
+        model = create_chat_model()  # provider:model from settings.model_name
+    llm = model.bind_tools(tools)
 
     # ToolNode handles the mechanical work of tool execution:
     # - reads the AIMessage's tool_calls field
@@ -520,9 +523,10 @@ def build_graph(checkpointer=None, tools: list[BaseTool] | None = None):
     return graph.compile(checkpointer=checkpointer)
 
 
-# Module-level compiled graph for backwards compatibility (no checkpointer).
+# No module-level compiled graph: building one at import would build the
+# configured chat model as a side effect, so a missing API key would crash the
+# import instead of giving the CLI's clear startup error.
 # Use build_graph(checkpointer) via get_checkpointer() when HITL is needed.
-agent_graph = build_graph()
 
 
 # ---------------------------------------------------------------------------
