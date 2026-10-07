@@ -10,7 +10,7 @@ Two levels of testing here:
 
 2. Integration test for the full graph — the graph structure, ToolNode,
    add_messages reducer, and routing all run for real. Only the LLM is
-   mocked with a deterministic fake that returns pre-scripted responses.
+   replaced: a scripted fake model is injected via build_graph(model=...).
 
 Why mock the LLM but not the tool?
    The LLM is the only non-deterministic, paid, slow dependency. The tool
@@ -18,7 +18,6 @@ Why mock the LLM but not the tool?
    confidence that the full stack is wired correctly.
 """
 
-from unittest.mock import AsyncMock, patch
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
@@ -66,7 +65,7 @@ def test_should_continue_routes_to_end_when_no_tool_call():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_graph_executes_react_loop(tmp_path):
+async def test_graph_executes_react_loop(tmp_path, scripted_model):
     """
     End-to-end test of the ReAct loop with a mocked LLM.
 
@@ -101,15 +100,11 @@ async def test_graph_executes_react_loop(tmp_path):
     # Response 2: the LLM has seen the tool result and produces the final answer
     second_response = AIMessage(content="The secret word is mango.")
 
-    # Patch ChatGoogleGenerativeAI so build_graph() gets a deterministic fake LLM.
-    with patch("agent.graph.ChatGoogleGenerativeAI") as MockLLMClass:
-        mock_bound_llm = MockLLMClass.return_value.bind_tools.return_value
-        mock_bound_llm.ainvoke = AsyncMock(side_effect=[first_response, second_response])
-
-        graph = build_graph()
-        result = await graph.ainvoke(
-            {"messages": [HumanMessage(content="What is the secret word?")]}
-        )
+    # Inject a scripted fake model so build_graph() never builds a real one.
+    graph = build_graph(model=scripted_model([first_response, second_response]))
+    result = await graph.ainvoke(
+        {"messages": [HumanMessage(content="What is the secret word?")]}
+    )
 
     # The final state should contain the full message history:
     # HumanMessage → AIMessage (tool call) → ToolMessage (tool result) → AIMessage (answer)
@@ -128,7 +123,7 @@ async def test_graph_executes_react_loop(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_graph_records_structured_tool_errors():
+async def test_graph_records_structured_tool_errors(scripted_model):
     """
     When the tool node fails with an exception, the graph should both:
       - return ToolMessages so the LLM message history remains valid
@@ -150,14 +145,10 @@ async def test_graph_records_structured_tool_errors():
     )
     second_response = AIMessage(content="The tool failed.")
 
-    with patch("agent.graph.ChatGoogleGenerativeAI") as MockLLMClass:
-        mock_bound_llm = MockLLMClass.return_value.bind_tools.return_value
-        mock_bound_llm.ainvoke = AsyncMock(side_effect=[first_response, second_response])
-
-        graph = build_graph(tools=[explode])
-        result = await graph.ainvoke(
-            {"messages": [HumanMessage(content="Trigger the failing tool.")]}
-        )
+    graph = build_graph(tools=[explode], model=scripted_model([first_response, second_response]))
+    result = await graph.ainvoke(
+        {"messages": [HumanMessage(content="Trigger the failing tool.")]}
+    )
 
     assert result["errors"] == [{
         "node": "tools",

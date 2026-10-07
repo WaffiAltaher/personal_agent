@@ -1,6 +1,5 @@
 import logging
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
 
 import httplib2
 import pytest
@@ -24,14 +23,14 @@ def no_backoff_wait(monkeypatch):
     )
 
 
-async def run_with_tool_calls(tools, tool_calls):
-    """Drive one tool round: LLM requests tool_calls, then gives a final answer."""
-    responses = [AIMessage(content="", tool_calls=tool_calls), AIMessage(content="done")]
-    with patch("agent.graph.ChatGoogleGenerativeAI") as MockLLMClass:
-        mock_bound_llm = MockLLMClass.return_value.bind_tools.return_value
-        mock_bound_llm.ainvoke = AsyncMock(side_effect=responses)
-        graph = build_graph(tools=tools)
+@pytest.fixture
+def run_with_tool_calls(scripted_model):
+    async def run(tools, tool_calls):
+        """Drive one tool round: LLM requests tool_calls, then gives a final answer."""
+        responses = [AIMessage(content="", tool_calls=tool_calls), AIMessage(content="done")]
+        graph = build_graph(tools=tools, model=scripted_model(responses))
         return await graph.ainvoke({"messages": [HumanMessage(content="go")]})
+    return run
 
 
 def tool_messages(result):
@@ -39,7 +38,7 @@ def tool_messages(result):
 
 
 @pytest.mark.asyncio
-async def test_transient_error_is_retried_until_success():
+async def test_transient_error_is_retried_until_success(run_with_tool_calls):
     attempts = {"n": 0}
 
     @tool("flaky_read")
@@ -57,7 +56,7 @@ async def test_transient_error_is_retried_until_success():
 
 
 @pytest.mark.asyncio
-async def test_permanent_error_is_not_retried():
+async def test_permanent_error_is_not_retried(run_with_tool_calls):
     attempts = {"n": 0}
 
     @tool("forbidden_read")
@@ -75,7 +74,7 @@ async def test_permanent_error_is_not_retried():
 
 
 @pytest.mark.asyncio
-async def test_parallel_success_survives_a_failing_sibling():
+async def test_parallel_success_survives_a_failing_sibling(run_with_tool_calls):
     calls = {"down": 0, "note": 0}
 
     @tool("down_read")
@@ -104,7 +103,7 @@ async def test_parallel_success_survives_a_failing_sibling():
 
 
 @pytest.mark.asyncio
-async def test_interrupt_inside_a_tool_pauses_the_graph():
+async def test_interrupt_inside_a_tool_pauses_the_graph(scripted_model):
     """interrupt() raises GraphInterrupt; neither retry_tool_call nor the fallback may swallow it."""
     @tool("ask_human")
     async def ask_human() -> str:
@@ -113,18 +112,16 @@ async def test_interrupt_inside_a_tool_pauses_the_graph():
 
     responses = [AIMessage(content="", tool_calls=[{"id": "c1", "name": "ask_human", "args": {}}]),
                  AIMessage(content="done")]
-    with patch("agent.graph.ChatGoogleGenerativeAI") as MockLLMClass:
-        MockLLMClass.return_value.bind_tools.return_value.ainvoke = AsyncMock(side_effect=responses)
-        graph = build_graph(checkpointer=InMemorySaver(), tools=[ask_human])
-        result = await graph.ainvoke({"messages": [HumanMessage(content="go")]},
-                                     config={"configurable": {"thread_id": "t1"}})
+    graph = build_graph(checkpointer=InMemorySaver(), tools=[ask_human], model=scripted_model(responses))
+    result = await graph.ainvoke({"messages": [HumanMessage(content="go")]},
+                                 config={"configurable": {"thread_id": "t1"}})
 
     assert "__interrupt__" in result
     assert not tool_messages(result)
 
 
 @pytest.mark.asyncio
-async def test_permanent_error_is_logged_with_traceback(caplog):
+async def test_permanent_error_is_logged_with_traceback(caplog, run_with_tool_calls):
     @tool("buggy_read")
     async def buggy_read() -> str:
         """Has a code bug."""

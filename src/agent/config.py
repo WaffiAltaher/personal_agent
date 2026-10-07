@@ -4,6 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     # LLM
     google_api_key: str
+    anthropic_api_key: str | None = None  # required only when an anthropic: model is selected
 
     # Tools
     tavily_api_key: str
@@ -14,7 +15,7 @@ class Settings(BaseSettings):
     langfuse_base_url: str = "http://localhost:3000"
 
     # Agent behaviour (sensible defaults for now)
-    model_name: str = "gemini-2.0-flash"
+    model_name: str = "google_genai:gemini-3.8-flash"  # provider:model, see agent/chat_model.py
     max_iterations: int = 10
 
     # Memory layer

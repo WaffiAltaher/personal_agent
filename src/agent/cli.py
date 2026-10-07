@@ -11,6 +11,7 @@ from langfuse import propagate_attributes
 from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 
+from agent.chat_model import MissingApiKeyError, create_chat_model
 from agent.graph import build_graph, get_checkpointer, log_run_to_memory
 from agent.tracing import flush_traces, get_callback_handler, verify_connection
 from agent.config import settings
@@ -121,6 +122,10 @@ def _prompt_decision() -> str:
 async def main():
     debug, user_input = _parse_args(sys.argv[1:])
 
+    # Build the chat model first: a missing API key for the selected provider
+    # stops the run here, before any MCP server is started.
+    model = create_chat_model()
+
     # Verify Langfuse is reachable before we do any work.
     # This fails loudly rather than running the agent and silently losing traces.
     if not verify_connection():
@@ -148,7 +153,7 @@ async def main():
 
     async with get_checkpointer() as checkpointer:
         tools = await load_all_tools()
-        agent_graph = build_graph(checkpointer, tools)
+        agent_graph = build_graph(checkpointer, tools, model)
 
         with propagate_attributes(
             user_id="waffi",
@@ -191,4 +196,7 @@ if __name__ == "__main__":
     except GraphRecursionError:
         print("Stopped: the agent hit its step limit (~10 tool rounds) without a final answer. "
               "Try a narrower question.")
+        sys.exit(1)
+    except MissingApiKeyError as exc:
+        print(f"Cannot start: {exc}")
         sys.exit(1)
