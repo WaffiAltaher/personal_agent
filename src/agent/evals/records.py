@@ -8,7 +8,7 @@ older results files still load) rather than a second record:
   and `expected_facts` from the scenario: `RunResult.generation`, means on Summary;
 - tokens, cost and latency: `RunResult.efficiency`, totals on Summary;
 - the run's Langfuse trace: `RunResult.trace_id`;
-- repeats reuse `RunResult.repeat`.
+- repeats: `EvalResults.repeats` runs per scenario, each RunResult with its `repeat`.
 """
 
 from typing import Literal
@@ -137,5 +137,6 @@ class EvalResults(BaseModel):
     dataset_path: str
     dataset_version: str
     scenario_filter: str | None
+    repeats: int = 1  # runs per scenario; each RunResult records its repeat (0-based)
     runs: list[RunResult]
     summary: Summary

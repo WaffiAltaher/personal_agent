@@ -220,6 +220,48 @@ async def test_summary_totals_tokens_and_cost(evaluate):
     assert s.mean_latency_s > 0
 
 
+# --- repeats -------------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_repeats_run_each_scenario_again_and_record_each_runs_variation(scripted_model, tmp_path):
+    # The first repeat plays the well-behaved script; the second gives up without a tool call.
+    scripts = iter([SCRIPTS["reply-flaky-mailbox"], [_answer("I could not find that mail.")]])
+
+    results = await run_eval(load_dataset(DATASET), model_name="scripted",
+                             model_factory=lambda scenario: scripted_model(next(scripts)),
+                             scenario_filter="reply", repeats=2)
+
+    assert results.repeats == 2
+    assert [(r.scenario_id, r.repeat) for r in results.runs] == [("reply-flaky-mailbox", 0), ("reply-flaky-mailbox", 1)]
+    assert [r.trajectory.passed for r in results.runs] == [True, False]
+    assert results.summary.runs == 2
+    assert results.summary.pass_rate == 0.5
+    _, report_path = write_results(results, tmp_path)
+    report = report_path.read_text()
+    assert "| reply-flaky-mailbox #1 | PASS |" in report
+    assert "| reply-flaky-mailbox #2 | FAIL |" in report
+
+
+@pytest.mark.asyncio
+async def test_by_default_each_scenario_runs_once(evaluate):
+    results = await evaluate()
+
+    assert results.repeats == 1
+    assert [r.repeat for r in results.runs] == [0, 0]
+
+
+@pytest.mark.asyncio
+async def test_command_runs_the_given_number_of_repeats(scripted_model, tmp_path, langfuse_spans):
+    await main(["--model", "anthropic:claude-sonnet-5-5", "--dataset", str(DATASET), "--scenario", "reply",
+                "--repeats", "3", "--out", str(tmp_path), "--no-ragas"],
+               create_model=lambda name: scripted_model(itertools.repeat(_answer("Nothing found."))))
+
+    [json_path] = tmp_path.glob("*.json")
+    results = EvalResults.model_validate_json(json_path.read_text())
+    assert results.repeats == 3
+    assert [r.repeat for r in results.runs] == [0, 1, 2]
+
+
 @pytest.mark.asyncio
 async def test_the_model_under_test_is_told_the_fixture_worlds_date(scripted_model, monkeypatch):
     monkeypatch.setenv("FIXTURE_WORLD_TODAY", "2027-01-01")  # an eval ignores the knob: always the seeded date

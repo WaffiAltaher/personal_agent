@@ -240,16 +240,22 @@ async def run_eval(
     scorer: GenerationScorer | None = None,
     judge_model: str | None = None,
     tracer: Tracer | None = None,
+    repeats: int = 1,
 ) -> EvalResults:
-    """Run every selected scenario once with a fresh model from `model_factory`, and summarise.
+    """Run every selected scenario `repeats` times, each run with a fresh model from
+    `model_factory` and a fresh Fixture world, and summarise over all runs (a run records
+    its repeat, 0-based, so the variation per scenario can be read from the results).
     `scorer` adds generation metrics, graded by `judge_model` (recorded in the results);
     `tracer` traces each run, tagged with the model, prompt version, scenario and eval run."""
+    if repeats < 1:
+        raise ValueError(f"repeats must be at least 1, not {repeats}")
     started = datetime.now(timezone.utc)
     eval_run_id = f"{started:%Y%m%dT%H%M%SZ}-{uuid.uuid4().hex[:6]}"
     runs = [
         await run_scenario(scenario, model=model_factory(scenario), model_name=model_name, load_tools=load_tools,
-                           scorer=scorer, tracer=tracer, eval_run_id=eval_run_id)
+                           repeat=repeat, scorer=scorer, tracer=tracer, eval_run_id=eval_run_id)
         for scenario in dataset.select(scenario_filter)
+        for repeat in range(repeats)
     ]
     return EvalResults(
         eval_run_id=eval_run_id,
@@ -260,6 +266,7 @@ async def run_eval(
         dataset_path=str(dataset_path),
         dataset_version=dataset.dataset_version,
         scenario_filter=scenario_filter,
+        repeats=repeats,
         runs=runs,
         summary=summarise(runs).model_copy(update={**efficiency_totals(runs), **generation_means(runs)}),
     )
