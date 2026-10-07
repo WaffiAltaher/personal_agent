@@ -6,10 +6,12 @@ agent sees the same tools against either.
 """
 
 import os
+import re
 import sys
 
 from agent.config import Settings, settings as default_settings
 from agent.tools.mcp_loader import McpServer
+from informer_mcp.client import TRANSIENT_ERROR_PREFIX
 
 NAME = "informer"
 
@@ -24,6 +26,10 @@ READ_TOOLS = frozenset({
     "list_overdue_invoices",
     "trial_balance",
 })
+
+# Over MCP a transient Informer failure (unreachable, 429, 5xx) arrives only as tool-error
+# text starting with this prefix; the loader turns it into a retryable error.
+TRANSIENT_ERRORS = (re.escape(TRANSIENT_ERROR_PREFIX),)
 
 
 def informer_server(settings: Settings = default_settings) -> McpServer:
@@ -47,6 +53,7 @@ def informer_server(settings: Settings = default_settings) -> McpServer:
             },
         },
         read_allowlist=READ_TOOLS,
+        transient_errors=TRANSIENT_ERRORS,
     )
 
 
@@ -62,4 +69,5 @@ def informer_fixture_server() -> McpServer:
             "env": {**os.environ},
         },
         read_allowlist=READ_TOOLS,
+        transient_errors=TRANSIENT_ERRORS,
     )

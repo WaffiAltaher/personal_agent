@@ -57,7 +57,10 @@ async def test_server_down_at_startup_leaves_the_agent_running_without_it(ms365_
 
     tools, notices = await load_all_tools(fixtures=True)
 
-    assert [t.name for t in tools] == [t.name for t in LOCAL_TOOLS]
+    names = {t.name for t in tools}
+    assert {t.name for t in LOCAL_TOOLS} <= names
+    assert any(name.startswith("informer_") for name in names)  # the other integration is unaffected
+    assert not any(name.startswith("ms365_") for name in names)
     assert len(notices) == 1
     assert notices[0] == "ms365 tools unavailable: the server failed to start (McpError: Connection closed)"
     # and the agent still runs on what's left
@@ -208,3 +211,18 @@ async def test_mcp_tool_calls_are_langfuse_spans_named_after_the_prefixed_tool(
         {"messages": [HumanMessage(content="go")]}, config={"callbacks": [handler]})
 
     assert "ms365_list-outlook-contacts" in {span.name for span in langfuse_spans()}
+
+
+@pytest.mark.asyncio
+async def test_transient_informer_failure_is_retried_on_a_read_tool(monkeypatch, scripted_model):
+    """Informer reports a transient upstream failure only as tool-error text; it is still retried."""
+    monkeypatch.setenv("FIXTURE_WORLD_TODAY", "2026-10-07")
+    monkeypatch.setenv("FIXTURE_WORLD_INFORMER_FAILURE", "server_error")  # the fake Informer API answers 503
+    tools, _ = await load_all_tools(fixtures=True)
+
+    result = await _run(tools, scripted_model, _call("informer_list_relations", {}, "c1"))
+
+    message = _tool_results(result)["c1"]
+    assert message.status == "error"
+    assert f"failed (transient) after {graph_module.TOOL_RETRY_POLICY.max_attempts} attempt(s)" in message.content
+    assert "Transient Informer failure" in message.content

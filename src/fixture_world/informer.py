@@ -11,12 +11,20 @@ read-only data, so nothing is lost between calls.
 Seeded Due dates are fixed (written for `clock.SEED_TODAY`), so "today" for Overdue invoices
 is today's weekday within the seeded week, matching how the MS365 stand-in moves its seeded
 week onto the current one.
+
+FIXTURE_WORLD_INFORMER_FAILURE=<mode> switches the fake into a failure mode for every request
+(`informer_api.Failure` values: unauthorized, quota_exhausted, server_error).
 """
 
+import os
+
 from fixture_world import clock
-from fixture_world.informer_api import FakeInformerApi
+from fixture_world.informer_api import FakeInformerApi, Failure
 from informer_mcp.config import InformerSettings
 from informer_mcp.server import create_server
+
+
+FAILURE_ENV = "FIXTURE_WORLD_INFORMER_FAILURE"
 
 
 def seeded_today():
@@ -26,6 +34,8 @@ def seeded_today():
 
 def main() -> None:
     with FakeInformerApi() as fake:
+        if mode := os.environ.get(FAILURE_ENV):
+            fake.failure = Failure(mode)
         settings = InformerSettings(
             _env_file=None,
             api_key=fake.api_key,
