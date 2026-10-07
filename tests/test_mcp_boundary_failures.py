@@ -173,31 +173,7 @@ async def test_server_gone_in_the_middle_of_a_run_reaches_the_model(ms365_failur
     assert "ms365 MCP server closed the connection" in message.content
 
 
-# --- tracing ------------------------------------------------------------------------------
-
-@pytest.fixture
-def langfuse_spans(monkeypatch):
-    """Spans the agent's Langfuse handler records, captured in memory: nothing is sent anywhere."""
-    from langfuse import Langfuse
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-
-    import agent.tracing as tracing
-
-    exporter = InMemorySpanExporter()
-    provider = TracerProvider()
-    provider.add_span_processor(SimpleSpanProcessor(exporter))
-    client = Langfuse(
-        public_key=tracing.settings.langfuse_public_key,
-        secret_key="test-dummy",
-        base_url="http://127.0.0.1:9",  # never reached: Langfuse's own exporter exports nothing
-        tracer_provider=provider,
-        should_export_span=lambda span: False,
-    )
-    monkeypatch.setattr(tracing, "_langfuse", client)
-    return exporter.get_finished_spans
-
+# --- tracing (langfuse_spans fixture: tests/conftest.py) -----------------------------------
 
 @pytest.mark.asyncio
 async def test_mcp_tool_calls_are_langfuse_spans_named_after_the_prefixed_tool(

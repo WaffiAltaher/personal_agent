@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     memory_top_k: int = 5
     memory_rewrite_model: str | None = None  # provider:model for memory query rewriting; None → model_name
 
+    # Evals: provider:model that grades answers (RAGAS); None → the model under test, with a warning.
+    # `--judge-model` overrides it. Answer relevancy embeds with chroma_embedding_model.
+    eval_judge_model: str | None = None
+
     # Context window pressure limits
     context_warning_threshold: int = 100_000
     context_hard_limit: int = 800_000

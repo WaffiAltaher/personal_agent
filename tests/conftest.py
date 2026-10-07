@@ -45,3 +45,34 @@ class ScriptedChatModel(GenericFakeChatModel):
 def scripted_model():
     """Factory: scripted_model([AIMessage(...), ...]) -> a fake model replying with those messages."""
     return lambda responses: ScriptedChatModel(messages=iter(responses))
+
+
+@pytest.fixture
+def langfuse_spans(monkeypatch):
+    """Spans the agent's Langfuse handler records, captured in memory: nothing is sent anywhere.
+
+    Returns a function listing the finished spans."""
+    import uuid
+
+    from langfuse import Langfuse
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    import agent.tracing as tracing
+
+    # Langfuse keeps one client per public key for the process: a fresh key per test gives
+    # each test its own client, wired to its own exporter.
+    monkeypatch.setattr(tracing.settings, "langfuse_public_key", f"pk-test-{uuid.uuid4().hex}")
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    client = Langfuse(
+        public_key=tracing.settings.langfuse_public_key,
+        secret_key="test-dummy",
+        base_url="http://127.0.0.1:9",  # never reached: Langfuse's own exporter exports nothing
+        tracer_provider=provider,
+        should_export_span=lambda span: False,
+    )
+    monkeypatch.setattr(tracing, "_langfuse", client)
+    return exporter.get_finished_spans
