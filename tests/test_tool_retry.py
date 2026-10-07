@@ -1,5 +1,4 @@
 import logging
-from types import SimpleNamespace
 
 import httplib2
 import pytest
@@ -7,10 +6,11 @@ from googleapiclient.errors import HttpError
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.types import interrupt
+from langgraph.types import Command, interrupt
 
 import agent.graph as graph_module
 from agent.graph import build_graph
+from agent.tools.classification import read_tool, write_action
 
 
 @pytest.fixture(autouse=True)
@@ -41,6 +41,7 @@ def tool_messages(result):
 async def test_transient_error_is_retried_until_success(run_with_tool_calls):
     attempts = {"n": 0}
 
+    @read_tool
     @tool("flaky_read")
     async def flaky_read() -> str:
         """Fails twice with a network blip, then succeeds."""
@@ -59,6 +60,7 @@ async def test_transient_error_is_retried_until_success(run_with_tool_calls):
 async def test_permanent_error_is_not_retried(run_with_tool_calls):
     attempts = {"n": 0}
 
+    @read_tool
     @tool("forbidden_read")
     async def forbidden_read() -> str:
         """Always fails with 403 Forbidden."""
@@ -77,12 +79,14 @@ async def test_permanent_error_is_not_retried(run_with_tool_calls):
 async def test_parallel_success_survives_a_failing_sibling(run_with_tool_calls):
     calls = {"down": 0, "note": 0}
 
+    @read_tool
     @tool("down_read")
     async def down_read() -> str:
         """Always fails with a network error."""
         calls["down"] += 1
         raise ConnectionError("service down")
 
+    @read_tool  # read-classified so the batch runs without an approval pause
     @tool("write_note")
     async def write_note() -> str:
         """Succeeds; has a side effect."""
@@ -105,6 +109,7 @@ async def test_parallel_success_survives_a_failing_sibling(run_with_tool_calls):
 @pytest.mark.asyncio
 async def test_interrupt_inside_a_tool_pauses_the_graph(scripted_model):
     """interrupt() raises GraphInterrupt; neither retry_tool_call nor the fallback may swallow it."""
+    @read_tool
     @tool("ask_human")
     async def ask_human() -> str:
         """Pauses for human input."""
@@ -122,6 +127,7 @@ async def test_interrupt_inside_a_tool_pauses_the_graph(scripted_model):
 
 @pytest.mark.asyncio
 async def test_permanent_error_is_logged_with_traceback(caplog, run_with_tool_calls):
+    @read_tool
     @tool("buggy_read")
     async def buggy_read() -> str:
         """Has a code bug."""
@@ -136,17 +142,24 @@ async def test_permanent_error_is_logged_with_traceback(caplog, run_with_tool_ca
 
 
 @pytest.mark.asyncio
-async def test_write_tool_transient_error_is_not_retried():
+async def test_write_tool_transient_error_is_not_retried(scripted_model):
     calls = {"n": 0}
 
-    async def execute(request):
+    @write_action
+    @tool("create_draft_email")
+    async def create_draft_email() -> str:
+        """Saves a draft; fails with a network blip."""
         calls["n"] += 1
         raise ConnectionError("blip")
 
-    request = SimpleNamespace(tool_call={"name": "create_draft_email", "args": {}, "id": "c1"})
-    command = await graph_module.retry_tool_call(request, execute)
+    responses = [AIMessage(content="", tool_calls=[{"id": "c1", "name": "create_draft_email", "args": {}}]),
+                 AIMessage(content="done")]
+    graph = build_graph(checkpointer=InMemorySaver(), tools=[create_draft_email], model=scripted_model(responses))
+    config = {"configurable": {"thread_id": "t1"}}
+    await graph.ainvoke({"messages": [HumanMessage(content="go")]}, config=config)
+    result = await graph.ainvoke(Command(resume="approve"), config=config)
 
-    msg = command.update["messages"][0]
+    msg = tool_messages(result)["c1"]
     assert calls["n"] == 1
     assert msg.status == "error"
     assert "not retried" in msg.content
