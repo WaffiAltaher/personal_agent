@@ -14,6 +14,7 @@ import json
 import math
 import re
 import threading
+from decimal import Decimal
 from enum import Enum
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
@@ -58,12 +59,20 @@ def _paginate(items: list, query: dict) -> tuple[list, dict]:
     return items[start:start + records], pagination
 
 
+def _dutch_amount(amount: Decimal) -> str:
+    """12100.5 -> "12.100,50", as Informer's reports print amounts."""
+    return f"{amount:,.2f}".replace(",", " ").replace(".", ",").replace(" ", ".")
+
+
 class FakeInformerApi:
     def __init__(self, api_key: str = "fixture-api-key", security_code: str = "fixture-security-code"):
         self.api_key = api_key
         self.security_code = security_code
         self.failure: Failure | None = None
         self.relations: list[dict] = load_seed("relations")
+        self.administration: dict = load_seed("administration")
+        self.ledgers: list[dict] = load_seed("ledgers")
+        self.ledger_movements: list[dict] = load_seed("ledger_movements")
         self._httpd: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -90,6 +99,9 @@ class FakeInformerApi:
         return [
             (r"/relations", self._list_relations),
             (r"/relations/(\d+)", self._get_relation),
+            (r"/administration", self._get_administration),
+            (r"/ledgers", self._list_ledgers),
+            (r"/reports/column-balance", self._column_balance),
         ]
 
     def _list_relations(self, query: dict) -> tuple[int, dict]:
@@ -103,6 +115,43 @@ class FakeInformerApi:
             if relation["id"] == int(relation_id):
                 return 200, {**relation, "freefields": []}
         return 404, {"error": ["Resource niet gevonden."], "response_code": 404}
+
+    def _get_administration(self, query: dict) -> tuple[int, dict]:
+        return 200, self.administration
+
+    def _list_ledgers(self, query: dict) -> tuple[int, list]:
+        return 200, self.ledgers  # a plain array, unpaginated, as in Informer's spec
+
+    def _column_balance(self, query: dict) -> tuple[int, dict]:
+        """The column balance (proef- en saldibalans) of the seeded journal, as a
+        presentation-style report: rows keyed by index, each a list of text columns,
+        amounts in Dutch notation. A header row first, a totals row last."""
+        required = ("year", "period_from", "period_to", "ledger_number_from", "ledger_number_to")
+        missing = [name for name in required if name not in query]
+        if missing:
+            return 422, {"error": [f"{name} is verplicht." for name in missing], "response_code": 422}
+        year, period_from, period_to, ledger_from, ledger_to = (int(query[name]) for name in required)
+
+        totals: dict[str, list[Decimal]] = {}
+        for m in self.ledger_movements:
+            if (m["year"] == year and period_from <= m["period"] <= period_to
+                    and ledger_from <= int(m["ledger_number"]) <= ledger_to):
+                debit_credit = totals.setdefault(m["ledger_number"], [Decimal(0), Decimal(0)])
+                debit_credit[0] += Decimal(m["debit"])
+                debit_credit[1] += Decimal(m["credit"])
+
+        descriptions = {ledger["number"]: ledger["description"] for ledger in self.ledgers}
+        rows = [["Rekening", "Omschrijving", "Debet", "Credit", "Saldo debet", "Saldo credit"]]
+        sums = [Decimal(0)] * 4
+        for number in sorted(totals):
+            debit, credit = totals[number]
+            amounts = [debit, credit, max(debit - credit, Decimal(0)), max(credit - debit, Decimal(0))]
+            sums = [s + a for s, a in zip(sums, amounts)]
+            rows.append([number, descriptions[number], *map(_dutch_amount, amounts)])
+        rows.append(["", "Totaal", *map(_dutch_amount, sums)])
+
+        report = {str(i): {"columns": [{"text": text, "style": {}} for text in row]} for i, row in enumerate(rows)}
+        return 200, {"column_balance": report}
 
     # --- lifecycle ------------------------------------------------------------------
 
