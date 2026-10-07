@@ -63,3 +63,23 @@ def test_graph_builds_the_configured_model_when_none_is_injected(monkeypatch):
 
     with pytest.raises(MissingApiKeyError, match="ANTHROPIC_API_KEY"):
         build_graph()
+
+
+def test_bare_claude_name_is_anthropic_and_still_needs_its_key():
+    with pytest.raises(MissingApiKeyError, match="ANTHROPIC_API_KEY"):
+        create_chat_model("claude-sonnet-5-5", settings=with_settings(anthropic_api_key=None))
+
+    model = create_chat_model("claude-sonnet-5-5", settings=with_settings(anthropic_api_key="sk-ant-dummy"))
+    assert isinstance(model, ChatAnthropic)
+    assert model.anthropic_api_key.get_secret_value() == "sk-ant-dummy"
+
+
+def test_unknown_bare_model_name_is_rejected_with_a_clear_message():
+    with pytest.raises(ValueError, match="provider:model"):
+        create_chat_model("gpt-9", settings=with_settings())
+
+
+def test_unknown_provider_prefix_is_rejected():
+    # Any provider we hold no key for would skip the key check entirely.
+    with pytest.raises(ValueError, match="provider"):
+        create_chat_model("openai:gpt-9", settings=with_settings())
