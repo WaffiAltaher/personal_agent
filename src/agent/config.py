@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     # Optional: without them the agent starts without MS365 tools, with a notice.
     ms365_mcp_client_id: str | None = None
     ms365_mcp_tenant_id: str | None = None
+    # Optional: the Microsoft account the server must be logged in as (fails fast on another one).
+    ms365_mcp_expected_username: str | None = None
     # Optional: without them the agent starts without Informer tools, with a notice.
     informer_api_key: str | None = None
     informer_security_code: str | None = None

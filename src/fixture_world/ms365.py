@@ -13,19 +13,30 @@ Only what the tools need is emulated: `$filter` understands comparisons (`eq`, `
 `gt`, `ge`, `lt`, `le`), `contains()` and `startswith()` joined by `and`; `$search` is a case-insensitive phrase match over
 the item's text fields. Seeded dates move with the Fixture world clock (see clock.py).
 
+Drafts: `create-draft-email` and `create-reply-draft` record every call, and the Draft it
+created, as a JSON line in the file named by FIXTURE_WORLD_MS365_DRAFTS (each tool call runs
+in a fresh process, so the record lives outside it); read it back with `recorded_drafts()`
+and `recorded_draft_calls()`. FIXTURE_WORLD_MS365_DRAFT_FAILURE=transient makes the draft
+tools fail with a Graph 503 instead, creating nothing. The other write tools the real server
+offers (send, delete, move, update, calendar, rules, folders, permissions) are served too, but
+not emulated, so that the agent's refusal to bind them is testable.
+
 Run over stdio with `python -m fixture_world.ms365`.
 """
 
 import json
+import os
 import re
+import tempfile
 from datetime import datetime, timedelta, timezone
 from importlib.resources import files
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
 
-from fixture_world.clock import seed_shift
+from fixture_world.clock import seed_shift, today
 
 OWNER = {"displayName": "Jen Do", "userPrincipalName": "jendo@example.com"}
 DEFAULT_PAGE_SIZE = 10  # Graph's default $top
@@ -195,6 +206,96 @@ def _in_zone(event: dict, zone: str | None) -> dict:
     return {**event, **{key: _graph_datetime(_parse(event[key]["dateTime"]), zone) for key in ("start", "end")}}
 
 
+# --- Drafts ----------------------------------------------------------------------------
+
+DRAFTS_ENV = "FIXTURE_WORLD_MS365_DRAFTS"  # JSON Lines file the draft tools record into
+DRAFT_FAILURE_ENV = "FIXTURE_WORLD_MS365_DRAFT_FAILURE"  # "transient": draft calls answer Graph 503
+DEFAULT_DRAFTS_PATH = Path(tempfile.gettempdir()) / "fixture_world_ms365_drafts.jsonl"
+
+
+def drafts_path() -> Path:
+    return Path(os.environ.get(DRAFTS_ENV) or DEFAULT_DRAFTS_PATH)
+
+
+def recorded_draft_calls(path: Path | str | None = None) -> list[dict]:
+    """Every draft-tool call that reached the stand-in: {tool, arguments, draft (None if it failed)}."""
+    path = Path(path) if path else drafts_path()
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
+def recorded_drafts(path: Path | str | None = None) -> list[dict]:
+    """The Drafts the stand-in created, oldest first, as Graph returned them."""
+    return [call["draft"] for call in recorded_draft_calls(path) if call["draft"]]
+
+
+def _record_draft_call(tool: str, arguments: dict, draft: dict | None) -> None:
+    path = drafts_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as log:
+        log.write(json.dumps({"tool": tool, "arguments": arguments, "draft": draft}) + "\n")
+
+
+def _graph_api_error(status: int, reason: str, code: str, message: str) -> CallToolResult:
+    """A Graph HTTP failure as the real server reports it: the status in the text and in `_meta`."""
+    graph_body = json.dumps({"error": {"code": code, "message": message}})
+    text = json.dumps({"error": f"Microsoft Graph API error: {status} {reason} - {graph_body}"})
+    return CallToolResult(content=[TextContent(type="text", text=text)], isError=True,
+                          _meta={"http_status": status, "error_code": code})
+
+
+def _new_draft(fields: dict) -> dict:
+    """A Draft as Graph returns it from POST /me/messages: saved in Drafts, unsent."""
+    now = datetime.combine(today(), datetime.now(timezone.utc).time(), timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    number = len(recorded_drafts()) + 1
+    return {
+        "id": f"AAMkAGZpeHR1cmUADRAFT{number:02d}",
+        "createdDateTime": now,
+        "lastModifiedDateTime": now,
+        "subject": "",
+        "body": {"contentType": "text", "content": ""},
+        "toRecipients": [],
+        "ccRecipients": [],
+        "bccRecipients": [],
+        "importance": "normal",
+        **fields,
+        "from": {"emailAddress": {"name": OWNER["displayName"], "address": OWNER["userPrincipalName"]}},
+        "isDraft": True,
+        "isRead": True,
+    }
+
+
+def _quoted(message: dict) -> str:
+    sender = message["from"]["emailAddress"]
+    original = "\n".join(f"> {line}" for line in message["body"]["content"].splitlines())
+    return f"On {message['sentDateTime']}, {sender['name']} <{sender['address']}> wrote:\n{original}"
+
+
+# The real server's other write tools in the `outlook` preset. Served (not emulated) so a
+# test can prove the agent never binds them.
+UNEMULATED_WRITE_TOOLS = (
+    "send-mail",
+    "send-draft-message",
+    "reply-mail-message",
+    "reply-all-mail-message",
+    "forward-mail-message",
+    "create-reply-all-draft",
+    "create-forward-draft",
+    "update-mail-message",
+    "move-mail-message",
+    "delete-mail-message",
+    "create-mail-folder",
+    "create-mail-rule",
+    "create-calendar-event",
+    "update-calendar-event",
+    "delete-calendar-event",
+    "accept-calendar-event",
+    "create-outlook-contact",
+    "update-my-calendar-permission",
+)
+
+
 # --- the world and the server ----------------------------------------------------------
 
 class Ms365World:
@@ -275,6 +376,73 @@ def create_server(world: Ms365World | None = None) -> FastMCP:
     @graph_tool("get-outlook-contact", "Retrieve the properties and relationships of a contact object.")
     def get_outlook_contact(contactId: str, select: str | None = None) -> CallToolResult:
         return _get(world.contacts, contactId, select)
+
+    # --- Drafts (Write actions; the real server annotates POST tools readOnlyHint false) ---
+
+    def draft_call(tool: str, arguments: dict, create) -> CallToolResult:
+        if os.environ.get(DRAFT_FAILURE_ENV) == "transient":
+            _record_draft_call(tool, arguments, None)
+            return _graph_api_error(503, "Service Unavailable", "ServiceUnavailable",
+                                    "The service is temporarily unavailable. Please retry later.")
+        result = create()
+        if isinstance(result, CallToolResult):  # a Graph error: nothing created
+            _record_draft_call(tool, arguments, None)
+            return result
+        _record_draft_call(tool, arguments, result)
+        return _ok(result)
+
+    @graph_tool("create-draft-email",
+                "Create a draft Outlook email message in the signed-in user's Drafts folder. Set subject, "
+                "body, toRecipients, ccRecipients, and importance. The draft is saved, not sent — use "
+                "send-mail to send a message directly, or send the draft afterwards.", read_only=False)
+    def create_draft_email(body: dict) -> CallToolResult:
+        return draft_call("create-draft-email", {"body": body}, lambda: _new_draft(body))
+
+    @graph_tool("create-reply-draft",
+                "Create a draft to reply to the sender of a message. Specify either a comment or the body "
+                "property of the message parameter. Specifying both will return an HTTP 400 Bad Request error.",
+                read_only=False)
+    def create_reply_draft(messageId: str, body: dict | None = None) -> CallToolResult:
+        body = body or {}
+        # Graph action parameters are case-insensitive; the real server's schema spells them Comment/Message.
+        params = {key.lower(): value for key, value in body.items()}
+        comment, message = params.get("comment"), params.get("message") or {}
+
+        def create():
+            original = next((m for m in world.messages if m["id"] == messageId), None)
+            if original is None:
+                return _graph_error("ErrorItemNotFound", "The specified object was not found in the store.")
+            if comment is not None and message.get("body"):
+                return _graph_error("BadRequest", "Specify either comment or message body, not both.")
+            reply_body = message.get("body") or {
+                "contentType": "text",
+                "content": f"{comment or ''}\n\n{_quoted(original)}".lstrip(),
+            }
+            return _new_draft({
+                "subject": f"RE: {original['subject']}",
+                "toRecipients": original.get("replyTo") or [original["from"]],
+                "conversationId": original["conversationId"],
+                **message,
+                "body": reply_body,
+            })
+
+        return draft_call("create-reply-draft", {"messageId": messageId, "body": body}, create)
+
+    # --- the real server's other writes: present, never emulated ---
+
+    def unemulated(name: str):
+        def tool() -> CallToolResult:
+            return _graph_error("NotSupported", f"{name} is not emulated by the Fixture world.")
+        return tool
+
+    for name in UNEMULATED_WRITE_TOOLS:
+        graph_tool(name, f"{name} (not emulated by the Fixture world)", read_only=False)(unemulated(name))
+
+    # A local-file write that the real server annotates readOnlyHint (its method is GET).
+    mcp.tool(name="download-bytes-to-file", structured_output=False,
+             description="Write authenticated Microsoft Graph byte content to a local file on the server.",
+             annotations=ToolAnnotations(title="download-bytes-to-file", readOnlyHint=True, openWorldHint=True),
+             )(unemulated("download-bytes-to-file"))
 
     # --- account tools: present like on the real server, so the agent's hiding of them is testable ---
 
