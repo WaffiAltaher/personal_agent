@@ -13,6 +13,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 import agent.graph as graph_module
 from agent.graph import build_graph
 from agent.tools import LOCAL_TOOLS, load_all_tools
+from agent.tools.ms365_mcp import PACKAGE
 from fixture_world.ms365 import FailureSwitch
 
 
@@ -78,7 +79,7 @@ async def test_missing_login_at_startup_names_the_login_command(ms365_failure):
     assert len(notices) == 1
     assert notices[0].startswith("ms365 tools unavailable: not logged in to Microsoft 365")
     assert "No valid token found" in notices[0]
-    assert "@softeria/ms-365-mcp-server@0.119.0 --login" in notices[0]
+    assert f"npx -y {PACKAGE} --login" in notices[0]
 
 
 # --- in a run -----------------------------------------------------------------------------
@@ -157,7 +158,7 @@ async def test_login_expiring_in_the_middle_of_a_run_names_the_login_command(ms3
     message = _tool_results(result)["c1"]
     assert message.status == "error"
     assert "Not logged in to Microsoft 365" in str(message.content)
-    assert "@softeria/ms-365-mcp-server@0.119.0 --login" in str(message.content)
+    assert f"npx -y {PACKAGE} --login" in str(message.content)
 
 
 @pytest.mark.asyncio

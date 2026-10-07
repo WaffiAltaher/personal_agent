@@ -64,6 +64,8 @@ class McpServer:
     connection: Connection | None  # None when the server isn't configured
     unavailable_reason: str = ""  # why connection is None, shown to the user
     hidden_tools: frozenset[str] = frozenset()  # server tool names (unprefixed) never bound
+    # When set, only these server tool names (unprefixed) are bound, whatever their annotations say.
+    exposed_tools: frozenset[str] | None = None
     read_allowlist: frozenset[str] = frozenset()  # server tool names (unprefixed) classified read
     trust_read_only_hint: bool = False  # classify tools annotated readOnlyHint as read
     login: LoginCheck | None = None  # checked at startup; None when the server needs no login
@@ -135,10 +137,15 @@ async def _load_server(server: McpServer) -> list[BaseTool]:
     )
     tools = await client.get_tools(server_name=server.name)
     if server.login:
-        await _check_login(client, server, server.login)
+        if f"{server.name}_{server.login.check_tool}" in {tool.name for tool in tools}:
+            await _check_login(client, server, server.login)
+        else:  # can't check; tool errors will still name the login command (LoginCheck.error_patterns)
+            logger.warning("MCP server %s has no %s tool; login not checked at startup",
+                           server.name, server.login.check_tool)
     hidden = {f"{server.name}_{name}" for name in server.hidden_tools}
+    exposed = None if server.exposed_tools is None else {f"{server.name}_{name}" for name in server.exposed_tools}
     return classify_mcp_tools(
-        [tool for tool in tools if tool.name not in hidden],
+        [tool for tool in tools if tool.name not in hidden and (exposed is None or tool.name in exposed)],
         read_allowlist={f"{server.name}_{name}" for name in server.read_allowlist},
         trust_read_only_hint=server.trust_read_only_hint,
     )

@@ -13,6 +13,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from agent.graph import build_graph
 from agent.tools import load_all_tools
+from agent.tools.classification import is_read
 
 # The Fixture world's seeded week runs Monday 2026-10-05 to Sunday 2026-10-11.
 SEEDED_TODAY = "2026-10-07"
@@ -145,10 +146,15 @@ async def test_unread_mail_filter_and_an_unsupported_filter(fixture_tools, scrip
 
 
 @pytest.mark.asyncio
-async def test_model_sees_ms365_read_tools_but_no_account_tools(fixture_tools):
+async def test_model_sees_ms365_read_tools_and_the_two_draft_tools_only(fixture_tools):
+    """The stand-in also serves send, delete, move, update, calendar, rule, folder and permission
+    writes, the account tools, and download-bytes-to-file (a local-file write the real server
+    annotates readOnlyHint): none of them is bound, whatever its annotations say."""
     tools = await fixture_tools()
 
     assert sorted(t.name for t in tools if t.name.startswith("ms365_")) == [
+        "ms365_create-draft-email",
+        "ms365_create-reply-draft",
         "ms365_get-calendar-event",
         "ms365_get-calendar-view",
         "ms365_get-mail-message",
@@ -157,3 +163,5 @@ async def test_model_sees_ms365_read_tools_but_no_account_tools(fixture_tools):
         "ms365_list-mail-messages",
         "ms365_list-outlook-contacts",
     ]
+    writes = sorted(t.name for t in tools if t.name.startswith("ms365_") and not is_read(t))
+    assert writes == ["ms365_create-draft-email", "ms365_create-reply-draft"]
