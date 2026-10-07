@@ -1,0 +1,592 @@
+[
+  {
+    "id": 5001,
+    "relation_id": 1001,
+    "contact_id": null,
+    "contact_name": null,
+    "template_id": 1,
+    "payment_condition_id": 1,
+    "number": "2026-0101",
+    "invoice_date": "2026-08-01",
+    "expiry_days": 30,
+    "expiry_date": "2026-08-31",
+    "totals": {
+      "excl_vat": 1000.0,
+      "incl_vat": 1210.0,
+      "excl_vat_default": 1000.0,
+      "incl_vat_default": 1210.0,
+      "vat": 210.0,
+      "paid": 0.0,
+      "open": 1210.0
+    },
+    "payment_date": null,
+    "vat_option": "excl",
+    "currency_id": 1,
+    "comment": null,
+    "footer": null,
+    "reference": null,
+    "concept": "0",
+    "reminder_status": "1",
+    "last_reminder_date": "2026-09-15",
+    "last_edit": "2026-08-01 09:30:00",
+    "created_at": "2026-08-01 09:00:00",
+    "url": "https://app.informer.eu/sales-invoice/5001",
+    "status": {
+      "status": "Verlopen",
+      "color": "red"
+    },
+    "send_options": {
+      "email": [],
+      "peppol": false
+    },
+    "attachments": [],
+    "document_attachments": [],
+    "lines": [
+      {
+        "info": false,
+        "qty": 1,
+        "product_id": null,
+        "description": "IT-beheer 2026-08",
+        "amount": 1000.0,
+        "discount": 0.0,
+        "vat": {
+          "id": 1,
+          "percentage": 21.0
+        },
+        "ledger_id": 8000,
+        "costs_id": null
+      }
+    ]
+  },
+  {
+    "id": 5002,
+    "relation_id": 1002,
+    "contact_id": null,
+    "contact_name": null,
+    "template_id": 1,
+    "payment_condition_id": 1,
+    "number": "2026-0102",
+    "invoice_date": "2026-08-02",
+    "expiry_days": 30,
+    "expiry_date": "2026-09-01",
+    "totals": {
+      "excl_vat": 82.73,
+      "incl_vat": 100.1,
+      "excl_vat_default": 82.73,
+      "incl_vat_default": 100.1,
+      "vat": 17.37,
+      "paid": 0.0,
+      "open": 100.1
+    },
+    "payment_date": null,
+    "vat_option": "excl",
+    "currency_id": 1,
+    "comment": null,
+    "footer": null,
+    "reference": null,
+    "concept": "0",
+    "reminder_status": null,
+    "last_reminder_date": null,
+    "last_edit": "2026-08-02 09:30:00",
+    "created_at": "2026-08-02 09:00:00",
+    "url": "https://app.informer.eu/sales-invoice/5002",
+    "status": {
+      "status": "Verlopen",
+      "color": "red"
+    },
+    "send_options": {
+      "email": [],
+      "peppol": false
+    },
+    "attachments": [],
+    "document_attachments": [],
+    "lines": [
+      {
+        "info": false,
+        "qty": 1,
+        "product_id": null,
+        "description": "IT-beheer 2026-08",
+        "amount": 82.73,
+        "discount": 0.0,
+        "vat": {
+          "id": 1,
+          "percentage": 21.0
+        },
+        "ledger_id": 8000,
+        "costs_id": null
+      }
+    ]
+  },
+  {
+    "id": 5003,
+    "relation_id": 1002,
+    "contact_id": null,
+    "contact_name": null,
+    "template_id": 1,
+    "payment_condition_id": 1,
+    "number": "2026-0103",
+    "invoice_date": "2026-08-11",
+    "expiry_days": 30,
+    "expiry_date": "2026-09-10",
+    "totals": {
+      "excl_vat": 165.45,
+      "incl_vat": 200.2,
+      "excl_vat_default": 165.45,
+      "incl_vat_default": 200.2,
+      "vat": 34.75,
+      "paid": 0.0,
+      "open": 200.2
+    },
+    "payment_date": null,
+    "vat_option": "excl",
+    "currency_id": 1,
+    "comment": null,
+    "footer": null,
+    "reference": null,
+    "concept": "0",
+    "reminder_status": null,
+    "last_reminder_date": null,
+    "last_edit": "2026-08-11 09:30:00",
+    "created_at": "2026-08-11 09:00:00",
+    "url": "https://app.informer.eu/sales-invoice/5003",
+    "status": {
+      "status": "Verlopen",
+      "color": "red"
+    },
+    "send_options": {
+      "email": [],
+      "peppol": false
+    },
+    "attachments": [],
+    "document_attachments": [],
+    "lines": [
+      {
+        "info": false,
+        "qty": 1,
+        "product_id": null,
+        "description": "IT-beheer 2026-08",
+        "amount": 165.45,
+        "discount": 0.0,
+        "vat": {
+          "id": 1,
+          "percentage": 21.0
+        },
+        "ledger_id": 8000,
+        "costs_id": null
+      }
+    ]
+  },
+  {
+    "id": 5004,
+    "relation_id": 1004,
+    "contact_id": null,
+    "contact_name": null,
+    "template_id": 1,
+    "payment_condition_id": 1,
+    "number": "2026-0104",
+    "invoice_date": "2026-08-21",
+    "expiry_days": 30,
+    "expiry_date": "2026-09-20",
+    "totals": {
+      "excl_vat": 371.9,
+      "incl_vat": 450.0,
+      "excl_vat_default": 371.9,
+      "incl_vat_default": 450.0,
+      "vat": 78.1,
+      "paid": 0.0,
+      "open": 450.0
+    },
+    "payment_date": null,
+    "vat_option": "excl",
+    "currency_id": 1,
+    "comment": null,
+    "footer": null,
+    "reference": null,
+    "concept": "0",
+    "reminder_status": null,
+    "last_reminder_date": null,
+    "last_edit": "2026-08-21 09:30:00",
+    "created_at": "2026-08-21 09:00:00",
+    "url": "https://app.informer.eu/sales-invoice/5004",
+    "status": {
+      "status": "Verlopen",
+      "color": "red"
+    },
+    "send_options": {
+      "email": [],
+      "peppol": false
+    },
+    "attachments": [],
+    "document_attachments": [],
+    "lines": [
+      {
+        "info": false,
+        "qty": 1,
+        "product_id": null,
+        "description": "IT-beheer 2026-08",
+        "amount": 371.9,
+        "discount": 0.0,
+        "vat": {
+          "id": 1,
+          "percentage": 21.0
+        },
+        "ledger_id": 8000,
+        "costs_id": null
+      }
+    ]
+  },
+  {
+    "id": 5005,
+    "relation_id": 1001,
+    "contact_id": null,
+    "contact_name": null,
+    "template_id": 1,
+    "payment_condition_id": 1,
+    "number": "2026-0105",
+    "invoice_date": "2026-08-15",
+    "expiry_days": 30,
+    "expiry_date": "2026-09-14",
+    "totals": {
+      "excl_vat": 500.0,
+      "incl_vat": 605.0,
+      "excl_vat_default": 500.0,
+      "incl_vat_default": 605.0,
+      "vat": 105.0,
+      "paid": 300.0,
+      "open": 305.0
+    },
+    "payment_date": "2026-09-20",
+    "vat_option": "excl",
+    "currency_id": 1,
+    "comment": null,
+    "footer": null,
+    "reference": null,
+    "concept": "0",
+    "reminder_status": null,
+    "last_reminder_date": null,
+    "last_edit": "2026-08-15 09:30:00",
+    "created_at": "2026-08-15 09:00:00",
+    "url": "https://app.informer.eu/sales-invoice/5005",
+    "status": {
+      "status": "Deels betaald",
+      "color": "orange"
+    },
+    "send_options": {
+      "email": [],
+      "peppol": false
+    },
+    "attachments": [],
+    "document_attachments": [],
+    "lines": [
+      {
+        "info": false,
+        "qty": 1,
+        "product_id": null,
+        "description": "IT-beheer 2026-08",
+        "amount": 500.0,
+        "discount": 0.0,
+        "vat": {
+          "id": 1,
+          "percentage": 21.0
+        },
+        "ledger_id": 8000,
+        "costs_id": null
+      }
+    ]
+  },
+  {
+    "id": 5006,
+    "relation_id": 1002,
+    "contact_id": null,
+    "contact_name": null,
+    "template_id": 1,
+    "payment_condition_id": 1,
+    "number": "2026-0098",
+    "invoice_date": "2026-06-01",
+    "expiry_days": 30,
+    "expiry_date": "2026-07-01",
+    "totals": {
+      "excl_vat": 413.22,
+      "incl_vat": 500.0,
+      "excl_vat_default": 413.22,
+      "incl_vat_default": 500.0,
+      "vat": 86.78,
+      "paid": 500.0,
+      "open": 0.0
+    },
+    "payment_date": "2026-06-28",
+    "vat_option": "excl",
+    "currency_id": 1,
+    "comment": null,
+    "footer": null,
+    "reference": null,
+    "concept": "0",
+    "reminder_status": null,
+    "last_reminder_date": null,
+    "last_edit": "2026-06-01 09:30:00",
+    "created_at": "2026-06-01 09:00:00",
+    "url": "https://app.informer.eu/sales-invoice/5006",
+    "status": {
+      "status": "Betaald",
+      "color": "green"
+    },
+    "send_options": {
+      "email": [],
+      "peppol": false
+    },
+    "attachments": [],
+    "document_attachments": [],
+    "lines": [
+      {
+        "info": false,
+        "qty": 1,
+        "product_id": null,
+        "description": "IT-beheer 2026-06",
+        "amount": 413.22,
+        "discount": 0.0,
+        "vat": {
+          "id": 1,
+          "percentage": 21.0
+        },
+        "ledger_id": 8000,
+        "costs_id": null
+      }
+    ]
+  },
+  {
+    "id": 5007,
+    "relation_id": 1003,
+    "contact_id": null,
+    "contact_name": null,
+    "template_id": 1,
+    "payment_condition_id": 1,
+    "number": "2026-0106",
+    "invoice_date": "2026-09-01",
+    "expiry_days": 30,
+    "expiry_date": "2026-10-01",
+    "totals": {
+      "excl_vat": 80.0,
+      "incl_vat": 96.8,
+      "excl_vat_default": 80.0,
+      "incl_vat_default": 96.8,
+      "vat": 16.8,
+      "paid": 96.8,
+      "open": 0.0
+    },
+    "payment_date": "2026-09-29",
+    "vat_option": "excl",
+    "currency_id": 1,
+    "comment": null,
+    "footer": null,
+    "reference": null,
+    "concept": "0",
+    "reminder_status": null,
+    "last_reminder_date": null,
+    "last_edit": "2026-09-01 09:30:00",
+    "created_at": "2026-09-01 09:00:00",
+    "url": "https://app.informer.eu/sales-invoice/5007",
+    "status": {
+      "status": "Betaald",
+      "color": "green"
+    },
+    "send_options": {
+      "email": [],
+      "peppol": false
+    },
+    "attachments": [],
+    "document_attachments": [],
+    "lines": [
+      {
+        "info": false,
+        "qty": 1,
+        "product_id": null,
+        "description": "IT-beheer 2026-09",
+        "amount": 80.0,
+        "discount": 0.0,
+        "vat": {
+          "id": 1,
+          "percentage": 21.0
+        },
+        "ledger_id": 8000,
+        "costs_id": null
+      }
+    ]
+  },
+  {
+    "id": 5008,
+    "relation_id": 1001,
+    "contact_id": null,
+    "contact_name": null,
+    "template_id": 1,
+    "payment_condition_id": 1,
+    "number": "2026-0110",
+    "invoice_date": "2026-09-07",
+    "expiry_days": 30,
+    "expiry_date": "2026-10-07",
+    "totals": {
+      "excl_vat": 200.0,
+      "incl_vat": 242.0,
+      "excl_vat_default": 200.0,
+      "incl_vat_default": 242.0,
+      "vat": 42.0,
+      "paid": 0.0,
+      "open": 242.0
+    },
+    "payment_date": null,
+    "vat_option": "excl",
+    "currency_id": 1,
+    "comment": null,
+    "footer": null,
+    "reference": null,
+    "concept": "0",
+    "reminder_status": null,
+    "last_reminder_date": null,
+    "last_edit": "2026-09-07 09:30:00",
+    "created_at": "2026-09-07 09:00:00",
+    "url": "https://app.informer.eu/sales-invoice/5008",
+    "status": {
+      "status": "Openstaand",
+      "color": "orange"
+    },
+    "send_options": {
+      "email": [],
+      "peppol": false
+    },
+    "attachments": [],
+    "document_attachments": [],
+    "lines": [
+      {
+        "info": false,
+        "qty": 1,
+        "product_id": null,
+        "description": "IT-beheer 2026-09",
+        "amount": 200.0,
+        "discount": 0.0,
+        "vat": {
+          "id": 1,
+          "percentage": 21.0
+        },
+        "ledger_id": 8000,
+        "costs_id": null
+      }
+    ]
+  },
+  {
+    "id": 5009,
+    "relation_id": 1003,
+    "contact_id": null,
+    "contact_name": null,
+    "template_id": 1,
+    "payment_condition_id": 1,
+    "number": "2026-0111",
+    "invoice_date": "2026-10-02",
+    "expiry_days": 30,
+    "expiry_date": "2026-11-01",
+    "totals": {
+      "excl_vat": 150.0,
+      "incl_vat": 181.5,
+      "excl_vat_default": 150.0,
+      "incl_vat_default": 181.5,
+      "vat": 31.5,
+      "paid": 0.0,
+      "open": 181.5
+    },
+    "payment_date": null,
+    "vat_option": "excl",
+    "currency_id": 1,
+    "comment": null,
+    "footer": null,
+    "reference": null,
+    "concept": "0",
+    "reminder_status": null,
+    "last_reminder_date": null,
+    "last_edit": "2026-10-02 09:30:00",
+    "created_at": "2026-10-02 09:00:00",
+    "url": "https://app.informer.eu/sales-invoice/5009",
+    "status": {
+      "status": "Openstaand",
+      "color": "orange"
+    },
+    "send_options": {
+      "email": [],
+      "peppol": false
+    },
+    "attachments": [],
+    "document_attachments": [],
+    "lines": [
+      {
+        "info": false,
+        "qty": 1,
+        "product_id": null,
+        "description": "IT-beheer 2026-10",
+        "amount": 150.0,
+        "discount": 0.0,
+        "vat": {
+          "id": 1,
+          "percentage": 21.0
+        },
+        "ledger_id": 8000,
+        "costs_id": null
+      }
+    ]
+  },
+  {
+    "id": 5010,
+    "relation_id": 1003,
+    "contact_id": null,
+    "contact_name": null,
+    "template_id": 1,
+    "payment_condition_id": 1,
+    "number": "",
+    "invoice_date": "2026-10-06",
+    "expiry_days": 30,
+    "expiry_date": "2026-11-05",
+    "totals": {
+      "excl_vat": 75.0,
+      "incl_vat": 90.75,
+      "excl_vat_default": 75.0,
+      "incl_vat_default": 90.75,
+      "vat": 15.75,
+      "paid": 0.0,
+      "open": 90.75
+    },
+    "payment_date": null,
+    "vat_option": "excl",
+    "currency_id": 1,
+    "comment": null,
+    "footer": null,
+    "reference": null,
+    "concept": "1",
+    "reminder_status": null,
+    "last_reminder_date": null,
+    "last_edit": "2026-10-06 09:30:00",
+    "created_at": "2026-10-06 09:00:00",
+    "url": "https://app.informer.eu/sales-invoice/5010",
+    "status": {
+      "status": "Concept",
+      "color": "grey"
+    },
+    "send_options": {
+      "email": [],
+      "peppol": false
+    },
+    "attachments": [],
+    "document_attachments": [],
+    "lines": [
+      {
+        "info": false,
+        "qty": 1,
+        "product_id": null,
+        "description": "IT-beheer 2026-10",
+        "amount": 75.0,
+        "discount": 0.0,
+        "vat": {
+          "id": 1,
+          "percentage": 21.0
+        },
+        "ledger_id": 8000,
+        "costs_id": null
+      }
+    ]
+  }
+]
