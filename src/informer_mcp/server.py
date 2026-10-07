@@ -1,8 +1,14 @@
 # src/informer_mcp/server.py
 """The Informer MCP server: read-only tools over Informer API v2 (no write endpoints, ADR-006)."""
 
+import json
+import re
+from decimal import Decimal
+from typing import Annotated
+
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
+from pydantic import Field
 
 from informer_mcp.client import InformerClient
 from informer_mcp.config import InformerSettings
@@ -11,6 +17,10 @@ READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldH
 
 # Single page for now; paging with a cap and a truncation notice is ticket 09.
 RELATIONS_PER_REQUEST = 100
+
+LAST_PERIOD = 13  # periods 1-12 plus the year-end closing period
+LAST_LEDGER_NUMBER = 99999999
+DUTCH_AMOUNT = re.compile(r"-?\d{1,3}(?:\.\d{3})*,\d{2}|-?\d+,\d{2}")
 
 
 def _person_name(*parts: str | None) -> str:
@@ -46,6 +56,46 @@ def _relation(raw: dict) -> dict:
     }
 
 
+def _administration(raw: dict) -> dict:
+    """The administration (ITtopia's own company) details, under readable names."""
+    return {
+        "name": raw["company_name"],
+        "contact": raw.get("contact"),
+        "address": _person_name(raw.get("address"), raw.get("house_number"), raw.get("house_number_suffix")),
+        "zip": raw.get("zip"),
+        "city": raw.get("city"),
+        "country": raw.get("country"),
+        "email": raw.get("email"),
+        "phone": raw.get("phone_number"),
+        "web": raw.get("web"),
+        "coc": raw.get("coc"),
+        "vat": raw.get("vat"),
+        "iban": raw.get("iban"),
+        "bic": raw.get("bic"),
+    }
+
+
+def _ledger(raw: dict) -> dict:
+    """One ledger account of the chart of accounts."""
+    return {
+        "number": raw["number"],
+        "description": raw["description"],
+        "type": raw.get("type"),
+        "category": raw.get("category"),
+        "vat_code": raw.get("vat_code"),
+        # The spec says "0" or "1"; its own example shows a boolean.
+        "blocked": raw.get("blocked") in (True, 1, "1"),
+    }
+
+
+def _report_text(text: str) -> str:
+    """A report cell as the model should see it: Dutch-notation amounts ("12.100,50")
+    become exact decimal strings ("12100.50"); any other text is kept as is."""
+    if DUTCH_AMOUNT.fullmatch(text.strip()):
+        return str(Decimal(text.strip().replace(".", "").replace(",", ".")))
+    return text
+
+
 def create_server(settings: InformerSettings) -> FastMCP:
     informer = InformerClient(settings)
     mcp = FastMCP(
@@ -71,6 +121,71 @@ def create_server(settings: InformerSettings) -> FastMCP:
     async def get_relation(relation_id: int) -> dict:
         """Get one Relation by its Informer id (the `id` from list_relations)."""
         return _relation(await informer.get(f"/relations/{relation_id}"))
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def trial_balance(
+        year: int,
+        period_from: int = 1,
+        period_to: int = LAST_PERIOD,
+        ledger_from: int = 0,
+        ledger_to: int = LAST_LEDGER_NUMBER,
+    ) -> dict:
+        """Trial balance (proef- en saldibalans) for a year and a range of periods, in EUR.
+        Periods run 1-13 (13 is the year-end closing period); the default is the whole year.
+        `ledger_from`/`ledger_to` limit it to a range of ledger account numbers (see the
+        chart of accounts resource). Each row is a list of columns as Informer reports them,
+        with amounts converted to decimal strings; the first row names the columns."""
+        if not 1 <= period_from <= period_to <= LAST_PERIOD:
+            raise ValueError(
+                f"Periods must run from 1 to {LAST_PERIOD}, with period_from <= period_to "
+                f"(got {period_from} to {period_to})."
+            )
+        data = await informer.get("/reports/column-balance", {
+            "year": year,
+            "period_from": period_from,
+            "period_to": period_to,
+            "ledger_number_from": ledger_from,
+            "ledger_number_to": ledger_to,
+        })
+        report = data["column_balance"]
+        rows = [[_report_text(c["text"]) for c in report[key]["columns"]] for key in sorted(report, key=int)]
+        return {"year": year, "period_from": period_from, "period_to": period_to, "currency": "EUR", "rows": rows}
+
+    @mcp.resource("informer://administration", name="administration", mime_type="application/json")
+    async def administration() -> str:
+        """ITtopia's own company details in Informer: name, address, contact details,
+        Chamber of Commerce and VAT numbers, and the bank account clients pay into."""
+        return json.dumps(_administration(await informer.get("/administration")))
+
+    @mcp.resource("informer://ledgers", name="ledgers", mime_type="application/json")
+    async def ledgers() -> str:
+        """The chart of accounts: every ledger account's number, description, type
+        (balance, revenue, costs), category, VAT code and whether it is blocked."""
+        return json.dumps({"ledgers": [_ledger(raw) for raw in await informer.get("/ledgers")]})
+
+    @mcp.prompt()
+    def payment_reminder(
+        client_name: Annotated[str, Field(description="The Client's name, as in Informer.")],
+        overdue_invoices: Annotated[str, Field(
+            description="The Client's Overdue invoices, as text or JSON: number, due date (ISO) "
+                        "and open amount (EUR decimal string) of each."
+        )],
+        contact_name: Annotated[str, Field(description="The person to address, if known.")] = "",
+    ) -> str:
+        """Draft a Payment reminder asking a Client to pay their Overdue invoices."""
+        addressee = contact_name or client_name
+        return (
+            f"Write a Payment reminder to {client_name} as an email Draft for the owner to "
+            "review. Never send it.\n\n"
+            f"Address it to {addressee}. Keep the tone polite, factual and friendly: assume an "
+            "oversight, not bad faith.\n"
+            "List each Overdue invoice with its invoice number, due date and open amount in EUR, "
+            "and state the total open amount. Ask them to pay it promptly, and to let us know if "
+            "they have already paid or disagree with an invoice. Give ITtopia's bank account "
+            "(IBAN) to pay into, from the informer://administration resource, and sign off as "
+            "ITtopia.\n\n"
+            f"Overdue invoices of {client_name}:\n{overdue_invoices.strip()}"
+        )
 
     return mcp
 
