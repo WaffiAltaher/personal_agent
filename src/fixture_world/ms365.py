@@ -27,12 +27,15 @@ The server can be switched into a failure mode (down, logged out, tool error, tr
 error, crash) from outside its process; see "failure injection" below.
 """
 
+import fcntl
 import functools
 import json
 import os
 import re
 import sys
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 from importlib.resources import files
@@ -212,6 +215,24 @@ def _in_zone(event: dict, zone: str | None) -> dict:
     return {**event, **{key: _graph_datetime(_parse(event[key]["dateTime"]), zone) for key in ("start", "end")}}
 
 
+# --- state shared between stand-in processes ---------------------------------------------
+
+@contextmanager
+def _exclusive(path: Path) -> Iterator[None]:
+    """Hold an exclusive lock on `path` (via a `.lock` file beside it) across processes.
+
+    Concurrent tool calls are concurrent stand-in processes, so every read-then-write of a
+    shared file happens under this lock.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path.with_name(path.name + ".lock"), "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
 # --- Drafts ----------------------------------------------------------------------------
 
 DRAFTS_ENV = "FIXTURE_WORLD_MS365_DRAFTS"  # JSON Lines file the draft tools record into
@@ -237,6 +258,7 @@ def recorded_drafts(path: Path | str | None = None) -> list[dict]:
 
 
 def _record_draft_call(tool: str, arguments: dict, draft: dict | None) -> None:
+    """Append one call to the Drafts file; the caller holds `_exclusive(drafts_path())`."""
     path = drafts_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a") as log:
@@ -254,7 +276,7 @@ def _graph_api_error(status: int, reason: str, code: str, message: str) -> CallT
 def _new_draft(fields: dict) -> dict:
     """A Draft as Graph returns it from POST /me/messages: saved in Drafts, unsent."""
     now = datetime.combine(today(), datetime.now(timezone.utc).time(), timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    number = len(recorded_drafts()) + 1
+    number = len(recorded_drafts()) + 1  # under _exclusive(drafts_path()), held by draft_call
     return {
         "id": f"AAMkAGZpeHR1cmUADRAFT{number:02d}",
         "createdDateTime": now,
@@ -366,26 +388,35 @@ class FailureSwitch:
     def set(self, mode: Failure | str, times: int | None = None) -> None:
         """Fail in `mode` from now on, or only the next `times` times it would apply."""
         mode = Failure(mode)
-        self.path.write_text(mode if times is None else f"{mode} {times}")
+        with _exclusive(self.path):
+            self.path.write_text(mode if times is None else f"{mode} {times}")
 
     def clear(self) -> None:
-        self.path.unlink(missing_ok=True)
+        with _exclusive(self.path):
+            self.path.unlink(missing_ok=True)
 
 
 def take_failure(*modes: Failure) -> Failure | None:
     """The switched-on failure if it is one of `modes`; counts one use of a limited failure."""
     path = os.environ.get(FAILURE_FILE_ENV)
-    spec = Path(path).read_text().split() if path and Path(path).exists() else []
-    if not spec:
-        fixed = os.environ.get(FAILURE_ENV)
-        return Failure(fixed) if fixed and Failure(fixed) in modes else None
-    failure = Failure(spec[0])
-    if failure not in modes:
-        return None
-    if len(spec) > 1:  # limited: count this use down
-        remaining = int(spec[1]) - 1
-        Path(path).write_text(f"{failure} {remaining}" if remaining > 0 else "")
-    return failure
+    if not path:
+        return _fixed_failure(modes)
+    with _exclusive(Path(path)):  # the countdown is a read-then-write shared by every process
+        spec = Path(path).read_text().split() if Path(path).exists() else []
+        if not spec:
+            return _fixed_failure(modes)
+        failure = Failure(spec[0])
+        if failure not in modes:
+            return None
+        if len(spec) > 1:  # limited: count this use down
+            remaining = int(spec[1]) - 1
+            Path(path).write_text(f"{failure} {remaining}" if remaining > 0 else "")
+        return failure
+
+
+def _fixed_failure(modes: tuple[Failure, ...]) -> Failure | None:
+    fixed = os.environ.get(FAILURE_ENV)
+    return Failure(fixed) if fixed and Failure(fixed) in modes else None
 
 
 def _server_error(message: str) -> CallToolResult:
@@ -483,16 +514,18 @@ def create_server(world: Ms365World | None = None) -> FastMCP:
     # --- Drafts (Write actions; the real server annotates POST tools readOnlyHint false) ---
 
     def draft_call(tool: str, arguments: dict, create) -> CallToolResult:
-        if os.environ.get(DRAFT_FAILURE_ENV) == "transient":
-            _record_draft_call(tool, arguments, None)
-            return _graph_api_error(503, "Service Unavailable", "ServiceUnavailable",
-                                    "The service is temporarily unavailable. Please retry later.")
-        result = create()
-        if isinstance(result, CallToolResult):  # a Graph error: nothing created
-            _record_draft_call(tool, arguments, None)
-            return result
-        _record_draft_call(tool, arguments, result)
-        return _ok(result)
+        # Numbering a Draft reads the file it is then recorded in: one process at a time.
+        with _exclusive(drafts_path()):
+            if os.environ.get(DRAFT_FAILURE_ENV) == "transient":
+                _record_draft_call(tool, arguments, None)
+                return _graph_api_error(503, "Service Unavailable", "ServiceUnavailable",
+                                        "The service is temporarily unavailable. Please retry later.")
+            result = create()
+            if isinstance(result, CallToolResult):  # a Graph error: nothing created
+                _record_draft_call(tool, arguments, None)
+                return result
+            _record_draft_call(tool, arguments, result)
+            return _ok(result)
 
     @graph_tool("create-draft-email",
                 "Create a draft Outlook email message in the signed-in user's Drafts folder. Set subject, "
