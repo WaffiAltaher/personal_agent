@@ -1,0 +1,21 @@
+{
+  "company_name": "ITtopia Fixture B.V.",
+  "contact": "Fixture Eigenaar",
+  "address": "Fixtureweg",
+  "house_number": "1",
+  "house_number_suffix": null,
+  "zip": "1011 AA",
+  "city": "Amsterdam",
+  "country": "NL",
+  "email": "administratie@ittopia.example",
+  "phone_number": "020-0000000",
+  "mobile": null,
+  "web": "https://ittopia.example",
+  "coc": "00123456",
+  "vat": "NL001234567B01",
+  "oin": null,
+  "iban": "NL00FIXT0123456789",
+  "bic": "FIXTNL2A",
+  "modules": {"trade": false},
+  "blocked_period": {"year": 2025, "month": 12}
+}

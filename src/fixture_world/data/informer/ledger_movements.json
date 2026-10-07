@@ -1,0 +1,19 @@
+[
+  {"year": 2025, "period": 12, "ledger_number": "1300", "description": "Licentie 2026", "debit": "500.00", "credit": "0.00"},
+  {"year": 2025, "period": 12, "ledger_number": "8100", "description": "Licentie 2026", "debit": "0.00", "credit": "500.00"},
+
+  {"year": 2026, "period": 1, "ledger_number": "1300", "description": "Factuur dienstverlening januari", "debit": "1210.00", "credit": "0.00"},
+  {"year": 2026, "period": 1, "ledger_number": "8000", "description": "Factuur dienstverlening januari", "debit": "0.00", "credit": "1000.00"},
+  {"year": 2026, "period": 1, "ledger_number": "1800", "description": "Factuur dienstverlening januari", "debit": "0.00", "credit": "210.00"},
+
+  {"year": 2026, "period": 2, "ledger_number": "1100", "description": "Ontvangst factuur januari", "debit": "1210.00", "credit": "0.00"},
+  {"year": 2026, "period": 2, "ledger_number": "1300", "description": "Ontvangst factuur januari", "debit": "0.00", "credit": "1210.00"},
+  {"year": 2026, "period": 2, "ledger_number": "4500", "description": "Abonnement software", "debit": "49.99", "credit": "0.00"},
+  {"year": 2026, "period": 2, "ledger_number": "1100", "description": "Abonnement software", "debit": "0.00", "credit": "49.99"},
+
+  {"year": 2026, "period": 3, "ledger_number": "1300", "description": "Factuur project maart", "debit": "12100.00", "credit": "0.00"},
+  {"year": 2026, "period": 3, "ledger_number": "8000", "description": "Factuur project maart", "debit": "0.00", "credit": "10000.00"},
+  {"year": 2026, "period": 3, "ledger_number": "1800", "description": "Factuur project maart", "debit": "0.00", "credit": "2100.00"},
+  {"year": 2026, "period": 3, "ledger_number": "4000", "description": "Huur kantoor maart", "debit": "1250.00", "credit": "0.00"},
+  {"year": 2026, "period": 3, "ledger_number": "1100", "description": "Huur kantoor maart", "debit": "0.00", "credit": "1250.00"}
+]
