@@ -4,6 +4,7 @@
 from langchain_core.tools import tool
 
 from agent.memory import get_episodic_memory, get_semantic_memory
+from agent.memory.recall import recall_chunks, recall_runs
 
 
 @tool
@@ -11,11 +12,11 @@ def retrieve_memory(query: str) -> str:
     """
     Search past agent interactions and ingested documents for context relevant
     to the query. Returns the top matches with source and relevance score.
+    Pass the user's request as phrased; it is rewritten into a search query.
     Use this when the user references something they may have asked before,
     or when background context from prior sessions could improve the answer.
     """
-    mem = get_semantic_memory()
-    chunks = mem.search_all(query, k=5)
+    chunks = recall_chunks(query, get_semantic_memory(), k=5)
 
     if not chunks:
         return "No relevant memory found."
@@ -33,7 +34,8 @@ def retrieve_episodic_memory(query: str = "", recent: int = 5) -> str:
     Look up past agent runs from episodic memory.
 
     If `query` is provided, searches run history by keyword (matches against
-    what the user asked and what the agent answered). If `query` is empty,
+    what the user asked and what the agent answered). Pass the user's request
+    as phrased; it is rewritten into keyword variants. If `query` is empty,
     returns the `recent` most recent runs.
 
     Use this when the user asks things like:
@@ -45,7 +47,7 @@ def retrieve_episodic_memory(query: str = "", recent: int = 5) -> str:
     mem = get_episodic_memory()
 
     if query:
-        runs = mem.search_runs(query, n=recent)
+        runs = recall_runs(query, mem, n=recent)
         header = f'Runs matching "{query}"'
     else:
         runs = mem.get_recent_runs(n=recent)

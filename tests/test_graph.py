@@ -23,6 +23,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 from langgraph.graph import END
 from agent.graph import AgentState, build_graph, should_continue
+from agent.tools.classification import read_tool
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +131,7 @@ async def test_graph_records_structured_tool_errors(scripted_model):
       - preserve structured error details for developer/debug output
     """
 
+    @read_tool
     @tool("explode")
     async def explode() -> str:
         """Raise a deterministic exception for testing fallback behavior."""
