@@ -1,0 +1,102 @@
+[
+  {
+    "id": "AAMkAGZpeHR1cmUAEVENT0001",
+    "subject": "Invoice questions call Bakkerij De Gouden Bol",
+    "bodyPreview": "Short call about the September invoice.",
+    "start": {"dateTime": "2026-10-02T12:00:00.0000000", "timeZone": "UTC"},
+    "end": {"dateTime": "2026-10-02T12:30:00.0000000", "timeZone": "UTC"},
+    "isAllDay": false,
+    "isOnlineMeeting": true,
+    "location": {"displayName": "Microsoft Teams Meeting", "locationType": "default"},
+    "organizer": {"emailAddress": {"name": "Jen Do", "address": "jendo@example.com"}},
+    "attendees": [
+      {
+        "type": "required",
+        "status": {"response": "accepted", "time": "2026-09-30T08:00:00Z"},
+        "emailAddress": {"name": "Jan de Bakker", "address": "jan@goudenbol.example"}
+      }
+    ]
+  },
+  {
+    "id": "AAMkAGZpeHR1cmUAEVENT0002",
+    "subject": "Quarterly review Bakkerij De Gouden Bol",
+    "bodyPreview": "Review of the ordering system and plans for Q4.",
+    "start": {"dateTime": "2026-10-06T08:00:00.0000000", "timeZone": "UTC"},
+    "end": {"dateTime": "2026-10-06T09:00:00.0000000", "timeZone": "UTC"},
+    "isAllDay": false,
+    "isOnlineMeeting": false,
+    "location": {"displayName": "Voorbeeldstraat 12A, Amsterdam", "locationType": "default"},
+    "organizer": {"emailAddress": {"name": "Jen Do", "address": "jendo@example.com"}},
+    "attendees": [
+      {
+        "type": "required",
+        "status": {"response": "accepted", "time": "2026-09-28T09:12:00Z"},
+        "emailAddress": {"name": "Jan de Bakker", "address": "jan@goudenbol.example"}
+      }
+    ]
+  },
+  {
+    "id": "AAMkAGZpeHR1cmUAEVENT0003",
+    "subject": "Kick-off route planner Van Dijk Logistiek",
+    "bodyPreview": "Kick-off of the route planner project. Agenda follows by mail.",
+    "start": {"dateTime": "2026-10-08T13:00:00.0000000", "timeZone": "UTC"},
+    "end": {"dateTime": "2026-10-08T14:30:00.0000000", "timeZone": "UTC"},
+    "isAllDay": false,
+    "isOnlineMeeting": false,
+    "location": {"displayName": "Van Dijk Logistiek, Rotterdam", "locationType": "default"},
+    "organizer": {"emailAddress": {"name": "Jen Do", "address": "jendo@example.com"}},
+    "attendees": [
+      {
+        "type": "required",
+        "status": {"response": "accepted", "time": "2026-10-01T14:03:00Z"},
+        "emailAddress": {"name": "Pieter van Dijk", "address": "pieter@vandijklogistiek.example"}
+      },
+      {
+        "type": "optional",
+        "status": {"response": "tentativelyAccepted", "time": "2026-10-02T07:45:00Z"},
+        "emailAddress": {"name": "Eva Jansen", "address": "eva.jansen@vandijklogistiek.example"}
+      }
+    ]
+  },
+  {
+    "id": "AAMkAGZpeHR1cmUAEVENT0004",
+    "subject": "Website advice call",
+    "bodyPreview": "Advice on the new portfolio website.",
+    "start": {"dateTime": "2026-10-09T09:00:00.0000000", "timeZone": "UTC"},
+    "end": {"dateTime": "2026-10-09T09:30:00.0000000", "timeZone": "UTC"},
+    "isAllDay": false,
+    "isOnlineMeeting": true,
+    "location": {"displayName": "Microsoft Teams Meeting", "locationType": "default"},
+    "organizer": {"emailAddress": {"name": "Sanne de Vries", "address": "sanne@devries.example"}},
+    "attendees": [
+      {
+        "type": "required",
+        "status": {"response": "accepted", "time": "2026-10-03T10:20:00Z"},
+        "emailAddress": {"name": "Jen Do", "address": "jendo@example.com"}
+      },
+      {
+        "type": "required",
+        "status": {"response": "none", "time": "0001-01-01T00:00:00Z"},
+        "emailAddress": {"name": "Sanne de Vries", "address": "sanne@devries.example"}
+      }
+    ]
+  },
+  {
+    "id": "AAMkAGZpeHR1cmUAEVENT0005",
+    "subject": "Strategy session Noordzee Advies",
+    "bodyPreview": "Yearly IT strategy session.",
+    "start": {"dateTime": "2026-10-12T10:00:00.0000000", "timeZone": "UTC"},
+    "end": {"dateTime": "2026-10-12T12:00:00.0000000", "timeZone": "UTC"},
+    "isAllDay": false,
+    "isOnlineMeeting": false,
+    "location": {"displayName": "Den Haag", "locationType": "default"},
+    "organizer": {"emailAddress": {"name": "Jen Do", "address": "jendo@example.com"}},
+    "attendees": [
+      {
+        "type": "required",
+        "status": {"response": "notResponded", "time": "0001-01-01T00:00:00Z"},
+        "emailAddress": {"name": "Mark Visser", "address": "mark@noordzeeadvies.example"}
+      }
+    ]
+  }
+]

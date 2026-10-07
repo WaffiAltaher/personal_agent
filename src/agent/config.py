@@ -36,8 +36,9 @@ class Settings(BaseSettings):
     )
 
     prompt_version: str = "v2"
-    ms365_mcp_client_id: str
-    ms365_mcp_tenant_id: str
+    # Optional: without them the agent starts without MS365 tools, with a notice.
+    ms365_mcp_client_id: str | None = None
+    ms365_mcp_tenant_id: str | None = None
 
 
 settings = Settings()

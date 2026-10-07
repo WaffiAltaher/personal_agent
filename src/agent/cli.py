@@ -18,7 +18,7 @@ from agent.config import settings
 from agent.tools import load_all_tools
 
 
-def _parse_args(argv: list[str]) -> tuple[bool, str]:
+def _parse_args(argv: list[str]) -> tuple[bool, bool, str]:
     """Parse minimal CLI flags without adding a full CLI framework yet."""
     debug = False
     args = list(argv)
@@ -26,11 +26,17 @@ def _parse_args(argv: list[str]) -> tuple[bool, str]:
         debug = True
         args.remove("--debug")
 
+    # --fixtures: MCP tools come from the Fixture world (seeded stand-ins), not real ITtopia data.
+    fixtures = False
+    if "--fixtures" in args:
+        fixtures = True
+        args.remove("--fixtures")
+
     if not args:
-        print("Usage: python -m agent.cli [--debug] '<your question>'")
+        print("Usage: python -m agent.cli [--debug] [--fixtures] '<your question>'")
         sys.exit(1)
 
-    return debug, args[0]
+    return debug, fixtures, args[0]
 
 
 def _stringify_content(content) -> str:
@@ -120,7 +126,7 @@ def _prompt_decision() -> str:
 
 
 async def main():
-    debug, user_input = _parse_args(sys.argv[1:])
+    debug, fixtures, user_input = _parse_args(sys.argv[1:])
 
     # Build the chat model first: a missing API key for the selected provider
     # stops the run here, before any MCP server is started.
@@ -152,7 +158,12 @@ async def main():
     }
 
     async with get_checkpointer() as checkpointer:
-        tools = await load_all_tools()
+        tools, notices = await load_all_tools(fixtures=fixtures)
+        if fixtures:
+            print("Running against the Fixture world (seeded MS365 stand-in).")
+        # An unavailable integration doesn't stop the run; say which one and why.
+        for notice in notices:
+            print(f"Notice: {notice}")
         agent_graph = build_graph(checkpointer, tools, model)
 
         with propagate_attributes(
