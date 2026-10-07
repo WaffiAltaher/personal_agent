@@ -26,6 +26,9 @@ dependencies = [
     "mcp>=1.24,<2",
     "httpx>=0.28",
     "langchain-anthropic>=1.7.5",
+    "ragas>=0.4.3",
+    # ragas 0.4.3 imports langchain_community.chat_models.vertexai, which 0.4.2 removed.
+    "langchain-community>=0.4.1,<0.4.2",
 ]
 
 [project.scripts]

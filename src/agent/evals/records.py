@@ -5,8 +5,9 @@ The results JSON is `EvalResults.model_dump_json()`; `EvalResults.model_validate
 back for re-analysis or a comparison report. Later metrics add fields here (with defaults, so
 older results files still load) rather than a second record:
 - generation metrics (RAGAS) score `final_answer` against `tool_calls[*].output` as contexts
-  and `expected_facts` from the scenario;
-- tokens, cost and latency belong on RunResult, their totals on Summary;
+  and `expected_facts` from the scenario: `RunResult.generation`, means on Summary;
+- tokens, cost and latency: `RunResult.efficiency`, totals on Summary;
+- the run's Langfuse trace: `RunResult.trace_id`;
 - repeats reuse `RunResult.repeat`.
 """
 
@@ -57,6 +58,35 @@ class FactsScore(BaseModel):
     missing: list[str]
 
 
+class ModelUsage(BaseModel):
+    """Tokens one model used in a run, as its responses reported them, and their cost."""
+    input_tokens: int = 0  # includes cached input
+    output_tokens: int = 0  # includes thinking tokens
+    total_tokens: int = 0
+    cost_usd: float | None = None  # None: model or usage not in the price table (agent/evals/pricing.py)
+
+
+class Efficiency(BaseModel):
+    """Tokens, cost and latency of one scenario run (every model call the agent made in it)."""
+    latency_s: float  # wall-clock time from the first input to the final answer, approvals included
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    cost_usd: float | None = None  # None if any model's usage could not be priced
+    by_model: dict[str, ModelUsage] = {}  # keyed by the model name the provider reported
+
+
+class GenerationScores(BaseModel):
+    """RAGAS scores of the final answer (0..1), with the tool outputs as retrieved contexts and
+    the scenario's expected facts as the reference. None: not scored, the reason in `notes`."""
+    faithfulness: float | None = None
+    answer_relevancy: float | None = None
+    context_precision: float | None = None
+    context_recall: float | None = None
+    contexts: int = 0  # how many tool outputs were used as contexts
+    notes: dict[str, str] = {}  # metric → why it has no score
+
+
 class RunResult(BaseModel):
     scenario_id: str
     workflow: str
@@ -72,6 +102,9 @@ class RunResult(BaseModel):
     drafts: list[dict]  # Drafts the MS365 stand-in recorded during the run
     trajectory: TrajectoryScore
     answer_facts: FactsScore
+    efficiency: Efficiency | None = None
+    generation: GenerationScores | None = None  # None: the eval ran without a judge
+    trace_id: str | None = None  # the run's Langfuse trace; None: not traced
 
 
 class Summary(BaseModel):
@@ -84,6 +117,14 @@ class Summary(BaseModel):
     forbidden_violations: int  # runs with at least one violation
     recovery_rate: float | None  # over runs with an injected failure; None if there were none
     facts_rate: float  # share of all expected facts found
+    total_tokens: int = 0
+    total_cost_usd: float | None = None  # None if any run's cost is unknown
+    mean_latency_s: float | None = None
+    # Means of the RAGAS scores over the runs that have one; None if none has.
+    mean_faithfulness: float | None = None
+    mean_answer_relevancy: float | None = None
+    mean_context_precision: float | None = None
+    mean_context_recall: float | None = None
 
 
 class EvalResults(BaseModel):
@@ -91,6 +132,7 @@ class EvalResults(BaseModel):
     eval_run_id: str
     started_at: str
     model: str
+    judge_model: str | None = None  # grades the generation metrics; None: not scored
     prompt_version: str
     dataset_path: str
     dataset_version: str

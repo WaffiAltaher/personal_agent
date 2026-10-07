@@ -4,13 +4,19 @@ tracing.py — Langfuse observability setup.
 This module is the single place where Langfuse is configured.
 The rest of the codebase imports `get_callback_handler` and passes
 the result into LangGraph's config dict. That's the full interface.
+(The eval harness uses `langfuse_trace`, which also tags the trace.)
 
 Credentials come from `agent.config` (Pydantic loads `.env`). The Langfuse SDK
 reads LANGFUSE_* from `os.environ` only; it does not see Pydantic-loaded
 values unless we pass them into `Langfuse(...)`, which we do in `_get_langfuse()`.
 """
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+
+from langchain_core.callbacks import BaseCallbackHandler
 from langfuse.types import TraceContext
-from langfuse import Langfuse
+from langfuse import Langfuse, propagate_attributes
 from langfuse.langchain import CallbackHandler
 
 from agent.config import settings
@@ -61,3 +67,28 @@ def get_callback_handler(trace_id: str) -> CallbackHandler:
 def flush_traces() -> None:
     """Batch-export any buffered spans to Langfuse."""
     _get_langfuse().flush()
+
+
+@dataclass(frozen=True)
+class TraceAttributes:
+    """Trace-level attributes for one traced run (Langfuse limits: US-ASCII, values ≤200 chars)."""
+    trace_id: str  # 32 lowercase hex chars
+    name: str
+    session_id: str | None = None
+    tags: list[str] = field(default_factory=list)
+    metadata: dict[str, str] = field(default_factory=dict)
+
+
+@contextmanager
+def langfuse_trace(attributes: TraceAttributes) -> Iterator[list[BaseCallbackHandler]]:
+    """One Langfuse trace carrying `attributes`. Pass the yielded callbacks in the config of
+    every graph invocation inside the block (a resume after an approval prompt included): they
+    all land in the same trace, and every span in it gets the name, session, tags and metadata."""
+    handler = get_callback_handler(trace_id=attributes.trace_id)
+    with propagate_attributes(
+        trace_name=attributes.name,
+        session_id=attributes.session_id,
+        tags=attributes.tags,
+        metadata=attributes.metadata,
+    ):
+        yield [handler]

@@ -3,10 +3,17 @@
 
     uv run python -m agent.evals --model google_genai:gemini-3.8-flash
     uv run python -m agent.evals --model anthropic:claude-sonnet-5-5 --scenario overdue
+    uv run python -m agent.evals --model google_genai:gemini-3.8-flash --judge-model anthropic:claude-sonnet-5-5
 
 Writes `<eval-run-id>.json` (raw results) and `<eval-run-id>.md` (report) to --out.
-Needs the API key of the model's provider; nothing else is real (no MS365 or Informer
-credentials, no Gmail or Calendar).
+Needs the API keys of the model's and the judge model's providers, plus GOOGLE_API_KEY for the
+embeddings answer relevancy uses; nothing else is real (no MS365 or Informer credentials, no
+Gmail or Calendar). Each scenario run is a Langfuse trace, tagged with the model, prompt
+version, scenario and eval-run id.
+
+The judge model grades the answers (RAGAS). It is --judge-model, else EVAL_JUDGE_MODEL, else
+the model under test itself: the command then says so, as the model grades its own answers.
+--no-ragas skips the generation metrics (and the judge).
 """
 
 import argparse
@@ -15,12 +22,16 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+from langchain_core.embeddings import Embeddings
 from langchain_core.language_models import BaseChatModel
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 from agent.chat_model import MissingApiKeyError, create_chat_model
 from agent.config import settings
+from agent.evals.generation import RagasScorer
 from agent.evals.harness import run_eval, write_results
 from agent.evals.scenarios import DEFAULT_DATASET, ScenarioError, load_dataset
+from agent.tracing import flush_traces, langfuse_trace
 
 DEFAULT_OUT = Path(__file__).resolve().parents[3] / "data" / "evals"
 
@@ -32,21 +43,49 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET, help="scenario dataset JSON file")
     parser.add_argument("--scenario", default=None, help="only run scenarios whose id contains this text")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT, help="directory for the results JSON and report")
+    parser.add_argument("--judge-model", default=settings.eval_judge_model,
+                        help="model grading the answers (RAGAS), as provider:model "
+                             "(default: EVAL_JUDGE_MODEL from settings, else the model under test)")
+    parser.add_argument("--no-ragas", action="store_true", help="skip the generation metrics and the judge")
     return parser.parse_args(argv)
 
 
-async def main(argv: list[str], *, create_model: Callable[[str], BaseChatModel] = create_chat_model) -> None:
+def create_embeddings() -> Embeddings:
+    """The embeddings RAGAS answer relevancy compares questions with (as semantic memory uses)."""
+    return GoogleGenerativeAIEmbeddings(model=settings.chroma_embedding_model, google_api_key=settings.google_api_key)
+
+
+async def main(
+    argv: list[str],
+    *,
+    create_model: Callable[[str], BaseChatModel] = create_chat_model,
+    create_embeddings: Callable[[], Embeddings] = create_embeddings,
+) -> None:
     args = _parse_args(argv)
     dataset = load_dataset(args.dataset)
     model = create_model(args.model)  # fails fast on a missing API key, before any run
 
-    results = await run_eval(
-        dataset,
-        model_name=args.model,
-        model_factory=lambda scenario: model,
-        scenario_filter=args.scenario,
-        dataset_path=args.dataset,
-    )
+    scorer, judge_model = None, None
+    if not args.no_ragas:
+        judge_model = args.judge_model or args.model
+        if judge_model == args.model:
+            print(f"Warning: no judge model set (--judge-model or EVAL_JUDGE_MODEL), so {judge_model} "
+                  "grades its own answers.")
+        scorer = RagasScorer(judge=create_model(judge_model), embeddings=create_embeddings())
+
+    try:
+        results = await run_eval(
+            dataset,
+            model_name=args.model,
+            model_factory=lambda scenario: model,
+            scenario_filter=args.scenario,
+            dataset_path=args.dataset,
+            scorer=scorer,
+            judge_model=judge_model,
+            tracer=langfuse_trace,
+        )
+    finally:
+        flush_traces()
     json_path, report_path = write_results(results, args.out)
 
     s = results.summary
