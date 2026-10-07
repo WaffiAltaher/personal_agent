@@ -64,3 +64,17 @@ CLI → graph.py (LangGraph) → agent_node (LLM) → human_review_node → tool
 - Google credentials file must be manually downloaded from GCP console and placed at `credentials/google_credentials.json`
 - The `credentials/` and `checkpoints/` directories are gitignored
 - Phase roadmap is in `docs/MASTER_PLAN.md` — currently completed through Phase 2 (HITL + checkpointing)
+
+## Agent skills
+
+### Issue tracker
+
+Local markdown under `.scratch/<feature-slug>/`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five canonical labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: root `GLOSSARY.md` (business domain) + ADRs in `docs/ARCHITECTURE_DECISIONS.md`. See `docs/agents/domain.md`.
