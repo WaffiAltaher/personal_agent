@@ -35,11 +35,12 @@ def informer_settings(fake_informer) -> InformerSettings:
 @pytest.fixture
 def connect(informer_settings):
     """`async with connect() as session:` opens an initialised MCP client session,
-    in-process, to a server built from `informer_settings` (or the settings given)."""
+    in-process, to a server built from `informer_settings` (or the settings given).
+    Keyword options (e.g. `rate_limiter=`) go to `create_server`."""
 
     @asynccontextmanager
-    async def _connect(settings: InformerSettings | None = None):
-        server = create_server(settings or informer_settings)
+    async def _connect(settings: InformerSettings | None = None, **server_options):
+        server = create_server(settings or informer_settings, **server_options)
         async with create_connected_server_and_client_session(server) as session:
             yield session
 
