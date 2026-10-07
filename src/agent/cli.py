@@ -2,16 +2,94 @@
 cli.py — Entry point with Langfuse tracing wired in.
 """
 
+import asyncio
 import sys
 import uuid
 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langfuse import propagate_attributes
+from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 
 from agent.graph import build_graph, get_checkpointer, log_run_to_memory
 from agent.tracing import flush_traces, get_callback_handler, verify_connection
 from agent.config import settings
+from agent.tools import load_all_tools
+
+
+def _parse_args(argv: list[str]) -> tuple[bool, str]:
+    """Parse minimal CLI flags without adding a full CLI framework yet."""
+    debug = False
+    args = list(argv)
+    if "--debug" in args:
+        debug = True
+        args.remove("--debug")
+
+    if not args:
+        print("Usage: python -m agent.cli [--debug] '<your question>'")
+        sys.exit(1)
+
+    return debug, args[0]
+
+
+def _stringify_content(content) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            block["text"] for block in content
+            if isinstance(block, dict) and block.get("type") == "text"
+        )
+    return str(content)
+
+
+def _display_debug_trace(result: dict) -> None:
+    """Print the message trajectory and captured structured errors."""
+    print("\n" + "=" * 60)
+    print("DEBUG: MESSAGE TRAJECTORY")
+    print("=" * 60)
+
+    for idx, message in enumerate(result.get("messages", []), start=1):
+        print(f"\n[{idx}] {type(message).__name__}")
+
+        content = _stringify_content(getattr(message, "content", ""))
+        if content:
+            print(f"content: {content[:1000]}")
+        else:
+            print("content: <empty>")
+
+        if isinstance(message, AIMessage):
+            tool_calls = getattr(message, "tool_calls", [])
+            if tool_calls:
+                print("tool_calls:")
+                for tool_call in tool_calls:
+                    print(f"  - {tool_call['name']}({tool_call.get('args', {})}) id={tool_call['id']}")
+
+            invalid_tool_calls = getattr(message, "invalid_tool_calls", [])
+            if invalid_tool_calls:
+                print("invalid_tool_calls:")
+                for tool_call in invalid_tool_calls:
+                    print(f"  - {tool_call}")
+
+            finish_reason = getattr(message, "response_metadata", {}).get("finish_reason")
+            if finish_reason:
+                print(f"finish_reason: {finish_reason}")
+
+        if isinstance(message, ToolMessage):
+            print(f"tool_call_id: {message.tool_call_id}")
+
+    errors = result.get("errors", [])
+    if errors:
+        print("\n" + "=" * 60)
+        print("DEBUG: STRUCTURED ERRORS")
+        print("=" * 60)
+        for error in errors:
+            print(
+                f"- node={error.get('node')} tool={error.get('tool')} "
+                f"type={error.get('exception_type')} message={error.get('message')}"
+            )
+            if error.get("args") is not None:
+                print(f"  args={error['args']}")
 
 
 def _display_interrupt(interrupt_payload: dict) -> None:
@@ -40,10 +118,8 @@ def _prompt_decision() -> str:
         print("Please type 'approve' or 'reject'.")
 
 
-def main():
-    if len(sys.argv) < 2:
-        print("Usage: python -m agent.cli '<your question>'")
-        sys.exit(1)
+async def main():
+    debug, user_input = _parse_args(sys.argv[1:])
 
     # Verify Langfuse is reachable before we do any work.
     # This fails loudly rather than running the agent and silently losing traces.
@@ -51,8 +127,6 @@ def main():
         print("Warning: Langfuse connection failed. Traces will not be recorded.")
         # We continue anyway — observability failing shouldn't block the agent.
 
-    user_input = sys.argv[1]
-    
     # Each CLI run gets a fresh thread_id so runs are independent.
     # The checkpointer uses this to namespace the checkpoint.
     thread_id = str(uuid.uuid4())
@@ -67,17 +141,21 @@ def main():
     config = {
         "callbacks": [langfuse_handler],
         "configurable": {"thread_id": thread_id},
+        # One tool round is 4 super-steps (budget → agent → human_review → tools),
+        # so 40 caps a run at ~10 tool rounds instead of LangGraph's default 10,007.
+        "recursion_limit": 40,
     }
 
-    with get_checkpointer() as checkpointer:
-        agent_graph = build_graph(checkpointer)
+    async with get_checkpointer() as checkpointer:
+        tools = await load_all_tools()
+        agent_graph = build_graph(checkpointer, tools)
 
         with propagate_attributes(
             user_id="waffi",
             trace_name="cli-run",
             metadata={"prompt-version": settings.prompt_version},
         ):
-            result = agent_graph.invoke(
+            result = await agent_graph.ainvoke(
                 {"messages": [HumanMessage(content=user_input)]},
                 config=config
             )
@@ -92,24 +170,25 @@ def main():
                 decision = _prompt_decision()
                 print(f"\nResuming with: {decision}\n")
 
-                result = agent_graph.invoke(
+                result = await agent_graph.ainvoke(
                     Command(resume=decision),
                     config=config,
                 )
 
     last = result["messages"][-1]
-    if isinstance(last.content, str):
-        print(last.content)
-    else:
-        text = " ".join(
-            block["text"] for block in last.content
-            if isinstance(block, dict) and block.get("type") == "text"
-        )
-        print(text)
+    print(_stringify_content(last.content))
+
+    if debug:
+        _display_debug_trace(result)
 
     log_run_to_memory(result, user_input)
     flush_traces()
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        asyncio.run(main())
+    except GraphRecursionError:
+        print("Stopped: the agent hit its step limit (~10 tool rounds) without a final answer. "
+              "Try a narrower question.")
+        sys.exit(1)

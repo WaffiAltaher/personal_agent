@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     )
 
     prompt_version: str = "v2"
+    ms365_mcp_client_id: str
+    ms365_mcp_tenant_id: str
 
 
 settings = Settings()

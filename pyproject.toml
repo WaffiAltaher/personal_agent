@@ -21,6 +21,8 @@ dependencies = [
     "langchain-chroma>=0.2.0",
     "langchain-text-splitters>=1.1.2",
     "langgraph-checkpoint-sqlite>=3.0.3",
+    "langchain-mcp-adapters>=0.3.0",
+    "aiosqlite>=0.22.1",
 ]
 
 [dependency-groups]

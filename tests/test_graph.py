@@ -18,11 +18,12 @@ Why mock the LLM but not the tool?
    confidence that the full stack is wired correctly.
 """
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.tools import tool
 from langgraph.graph import END
-from agent.graph import agent_graph
-from agent.graph import AgentState, should_continue
+from agent.graph import AgentState, build_graph, should_continue
 
 
 # ---------------------------------------------------------------------------
@@ -64,7 +65,8 @@ def test_should_continue_routes_to_end_when_no_tool_call():
 # 2. Full graph integration test — LLM mocked, everything else real
 # ---------------------------------------------------------------------------
 
-def test_graph_executes_react_loop(tmp_path):
+@pytest.mark.asyncio
+async def test_graph_executes_react_loop(tmp_path):
     """
     End-to-end test of the ReAct loop with a mocked LLM.
 
@@ -99,16 +101,13 @@ def test_graph_executes_react_loop(tmp_path):
     # Response 2: the LLM has seen the tool result and produces the final answer
     second_response = AIMessage(content="The secret word is mango.")
 
-    # Patch the llm object inside agent.graph.
-    # We patch where the name is *used* (agent.graph.llm), not where it's defined.
-    # Patching the class itself (ChatGoogleGenerativeAI) would miss the already-bound object.
-    with patch("agent.graph.llm") as mock_llm:
-        mock_llm.invoke.side_effect = [first_response, second_response]
+    # Patch ChatGoogleGenerativeAI so build_graph() gets a deterministic fake LLM.
+    with patch("agent.graph.ChatGoogleGenerativeAI") as MockLLMClass:
+        mock_bound_llm = MockLLMClass.return_value.bind_tools.return_value
+        mock_bound_llm.ainvoke = AsyncMock(side_effect=[first_response, second_response])
 
-        # if test fails, uncomment this and comment the import above
-        # from agent.graph import agent_graph
-
-        result = agent_graph.invoke(
+        graph = build_graph()
+        result = await graph.ainvoke(
             {"messages": [HumanMessage(content="What is the secret word?")]}
         )
 
@@ -126,3 +125,49 @@ def test_graph_executes_react_loop(tmp_path):
     tool_msg = messages[-2]
     assert isinstance(tool_msg, ToolMessage)
     assert "the secret word is mango" in tool_msg.content
+
+
+@pytest.mark.asyncio
+async def test_graph_records_structured_tool_errors():
+    """
+    When the tool node fails with an exception, the graph should both:
+      - return ToolMessages so the LLM message history remains valid
+      - preserve structured error details for developer/debug output
+    """
+
+    @tool("explode")
+    async def explode() -> str:
+        """Raise a deterministic exception for testing fallback behavior."""
+        raise RuntimeError("boom")
+
+    first_response = AIMessage(
+        content="",
+        tool_calls=[{
+            "id": "call_explode",
+            "name": "explode",
+            "args": {},
+        }]
+    )
+    second_response = AIMessage(content="The tool failed.")
+
+    with patch("agent.graph.ChatGoogleGenerativeAI") as MockLLMClass:
+        mock_bound_llm = MockLLMClass.return_value.bind_tools.return_value
+        mock_bound_llm.ainvoke = AsyncMock(side_effect=[first_response, second_response])
+
+        graph = build_graph(tools=[explode])
+        result = await graph.ainvoke(
+            {"messages": [HumanMessage(content="Trigger the failing tool.")]}
+        )
+
+    assert result["errors"] == [{
+        "node": "tools",
+        "tool": "explode",
+        "tool_call_id": "call_explode",
+        "args": {},
+        "exception_type": "RuntimeError",
+        "message": "boom",
+    }]
+
+    tool_msg = result["messages"][-2]
+    assert isinstance(tool_msg, ToolMessage)
+    assert "RuntimeError: boom" in tool_msg.content
