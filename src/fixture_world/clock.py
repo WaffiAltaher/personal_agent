@@ -13,11 +13,20 @@ import os
 from datetime import date, timedelta
 
 SEED_TODAY = date(2026, 10, 7)  # a Wednesday; seed files are written relative to this week
+TODAY_ENV = "FIXTURE_WORLD_TODAY"
 
 
 def today() -> date:
-    pinned = os.environ.get("FIXTURE_WORLD_TODAY")
+    pinned = os.environ.get(TODAY_ENV)
     return date.fromisoformat(pinned) if pinned else date.today()
+
+
+def pin_today() -> date:
+    """Pin the Fixture world's "today" for this process and the stand-ins it starts, and return it:
+    FIXTURE_WORLD_TODAY if set, else SEED_TODAY. A run against the Fixture world calls this
+    before loading tools and tells the model the same date, so there is one "today"."""
+    os.environ.setdefault(TODAY_ENV, SEED_TODAY.isoformat())
+    return today()
 
 
 def seed_shift(on: date | None = None) -> timedelta:

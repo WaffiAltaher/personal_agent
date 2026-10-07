@@ -13,7 +13,12 @@ version, scenario and eval-run id.
 
 The judge model grades the answers (RAGAS). It is --judge-model, else EVAL_JUDGE_MODEL, else
 the model under test itself: the command then says so, as the model grades its own answers.
---no-ragas skips the generation metrics (and the judge).
+--no-ragas skips the generation metrics (and the judge). --repeats N runs every scenario N
+times, so the results show the run-to-run variation.
+
+Compare two models from their results files (writes `compare-<run A>-vs-<run B>.md` to --out):
+
+    uv run python -m agent.evals compare data/evals/<run A>.json data/evals/<run B>.json
 """
 
 import argparse
@@ -28,6 +33,7 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 from agent.chat_model import MissingApiKeyError, create_chat_model
 from agent.config import settings
+from agent.evals.compare import ResultsError, write_comparison
 from agent.evals.generation import RagasScorer
 from agent.evals.harness import run_eval, write_results
 from agent.evals.scenarios import DEFAULT_DATASET, ScenarioError, load_dataset
@@ -47,7 +53,27 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
                         help="model grading the answers (RAGAS), as provider:model "
                              "(default: EVAL_JUDGE_MODEL from settings, else the model under test)")
     parser.add_argument("--no-ragas", action="store_true", help="skip the generation metrics and the judge")
+    parser.add_argument("--repeats", type=_positive_int, default=1,
+                        help="runs per scenario, to measure run-to-run variation (default: 1)")
     return parser.parse_args(argv)
+
+
+def _positive_int(text: str) -> int:
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, not {value}")
+    return value
+
+
+def _compare(argv: list[str]) -> None:
+    parser = argparse.ArgumentParser(prog="python -m agent.evals compare",
+                                     description="Compare two models from their eval results files.")
+    parser.add_argument("a", type=Path, help="results JSON of model A")
+    parser.add_argument("b", type=Path, help="results JSON of model B")
+    parser.add_argument("--out", type=Path, default=DEFAULT_OUT, help="directory for the comparison report")
+    args = parser.parse_args(argv)
+    path = write_comparison(args.a, args.b, args.out)
+    print(f"Comparison: {path}")
 
 
 def create_embeddings() -> Embeddings:
@@ -61,6 +87,8 @@ async def main(
     create_model: Callable[[str], BaseChatModel] = create_chat_model,
     create_embeddings: Callable[[], Embeddings] = create_embeddings,
 ) -> None:
+    if argv[:1] == ["compare"]:
+        return _compare(argv[1:])
     args = _parse_args(argv)
     dataset = load_dataset(args.dataset)
     model = create_model(args.model)  # fails fast on a missing API key, before any run
@@ -83,6 +111,7 @@ async def main(
             scorer=scorer,
             judge_model=judge_model,
             tracer=langfuse_trace,
+            repeats=args.repeats,
         )
     finally:
         flush_traces()
@@ -97,6 +126,6 @@ async def main(
 if __name__ == "__main__":
     try:
         asyncio.run(main(sys.argv[1:]))
-    except (MissingApiKeyError, ScenarioError) as exc:
+    except (MissingApiKeyError, ScenarioError, ResultsError) as exc:
         print(f"Cannot run evals: {exc}")
         sys.exit(1)

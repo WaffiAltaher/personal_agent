@@ -18,6 +18,9 @@ Why mock the LLM but not the tool?
    confidence that the full stack is wired correctly.
 """
 
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
+
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
@@ -164,3 +167,36 @@ async def test_graph_records_structured_tool_errors(scripted_model):
     tool_msg = result["messages"][-2]
     assert isinstance(tool_msg, ToolMessage)
     assert "RuntimeError: boom" in tool_msg.content
+
+
+# ---------------------------------------------------------------------------
+# 3. The date the model is told
+# ---------------------------------------------------------------------------
+
+def _system_prompt_reply(seen: list):
+    def reply(messages):
+        seen.append(messages[0].content)
+        return AIMessage(content="ok")
+    return reply
+
+
+@pytest.mark.asyncio
+async def test_a_pinned_today_is_the_date_in_the_models_runtime_context(scripted_model):
+    """A run against the Fixture world tells the model the Fixture world's date, not the real one."""
+    seen = []
+    graph = build_graph(model=scripted_model([_system_prompt_reply(seen)]), today=date(2026, 10, 7))
+
+    await graph.ainvoke({"messages": [HumanMessage(content="What day is it?")]})
+
+    [system] = seen
+    assert "Current date/time: 2026-10-07T09:00:00+02:00" in system
+
+
+@pytest.mark.asyncio
+async def test_without_a_pinned_today_the_model_is_told_the_real_date(scripted_model):
+    seen = []
+    graph = build_graph(model=scripted_model([_system_prompt_reply(seen)]))
+
+    await graph.ainvoke({"messages": [HumanMessage(content="What day is it?")]})
+
+    assert f"Current date/time: {datetime.now(ZoneInfo('Europe/Amsterdam')).date().isoformat()}" in seen[0]

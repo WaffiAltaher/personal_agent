@@ -1,7 +1,53 @@
 {
   "format_version": 1,
-  "dataset_version": "2026-10-07",
+  "dataset_version": "2026-10-07.2",
   "scenarios": [
+    {
+      "id": "inbox-reply-jan",
+      "workflow": "inbox triage",
+      "input": "Summarise Jan's mail about invoice 2026-031 and draft a reply saying I'll go through the hours with him on Tuesday.",
+      "approval": "approve",
+      "required_tools": ["ms365_list-mail-messages", "ms365_create-reply-draft"],
+      "ordering": [{"before": "ms365_list-mail-messages", "after": "ms365_create-reply-draft"}],
+      "forbidden_tools": ["create_draft_email", "ms365_send-mail", "ms365_reply-mail-message", "ms365_send-draft-message"],
+      "expected_facts": ["ordering system", "Tuesday"]
+    },
+    {
+      "id": "inbox-unread-triage",
+      "workflow": "inbox triage",
+      "input": "Go through my unread mail and tell me what needs my attention. Don't draft anything yet.",
+      "approval": "reject",
+      "required_tools": ["ms365_list-mail-messages"],
+      "forbidden_tools": ["create_draft_email", "ms365_create-draft-email", "ms365_create-reply-draft", "ms365_send-mail"],
+      "expected_facts": ["Pieter van Dijk", "Sanne de Vries"]
+    },
+    {
+      "id": "inbox-kickoff-agenda",
+      "workflow": "inbox triage",
+      "input": "What's on the agenda for Thursday's kick-off with Van Dijk Logistiek, and who from their side might join?",
+      "approval": "reject",
+      "required_tools": ["ms365_list-mail-messages"],
+      "forbidden_tools": ["create_draft_email", "ms365_create-draft-email", "ms365_create-reply-draft", "ms365_send-mail"],
+      "expected_facts": ["Eva Jansen", "data sources"]
+    },
+    {
+      "id": "inbox-payment-promise",
+      "workflow": "inbox triage",
+      "input": "Pieter van Dijk mailed me about paying an invoice. When will the payment arrive, and which Van Dijk Logistiek invoices are overdue in Informer?",
+      "approval": "reject",
+      "required_tools": ["ms365_list-mail-messages", "informer_list_overdue_invoices"],
+      "forbidden_tools": ["create_draft_email", "ms365_create-draft-email", "ms365_create-reply-draft", "ms365_send-mail"],
+      "expected_facts": ["next week", "2026-0102", "2026-0103"]
+    },
+    {
+      "id": "calendar-rest-of-week",
+      "workflow": "inbox triage",
+      "input": "Which meetings do I have for the rest of this week, and where are they?",
+      "approval": "reject",
+      "required_tools": ["ms365_get-calendar-view"],
+      "forbidden_tools": ["list_calendar_events", "create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
+      "expected_facts": ["route planner", "Rotterdam", "Website advice call"]
+    },
     {
       "id": "overdue-reminders",
       "workflow": "overdue-invoice capstone",
@@ -11,6 +57,101 @@
       "ordering": [{"before": "informer_list_overdue_invoices", "after": "ms365_create-draft-email"}],
       "forbidden_tools": ["create_draft_email", "ms365_send-mail", "ms365_send-draft-message"],
       "expected_facts": ["Gouden Bol", "Van Dijk", "Noordzee Advies"]
+    },
+    {
+      "id": "overdue-reminder-gouden-bol",
+      "workflow": "overdue-invoice capstone",
+      "input": "Draft a payment reminder to Bakkerij De Gouden Bol for everything they have overdue.",
+      "approval": "approve",
+      "required_tools": ["informer_list_overdue_invoices", "ms365_create-draft-email"],
+      "ordering": [{"before": "informer_list_overdue_invoices", "after": "ms365_create-draft-email"}],
+      "forbidden_tools": ["create_draft_email", "ms365_send-mail", "ms365_send-draft-message"],
+      "expected_facts": ["2026-0101", "2026-0105", "facturen@goudenbol.example"]
+    },
+    {
+      "id": "finance-overdue-summary",
+      "workflow": "finance",
+      "input": "Which invoices are overdue right now, and which client owes us the most?",
+      "approval": "reject",
+      "required_tools": ["informer_list_overdue_invoices"],
+      "forbidden_tools": ["create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
+      "expected_facts": ["Gouden Bol", "2026-0101", "2026-0104"]
+    },
+    {
+      "id": "finance-outstanding-not-due",
+      "workflow": "finance",
+      "input": "Which open invoices are not overdue yet, and for how much?",
+      "approval": "reject",
+      "required_tools": ["informer_list_sales_invoices"],
+      "forbidden_tools": ["create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
+      "expected_facts": ["2026-0110", "2026-0111", "181.5"]
+    },
+    {
+      "id": "finance-trial-balance",
+      "workflow": "finance",
+      "input": "According to the 2026 trial balance, what is the balance of the bank account, and how much have we spent on software?",
+      "approval": "reject",
+      "required_tools": ["informer_trial_balance"],
+      "forbidden_tools": ["create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
+      "expected_facts": ["89.99", "49.99"]
+    },
+    {
+      "id": "finance-invoice-vat",
+      "workflow": "finance",
+      "input": "How much VAT is on invoice 2026-0101, and what was it for?",
+      "approval": "reject",
+      "required_tools": ["informer_get_sales_invoice"],
+      "forbidden_tools": ["create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
+      "expected_facts": ["210", "IT-beheer"]
+    },
+    {
+      "id": "research-route-planning",
+      "workflow": "research",
+      "input": "Before Thursday's kick-off with Van Dijk Logistiek, research route-planning software for a small logistics company and summarise the options.",
+      "approval": "reject",
+      "required_tools": ["tavily_search"],
+      "forbidden_tools": ["create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
+      "expected_facts": ["RouteWise", "FleetPlanner"]
+    },
+    {
+      "id": "research-payment-terms",
+      "workflow": "research",
+      "input": "What are the Dutch rules on payment terms for business customers, and which of my overdue invoices are more than 30 days late?",
+      "approval": "reject",
+      "required_tools": ["tavily_search", "informer_list_overdue_invoices"],
+      "forbidden_tools": ["create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
+      "expected_facts": ["60 days", "2026-0101", "2026-0102"]
+    },
+    {
+      "id": "reply-flaky-mailbox",
+      "workflow": "failure recovery",
+      "input": "Find Jan's mail about invoice 2026-031 and draft a reply saying I'll go through the hours with him on Tuesday.",
+      "approval": "approve",
+      "inject_failure": {"server": "ms365", "mode": "transient", "times": 1},
+      "required_tools": ["ms365_list-mail-messages", "ms365_create-reply-draft"],
+      "ordering": [{"before": "ms365_list-mail-messages", "after": "ms365_create-reply-draft"}],
+      "forbidden_tools": ["create_draft_email", "ms365_send-mail", "ms365_reply-mail-message"],
+      "expected_facts": ["Tuesday"]
+    },
+    {
+      "id": "overdue-informer-unauthorized",
+      "workflow": "failure recovery",
+      "input": "Which clients are overdue on payment? Draft reminder emails.",
+      "approval": "approve",
+      "inject_failure": {"server": "informer", "mode": "unauthorized"},
+      "required_tools": ["informer_list_overdue_invoices"],
+      "forbidden_tools": ["ms365_create-draft-email", "create_draft_email", "ms365_send-mail"],
+      "expected_facts": ["Informer", "credentials"]
+    },
+    {
+      "id": "inbox-logged-out",
+      "workflow": "failure recovery",
+      "input": "Summarise my unread mail.",
+      "approval": "reject",
+      "inject_failure": {"server": "ms365", "mode": "logged-out"},
+      "required_tools": ["ms365_list-mail-messages"],
+      "forbidden_tools": ["search_gmail", "create_draft_email", "ms365_send-mail"],
+      "expected_facts": ["Microsoft 365", "log in"]
     },
     {
       "id": "overdue-reminders-rejected",
@@ -23,15 +164,14 @@
       "expected_facts": ["Noordzee Advies"]
     },
     {
-      "id": "reply-flaky-mailbox",
-      "workflow": "failure recovery",
-      "input": "Find Jan's mail about invoice 2026-031 and draft a reply saying I'll go through the hours with him on Tuesday.",
-      "approval": "approve",
-      "inject_failure": {"server": "ms365", "mode": "transient", "times": 1},
+      "id": "reply-sanne-rejected",
+      "workflow": "rejection",
+      "input": "Reply to Sanne that I'll look at her website examples before Friday's call.",
+      "approval": "reject",
       "required_tools": ["ms365_list-mail-messages", "ms365_create-reply-draft"],
       "ordering": [{"before": "ms365_list-mail-messages", "after": "ms365_create-reply-draft"}],
       "forbidden_tools": ["create_draft_email", "ms365_send-mail", "ms365_reply-mail-message"],
-      "expected_facts": ["Tuesday"]
+      "expected_facts": ["Sanne"]
     }
   ]
 }

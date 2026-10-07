@@ -1,15 +1,16 @@
 # src/agent/evals/harness.py
 """Runs scenarios through the agent graph against the Fixture world and scores them.
 
-Each scenario run gets a fresh Fixture world: the clock pinned to the seeded week, its own
-Drafts file, and the scenario's injected failure. The tools are loaded as `--fixtures` loads
-them, the chat model is injected into the graph, and every approval prompt is answered with
-the scenario's approval policy by resuming with `Command(resume=...)`, as the CLI does with
-the owner's answer.
+Each scenario run gets a fresh Fixture world: the clock pinned to the seeded date (which the
+model is told as "today" too), its own Drafts file, and the scenario's injected failure. The
+tools are loaded as `--fixtures` loads them, the chat model is injected into the graph, and
+every approval prompt is answered with the scenario's approval policy by resuming with
+`Command(resume=...)`, as the CLI does with the owner's answer.
 
 Only tools that stay inside the Fixture world are bound: the Fixture world's MCP tools plus
-the local tools in EVAL_LOCAL_TOOLS. The other local tools reach the owner's real Gmail,
-Google Calendar, memory store or files, and an auto-approved Write action there would be real.
+the local tools in EVAL_LOCAL_TOOLS (the seeded web search). The other local tools reach the
+owner's real Gmail, Google Calendar, memory store or files, and an auto-approved Write action
+there would be real.
 """
 
 import os
@@ -39,13 +40,15 @@ from agent.evals.trajectory import score_facts, score_trajectory, summarise
 from agent.graph import build_graph
 from agent.tracing import TraceAttributes
 from agent.tools import LOCAL_TOOLS, load_all_tools
+from agent.tools.web import web_search
 from fixture_world import clock, informer as fixture_informer, ms365 as fixture_ms365
 
 # One tool round is 4 super-steps, so 40 caps a run at ~10 tool rounds (as in the CLI).
 RECURSION_LIMIT = 40
 
-# Local tools that touch nothing real: safe to bind in an eval.
-EVAL_LOCAL_TOOLS = frozenset({"web_search"})
+# Local tools that touch nothing real in Fixture-world mode: safe to bind in an eval. (The web
+# search is the Fixture world's seeded one there, under the real tool's name.)
+EVAL_LOCAL_TOOLS = frozenset({web_search.name})
 
 ModelFactory = Callable[[Scenario], BaseChatModel]
 ToolLoader = Callable[[], Awaitable[tuple[list[BaseTool], list[str]]]]
@@ -157,7 +160,7 @@ async def run_scenario(
         drafts_path = Path(workdir) / "drafts.jsonl"
         switch = fixture_ms365.FailureSwitch(Path(workdir) / "ms365-failure")
         env = {
-            "FIXTURE_WORLD_TODAY": clock.SEED_TODAY.isoformat(),
+            clock.TODAY_ENV: clock.SEED_TODAY.isoformat(),
             fixture_ms365.DRAFTS_ENV: str(drafts_path),
             fixture_ms365.DRAFT_FAILURE_ENV: None,
             fixture_ms365.FAILURE_ENV: None,
@@ -170,7 +173,7 @@ async def run_scenario(
             if failure and failure.server == "ms365":
                 switch.set(failure.mode, failure.times)  # after loading: it hits the run, not startup
 
-            graph = build_graph(checkpointer=InMemorySaver(), tools=tools, model=model)
+            graph = build_graph(checkpointer=InMemorySaver(), tools=tools, model=model, today=clock.today())
             trace = trace_attributes(scenario, model_name=model_name, eval_run_id=eval_run_id, repeat=repeat)
             usage = UsageMetadataCallbackHandler()
             interrupts: list[InterruptRecord] = []
@@ -238,16 +241,22 @@ async def run_eval(
     scorer: GenerationScorer | None = None,
     judge_model: str | None = None,
     tracer: Tracer | None = None,
+    repeats: int = 1,
 ) -> EvalResults:
-    """Run every selected scenario once with a fresh model from `model_factory`, and summarise.
+    """Run every selected scenario `repeats` times, each run with a fresh model from
+    `model_factory` and a fresh Fixture world, and summarise over all runs (a run records
+    its repeat, 0-based, so the variation per scenario can be read from the results).
     `scorer` adds generation metrics, graded by `judge_model` (recorded in the results);
     `tracer` traces each run, tagged with the model, prompt version, scenario and eval run."""
+    if repeats < 1:
+        raise ValueError(f"repeats must be at least 1, not {repeats}")
     started = datetime.now(timezone.utc)
     eval_run_id = f"{started:%Y%m%dT%H%M%SZ}-{uuid.uuid4().hex[:6]}"
     runs = [
         await run_scenario(scenario, model=model_factory(scenario), model_name=model_name, load_tools=load_tools,
-                           scorer=scorer, tracer=tracer, eval_run_id=eval_run_id)
+                           repeat=repeat, scorer=scorer, tracer=tracer, eval_run_id=eval_run_id)
         for scenario in dataset.select(scenario_filter)
+        for repeat in range(repeats)
     ]
     return EvalResults(
         eval_run_id=eval_run_id,
@@ -258,6 +267,7 @@ async def run_eval(
         dataset_path=str(dataset_path),
         dataset_version=dataset.dataset_version,
         scenario_filter=scenario_filter,
+        repeats=repeats,
         runs=runs,
         summary=summarise(runs).model_copy(update={**efficiency_totals(runs), **generation_means(runs)}),
     )

@@ -6,6 +6,11 @@ results JSON file."""
 from agent.evals.records import EvalResults, RunResult
 
 
+def _label(results: EvalResults, run: RunResult) -> str:
+    """The scenario id, with the repeat (1-based) when scenarios ran more than once."""
+    return run.scenario_id if results.repeats == 1 else f"{run.scenario_id} #{run.repeat + 1}"
+
+
 def _pct(value: float | None) -> str:
     return "n/a" if value is None else f"{value:.0%}"
 
@@ -43,9 +48,9 @@ def _generation_lines(results: EvalResults) -> list[str]:
     for run in results.runs:
         g = run.generation
         if g is None:
-            lines.append(f"| {run.scenario_id} | n/a | n/a | n/a | n/a | n/a |")
+            lines.append(f"| {_label(results, run)} | n/a | n/a | n/a | n/a | n/a |")
         else:
-            lines.append(f"| {run.scenario_id} | {_score(g.faithfulness)} | {_score(g.answer_relevancy)} "
+            lines.append(f"| {_label(results, run)} | {_score(g.faithfulness)} | {_score(g.answer_relevancy)} "
                          f"| {_score(g.context_precision)} | {_score(g.context_recall)} | {g.contexts} |")
     return lines
 
@@ -79,9 +84,9 @@ def _efficiency_lines(results: EvalResults) -> list[str]:
     for run in results.runs:
         e = run.efficiency
         if e is None:
-            lines.append(f"| {run.scenario_id} | n/a | n/a | n/a | n/a |")
+            lines.append(f"| {_label(results, run)} | n/a | n/a | n/a | n/a |")
         else:
-            lines.append(f"| {run.scenario_id} | {e.input_tokens} | {e.output_tokens} | {_usd(e.cost_usd)} "
+            lines.append(f"| {_label(results, run)} | {e.input_tokens} | {e.output_tokens} | {_usd(e.cost_usd)} "
                          f"| {_seconds(e.latency_s)} |")
     return lines
 
@@ -116,6 +121,7 @@ def render_report(results: EvalResults) -> str:
         f"- Prompt version: `{results.prompt_version}`",
         f"- Dataset: `{results.dataset_path}` (version {results.dataset_version})"
         + (f", scenarios matching `{results.scenario_filter}`" if results.scenario_filter else ""),
+        f"- Repeats: {results.repeats} per scenario",
         f"- Started: {results.started_at}",
         "",
         "## Trajectory summary",
@@ -140,7 +146,7 @@ def render_report(results: EvalResults) -> str:
         facts = len(run.answer_facts.found), len(run.answer_facts.found) + len(run.answer_facts.missing)
         tools = " → ".join(f"{c.name}" + ("" if c.status == "success" else f" ({c.status})") for c in run.tool_calls)
         lines.append(
-            f"| {run.scenario_id} | {'PASS' if t.passed else 'FAIL'} | {t.precision:.2f} | {t.recall:.2f} "
+            f"| {_label(results, run)} | {'PASS' if t.passed else 'FAIL'} | {t.precision:.2f} | {t.recall:.2f} "
             f"| {'met' if t.ordering_met else 'not met'} | {', '.join(t.forbidden_violations) or 'none'} "
             f"| {'n/a' if t.recovered is None else ('yes' if t.recovered else 'no')} "
             f"| {facts[0]}/{facts[1]} | {tools or '—'} |"
@@ -153,5 +159,5 @@ def render_report(results: EvalResults) -> str:
     if failing:
         lines += ["", "## Failures", ""]
         for run in failing:
-            lines.append(f"- **{run.scenario_id}**: {'; '.join(failure_reasons(run))}")
+            lines.append(f"- **{_label(results, run)}**: {'; '.join(failure_reasons(run))}")
     return "\n".join(lines) + "\n"
