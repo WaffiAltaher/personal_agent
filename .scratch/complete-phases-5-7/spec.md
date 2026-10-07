@@ -14,7 +14,7 @@ The owner wants to run ITtopia with this agent every day: triage the inbox, chas
 
 ## Solution
 
-Finish the agent so it runs the four ITtopia workflows in the master plan, with ITtopia as its only business data source:
+Finish the agent so it runs the four ITtopia workflows in the master plan. Microsoft 365 and Informer are the business data sources. Gmail and Google Calendar remain available but are not used for ITtopia work:
 
 1. **Inbox triage:** summarise mail on a topic and propose Drafts as replies.
 2. **Overdue-invoice reminders (the capstone):** find Overdue invoices in Informer and draft one Payment reminder per Client in Outlook.
@@ -29,7 +29,7 @@ An eval harness scores the agent on two levels:
 
 It compares Gemini 3.8 Flash with Claude Sonnet 5.5 on quality, cost and latency.
 
-Each phase ends with a predict-then-run notebook and draft answers to its Learning checkpoint.
+Learning materials (notebooks, checkpoint answers) are written by the owner after the build, not by this spec.
 
 ## User Stories
 
@@ -41,11 +41,11 @@ Each phase ends with a predict-then-run notebook and draft answers to its Learni
 4. As the owner, I want the MS365 MCP server pinned to a current exact version, so that upgrades are deliberate and reviewed (ADR-005).
 5. As a maintainer, I want the Python MCP SDK held on the 1.x line, so that it stays compatible with `langchain-mcp-adapters`.
 
-### Retire Google sources
+### Google sources (kept)
 
-6. As the owner, I want the Gmail and Google Calendar tools, the Google OAuth code and their settings removed, so that the agent only touches ITtopia data (ADR-004).
-7. As the owner, I want the agent's system prompt and the docs to stop mentioning Gmail and Google Calendar, so that the model never tries to call tools that no longer exist.
-8. As a maintainer, I want the Google client dependencies removed while the Gemini LLM dependency stays, so that the dependency footprint is honest.
+6. As the owner, I want Gmail's draft tool treated as a Write action like any other, so that approval covers it too.
+7. As the owner, I want the agent to use MS365, not Gmail, for ITtopia work, so that ITtopia business stays in the ITtopia mailbox.
+8. *(Retiring Gmail and Google Calendar is out of scope.)*
 
 ### Microsoft 365 via MCP (Phase 5)
 
@@ -128,11 +128,11 @@ Each phase ends with a predict-then-run notebook and draft answers to its Learni
 57. As the learner, I want a markdown comparison report (Gemini 3.8 Flash vs Claude Sonnet 5.5) generated from the results, so that I can justify a model choice with data.
 58. As the learner, I want the raw results saved as JSON next to the report, so that I can re-analyse them later.
 
-### Learning materials and docs
+### Docs
 
-59. As the learner, I want a predict-then-run notebook for each of Phases 5, 6 and 7, built on the Fixture world, so that I learn by predicting behaviour and then running it.
-60. As the learner, I want draft answers to each phase's Learning checkpoint that point at real code and traces, so that I can prepare for interviews.
-61. As the owner, I want the master plan checkboxes, CLAUDE.md and the ADR log updated as phases complete, so that the docs match the code.
+59. As the owner, I want each new architectural decision appended to the ADR log by the ticket that makes it, so that the "why" is recorded next to the change.
+60. *(Learning notebooks and checkpoint answers are out of scope; the owner writes them.)*
+61. *(Master plan and CLAUDE.md updates are out of scope; the owner makes them.)*
 62. As the owner, I want a read-only live smoke check I can run after setting up credentials, so that I can confirm the real MS365 and Informer connections work.
 63. As the owner, I want a single interactive setup wizard that walks me through every manual step, so that preparing keys and logins is one sitting.
 
@@ -229,24 +229,21 @@ Each phase ends with a predict-then-run notebook and draft answers to its Learni
 - It writes a results JSON file and a markdown comparison report.
 - The Claude model under comparison is Claude Sonnet 5.5 (`claude-sonnet-5-5`).
 
-### Removals
-- Gmail and Google Calendar tools, Google OAuth, Google client settings, and their tests and docs.
-- `langchain-google-genai` stays.
+### Google sources
+- Gmail and Google Calendar tools stay.
+- Under the fail-closed classification, Gmail's draft tool is a Write action, and its read tools and the Calendar read tools are read.
+- The new system prompt tells the agent to use MS365 for ITtopia work.
 
-### Docs and learning materials
-- Notebooks for Phases 5, 6 and 7, using predict-then-run cells against the Fixture world.
-- Draft Learning-checkpoint answers for each phase, kept under `learning/`.
-- Master plan checkboxes updated.
-- CLAUDE.md updated (model, data sources, roadmap position).
-- New ADRs appended to the ADR log for:
+### Docs
+- New ADRs are appended to the ADR log by the ticket that makes each decision:
   - the fail-closed Write-action classification
   - the Fixture world
   - the model change
   - the `Mail.ReadWrite` scope amendment
-- Write-ups 3.4 and 4.4 stay with the owner (see Out of Scope).
+- Notebooks, checkpoint answers, master plan and CLAUDE.md updates are left to the owner.
 
 ### Manual setup and live check
-- An interactive setup wizard script, generated with the `/wizard` skill, walks the owner through every manual step:
+- The owner's one manual ticket is an interactive setup wizard, generated with the `/wizard` skill and run by the owner, that walks through every manual step:
   - creating the Informer API key and finding the security code
   - getting an Anthropic API key
   - granting the Azure app `Mail.ReadWrite` and checking it with `--list-permissions`
@@ -284,6 +281,8 @@ Each phase ends with a predict-then-run notebook and draft answers to its Learni
 
 ## Out of Scope
 
+- Retiring Gmail and Google Calendar.
+- Learning materials: phase notebooks, Learning-checkpoint answers, master plan and CLAUDE.md updates.
 - Portfolio write-ups for 3.4 (context-pressure findings) and 4.4 (prompt-engineering findings). The owner writes these from their own understanding; the harness and traces supply the numbers.
 - Phase 8 (Streamlit/FastAPI UI) and Phase 9 (aisuite). Multi-model use is done through LangChain's own chat-model abstraction.
 - Sending mail, or any MS365 write other than the two draft tools.
@@ -303,4 +302,5 @@ Each phase ends with a predict-then-run notebook and draft answers to its Learni
   - MS365 server 0.159.1, with write tool names as listed above.
   - `mcp` 2.x is incompatible with `langchain-mcp-adapters` 0.3.x.
   - `gemini-2.0-flash` was shut down on 2026-06-01.
+- **Automated run boundary.** Ticket 01 is the owner's manual setup (`ready-for-human`). An automated `/implement-spec` run implements every ticket not blocked by 01, which is tickets 02–15. It treats ticket 01, and tickets 16 and 17 that depend on it, as outside the run: it does not wait for them, and it reports them as pending. Run 16 and 17 after the owner completes 01.
 - The integration branch is `feat/complete-phases-5-7`. The workflow never merges to `main`; the owner reviews and merges.
