@@ -14,12 +14,20 @@ Only what the tools need is emulated: `$filter` understands comparisons (`eq`, `
 the item's text fields. Seeded dates move with the Fixture world clock (see clock.py).
 
 Run over stdio with `python -m fixture_world.ms365`.
+
+The server can be switched into a failure mode (down, logged out, tool error, transient
+error, crash) from outside its process; see "failure injection" below.
 """
 
+import functools
 import json
+import os
 import re
+import sys
 from datetime import datetime, timedelta, timezone
+from enum import StrEnum
 from importlib.resources import files
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from mcp.server.fastmcp import FastMCP
@@ -214,13 +222,110 @@ class Ms365World:
         self.contacts = load_seed("contacts")
 
 
+# --- failure injection -------------------------------------------------------------------
+#
+# The agent's MCP client starts a fresh stand-in process for every tool call (and one to
+# list the tools), so the failure mode lives outside the process and every process reads
+# it when it needs it. Two knobs, read in this order:
+#
+#   FIXTURE_WORLD_MS365_FAILURE_FILE=<path>  a file naming the mode: "<mode>" or "<mode> <times>".
+#       Re-read by every process, so it can be switched in the middle of a run. With <times>,
+#       the failure applies that many more times (the file counts down), then the server is
+#       healthy again. A missing or empty file means healthy. Write it with FailureSwitch.
+#   FIXTURE_WORLD_MS365_FAILURE=<mode>       a mode fixed for every process started with it,
+#       e.g. `FIXTURE_WORLD_MS365_FAILURE=logged-out python -m agent.cli --fixtures "..."`.
+#
+# Failures reproduce what the real @softeria/ms-365-mcp-server does: tool errors are its
+# `{"error": "<message>"}` text with isError, worded as it words them.
+
+FAILURE_ENV = "FIXTURE_WORLD_MS365_FAILURE"
+FAILURE_FILE_ENV = "FIXTURE_WORLD_MS365_FAILURE_FILE"
+
+
+class Failure(StrEnum):
+    DOWN = "down"  # the server exits before serving: it fails to start
+    LOGGED_OUT = "logged-out"  # no (or an expired) MS365 login: verify-login and Graph tools fail
+    TOOL_ERROR = "tool-error"  # Graph tools report a permanent Graph error (403) through MCP
+    TRANSIENT = "transient"  # Graph tools report a transient Graph error (503) through MCP
+    CRASH = "crash"  # the server process dies in the middle of a Graph tool call
+
+
+class FailureSwitch:
+    """Switches stand-in MS365 servers into a Failure mode from outside their processes.
+
+    Start the server with `env` in its environment (the agent's fixture loader passes the
+    current environment through), then `set` and `clear` the mode at any time.
+    """
+
+    def __init__(self, path: str | Path):
+        self.path = Path(path)
+
+    @property
+    def env(self) -> dict[str, str]:
+        return {FAILURE_FILE_ENV: str(self.path)}
+
+    def set(self, mode: Failure | str, times: int | None = None) -> None:
+        """Fail in `mode` from now on, or only the next `times` times it would apply."""
+        mode = Failure(mode)
+        self.path.write_text(mode if times is None else f"{mode} {times}")
+
+    def clear(self) -> None:
+        self.path.unlink(missing_ok=True)
+
+
+def take_failure(*modes: Failure) -> Failure | None:
+    """The switched-on failure if it is one of `modes`; counts one use of a limited failure."""
+    path = os.environ.get(FAILURE_FILE_ENV)
+    spec = Path(path).read_text().split() if path and Path(path).exists() else []
+    if not spec:
+        fixed = os.environ.get(FAILURE_ENV)
+        return Failure(fixed) if fixed and Failure(fixed) in modes else None
+    failure = Failure(spec[0])
+    if failure not in modes:
+        return None
+    if len(spec) > 1:  # limited: count this use down
+        remaining = int(spec[1]) - 1
+        Path(path).write_text(f"{failure} {remaining}" if remaining > 0 else "")
+    return failure
+
+
+def _server_error(message: str) -> CallToolResult:
+    """A tool error as the real server reports it."""
+    return CallToolResult(content=[TextContent(type="text", text=json.dumps({"error": message}))], isError=True)
+
+
+NO_TOKEN = "No valid token found"  # the real server's error when nobody is logged in
+
+
+def _failing_as_switched(fn):
+    """Wrap a Graph tool so it fails as the switched-on Failure mode says."""
+
+    @functools.wraps(fn)
+    def tool(*args, **kwargs):
+        failure = take_failure(Failure.LOGGED_OUT, Failure.TOOL_ERROR, Failure.TRANSIENT, Failure.CRASH)
+        if failure is Failure.CRASH:
+            os._exit(1)  # die mid-call, without answering
+        if failure is Failure.LOGGED_OUT:
+            return _server_error(NO_TOKEN)
+        if failure is Failure.TOOL_ERROR:
+            return _server_error('Microsoft Graph API error: 403 Forbidden - {"error":{"code":"ErrorAccessDenied",'
+                                 '"message":"Access is denied. Check credentials and try again."}}')
+        if failure is Failure.TRANSIENT:
+            return _server_error('Microsoft Graph API error: 503 Service Unavailable - {"error":{"code":'
+                                 '"ServiceNotAvailable","message":"The service is temporarily unavailable."}}')
+        return fn(*args, **kwargs)
+
+    return tool
+
+
 def create_server(world: Ms365World | None = None) -> FastMCP:
     world = world or Ms365World()
     mcp = FastMCP("ms365-fixture-world", instructions="Stand-in for @softeria/ms-365-mcp-server (Fixture world).")
 
     def graph_tool(name: str, description: str, read_only: bool = True):
-        return mcp.tool(name=name, description=description,
-                        annotations=_graph_annotations(name, read_only), structured_output=False)
+        register = mcp.tool(name=name, description=description,
+                            annotations=_graph_annotations(name, read_only), structured_output=False)
+        return lambda fn: register(_failing_as_switched(fn))
 
     # --- calendar ---
 
@@ -292,6 +397,8 @@ def create_server(world: Ms365World | None = None) -> FastMCP:
 
     @account_tool("verify-login", "Check current Microsoft authentication status", read_only=True)
     def verify_login() -> str:
+        if take_failure(Failure.LOGGED_OUT):
+            return json.dumps({"success": False, "message": f"Login failed: {NO_TOKEN}"})
         return json.dumps({"success": True, "message": "Login successful", "userData": OWNER})
 
     @account_tool("list-accounts", "List all Microsoft accounts configured in this server.", read_only=True)
@@ -311,6 +418,8 @@ def create_server(world: Ms365World | None = None) -> FastMCP:
 
 def main() -> None:
     """Run the stand-in over stdio, as the real server runs under npx."""
+    if take_failure(Failure.DOWN):
+        sys.exit("ms365 stand-in: switched down (Failure.DOWN)")
     create_server().run("stdio")
 
 

@@ -9,7 +9,7 @@ import os
 import sys
 
 from agent.config import Settings, settings as default_settings
-from agent.tools.mcp_loader import McpServer
+from agent.tools.mcp_loader import LoginCheck, McpServer
 
 NAME = "ms365"
 
@@ -22,6 +22,26 @@ HIDDEN_TOOLS = frozenset({
     "verify-login",
     "list-accounts",
 })
+
+PACKAGE = "@softeria/ms-365-mcp-server@0.119.0"
+
+# A missing or expired login: checked at startup with verify-login, and recognised in
+# tool errors by the real server's wording (a token error, or Graph answering 401).
+LOGIN = LoginCheck(
+    service="Microsoft 365",
+    command=f"npx -y {PACKAGE} --login (with MS365_MCP_CLIENT_ID and MS365_MCP_TENANT_ID set)",
+    check_tool="verify-login",
+    error_patterns=(
+        r"No valid token found",
+        r"No access token available",
+        r"token may have expired",
+        r"Microsoft Graph API error: 401\b",
+    ),
+)
+
+# The real server reports Graph errors as tool errors worded
+# "Microsoft Graph API error: <status> <reason> - <body>"; 429 and 5xx are transient.
+TRANSIENT_ERRORS = (r"Microsoft Graph API error: (429|5\d\d)\b",)
 
 
 def ms365_server(settings: Settings = default_settings) -> McpServer:
@@ -38,7 +58,7 @@ def ms365_server(settings: Settings = default_settings) -> McpServer:
             "command": "npx",
             "args": [
                 "-y",
-                "@softeria/ms-365-mcp-server@0.119.0",
+                PACKAGE,
                 "--preset",
                 "outlook",
                 "--read-only",
@@ -51,6 +71,8 @@ def ms365_server(settings: Settings = default_settings) -> McpServer:
             },
         },
         hidden_tools=HIDDEN_TOOLS,
+        login=LOGIN,
+        transient_errors=TRANSIENT_ERRORS,
         # Fail-closed classification: the pinned server marks GET tools readOnlyHint,
         # so we trust that annotation; every other tool is a Write action.
         trust_read_only_hint=True,
@@ -69,5 +91,7 @@ def ms365_fixture_server() -> McpServer:
             "env": {**os.environ},
         },
         hidden_tools=HIDDEN_TOOLS,
+        login=LOGIN,
+        transient_errors=TRANSIENT_ERRORS,
         trust_read_only_hint=True,
     )
