@@ -150,35 +150,47 @@ class InformerClient:
         return response.json()
 
     async def get_pages(self, path: str, key: str, params: dict | None = None) -> "Paged":
-        """Read every page of a list endpoint, up to the `max_pages` cap."""
+        """Read every page of a list endpoint, up to the `max_pages` cap.
+
+        Informer numbers pages from 0 and sends `pagination.prev` / `pagination.next`
+        (the next page number, or null). It does not send a total. A page past the
+        end, including an empty first page, is HTTP 400 "No records found".
+        """
         params = {**(params or {}), "records": self._settings.page_size}
         items: list[dict] = []
-        page = total = 0
-        while page < self._settings.max_pages:
-            page += 1
-            data = await self.get(path, {**params, "page": page})
+        page: int | None = 0
+        pages_read = 0
+        while page is not None and pages_read < self._settings.max_pages:
+            try:
+                data = await self.get(path, {**params, "page": page})
+            except InformerError as exc:
+                if pages_read == 0 and "No records found" in str(exc):
+                    return Paged(items, truncated=False)
+                raise
             items += data[key]
-            total = data["pagination"]["total"]
-            if page >= data["pagination"]["pages"]:
-                return Paged(items, total, truncated=False)
-        return Paged(items, total, truncated=len(items) < total)
+            pages_read += 1
+            page = data["pagination"]["next"]
+        return Paged(items, truncated=page is not None)
 
 
 class Paged:
     """The records read from a list endpoint, and whether the page cap cut them short."""
 
-    def __init__(self, items: list[dict], total: int, truncated: bool):
+    def __init__(self, items: list[dict], truncated: bool):
         self.items = items
-        self.total = total
         self.truncated = truncated
 
     def notice(self, what: str) -> dict:
-        """`truncated`, plus a notice for the model when it is not seeing everything."""
+        """`truncated`, plus a notice for the model when it is not seeing everything.
+
+        Informer does not report how many rows remain, so the notice names only
+        how many were shown.
+        """
         if not self.truncated:
             return {"truncated": False}
         return {
             "truncated": True,
-            "notice": f"Truncated: showing the first {len(self.items)} of {self.total} {what} "
+            "notice": f"Truncated: showing the first {len(self.items)} {what} "
                       "(page cap reached). Narrow the query to see the rest.",
         }
 

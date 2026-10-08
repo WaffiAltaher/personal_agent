@@ -18,7 +18,7 @@ async def test_reads_every_page_of_sales_invoices(fake_informer, informer_settin
     assert [i["number"] for i in payload["invoices"]] == ALL_INVOICE_NUMBERS
     assert payload["truncated"] is False
     assert "notice" not in payload
-    assert [q["page"] for path, q in fake_informer.requests] == ["1", "2", "3", "4"]
+    assert [q["page"] for path, q in fake_informer.requests] == ["0", "1", "2", "3"]
 
 
 @pytest.mark.asyncio
@@ -30,7 +30,7 @@ async def test_page_cap_truncates_with_a_notice(fake_informer, informer_settings
 
     assert [i["number"] for i in payload["invoices"]] == ALL_INVOICE_NUMBERS[:6]
     assert payload["truncated"] is True
-    assert "6 of 10" in payload["notice"]
+    assert "first 6 sales invoices" in payload["notice"]
     assert len(fake_informer.requests) == 2
 
 
@@ -43,4 +43,4 @@ async def test_relations_are_paged_and_truncated_too(informer_settings, connect,
 
     assert [r["id"] for r in payload["relations"]] == [1001, 1002, 1003, 1004]
     assert payload["truncated"] is True
-    assert "4 of 5 relations" in payload["notice"]
+    assert "first 4 relations" in payload["notice"]

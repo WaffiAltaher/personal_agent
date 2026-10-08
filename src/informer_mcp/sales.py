@@ -109,20 +109,23 @@ RELATION_LOOKUP_CONCURRENCY = 4  # one-by-one Relation requests in flight at onc
 
 
 async def _relations_by_id(informer: InformerClient, settings: InformerSettings, ids: set[int]) -> dict[int, dict]:
-    """The raw Relations with these ids, in as few requests as Informer allows: the first page
-    of /relations, then whichever is cheaper for the rest, the remaining pages or one
+    """The raw Relations with these ids, in as few requests as Informer allows: page 0
+    of /relations, then further pages while more than one Relation is still missing
+    (`next` says another page exists; Informer does not say how many), otherwise one
     GET /relations/{id} each (a few at a time)."""
     if not ids:
         return {}
     params = {"records": settings.page_size}
-    first = await informer.get("/relations", {**params, "page": 1})
+    first = await informer.get("/relations", {**params, "page": 0})
     found = {r["id"]: r for r in first["relations"] if r["id"] in ids}
-    pages = first["pagination"]["pages"]
-    page = 1
-    while len(found) < len(ids) and page < pages and pages - page <= len(ids) - len(found):
-        page += 1
+    # Informer sends `next` (another page exists) and not how many pages remain.
+    # One more list page is cheaper than one GET per missing Relation only when
+    # more than one is still missing; a single missing Relation is one GET.
+    page = first["pagination"]["next"]
+    while len(found) < len(ids) and page is not None and len(ids) - len(found) > 1:
         data = await informer.get("/relations", {**params, "page": page})
         found |= {r["id"]: r for r in data["relations"] if r["id"] in ids}
+        page = data["pagination"]["next"]
 
     slots = asyncio.Semaphore(RELATION_LOOKUP_CONCURRENCY)
 

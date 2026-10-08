@@ -13,7 +13,6 @@ Every response carries Informer's quota headers (X-RateLimit-*, X-DailyLimit-*).
 """
 
 import json
-import math
 import re
 import threading
 import time
@@ -84,13 +83,20 @@ def _shift_invoice(invoice: dict, shift: timedelta) -> dict:
     return {**invoice, **{f: _shift_date(invoice.get(f), shift) for f in SALES_INVOICE_DATE_FIELDS if f in invoice}}
 
 
-def _paginate(items: list, query: dict) -> tuple[list, dict]:
-    page = int(query.get("page", 1))
+def _paginate(items: list, query: dict) -> tuple[list, dict] | None:
+    """One page, numbered from 0, with `prev`/`next` as Informer sends them.
+
+    None means this page is past the end: the real API then answers HTTP 400
+    "No records found" rather than an empty page. Omitting `page` is page 0.
+    """
     records = int(query.get("records", 20))
-    start = (page - 1) * records
-    pagination = {"page": page, "records": records, "total": len(items),
-                  "pages": math.ceil(len(items) / records)}
-    return items[start:start + records], pagination
+    page = int(query.get("page", 0))
+    start = page * records
+    if page < 0 or (start >= len(items) and not (page == 0 and len(items) == 0)):
+        return None
+    prev = None if page == 0 else page - 1
+    nxt = page + 1 if start + records < len(items) else None
+    return items[start:start + records], {"prev": prev, "next": nxt}
 
 
 def _dutch_amount(amount: Decimal) -> str:
@@ -191,7 +197,10 @@ class FakeInformerApi:
     def _list_relations(self, query: dict) -> tuple[int, dict]:
         search = query.get("search", "")
         found = [r for r in self.relations if not search or _matches(r, search)]
-        page, pagination = _paginate(found, query)
+        paged = _paginate(found, query)
+        if paged is None:
+            return 400, {"error": ["No records found"], "response_code": 400}
+        page, pagination = paged
         return 200, {"pagination": pagination, "relations": page}
 
     def _get_relation(self, query: dict, relation_id: str) -> tuple[int, dict]:
@@ -204,7 +213,10 @@ class FakeInformerApi:
         found = [i for i in self.sales_invoices if _in_filter(i, query.get("filter"))]
         if "relation_id" in query:
             found = [i for i in found if i["relation_id"] == int(query["relation_id"])]
-        page, pagination = _paginate(found, query)
+        paged = _paginate(found, query)
+        if paged is None:
+            return 400, {"error": ["No records found"], "response_code": 400}
+        page, pagination = paged
         return 200, {"pagination": pagination, "invoices": page}
 
     def _get_sales_invoice(self, query: dict, invoice_id: str) -> tuple[int, dict]:
