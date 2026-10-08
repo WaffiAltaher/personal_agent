@@ -46,19 +46,16 @@ def classify_mcp_tools(
     tools: Iterable[BaseTool],
     *,
     read_allowlist: Iterable[str] = (),
-    trust_read_only_hint: bool = False,
 ) -> list[BaseTool]:
     """
     Classify one MCP server's tools. Call it once per server in the MCP loader.
 
     A tool is read if its name (as bound, i.e. with any server prefix) is on
-    `read_allowlist`, or if `trust_read_only_hint` is set for this server and the
-    tool carries the MCP `readOnlyHint: true` annotation (langchain-mcp-adapters
-    copies annotations into the tool's metadata). Every other tool is a Write action.
+    `read_allowlist`. Every other tool is a Write action, whatever annotations
+    (e.g. `readOnlyHint`) the server sets about it.
     """
     allowlist = set(read_allowlist)
     classified = []
     for tool in tools:
-        hinted_read = trust_read_only_hint and (tool.metadata or {}).get("readOnlyHint") is True
-        classified.append(read_tool(tool) if tool.name in allowlist or hinted_read else write_action(tool))
+        classified.append(read_tool(tool) if tool.name in allowlist else write_action(tool))
     return classified

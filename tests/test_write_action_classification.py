@@ -118,31 +118,24 @@ def mcp_tool(name, annotations=None):
 
 
 @pytest.mark.asyncio
-async def test_mcp_tool_is_read_only_via_allowlist_or_trusted_read_only_annotation(start_run):
-    trusted = classify_mcp_tools(
+async def test_mcp_tool_is_read_only_via_allowlist_only_never_its_annotation(start_run):
+    classified = classify_mcp_tools(
         [
             mcp_tool("srv_list-mail", {"readOnlyHint": True}),
             mcp_tool("srv_create-draft", {"readOnlyHint": False, "destructiveHint": True}),
             mcp_tool("srv_no-annotations"),
+            mcp_tool("srv_claims-read-only", {"readOnlyHint": True}),
         ],
-        trust_read_only_hint=True,
-    )
-    untrusted = classify_mcp_tools(
-        [
-            mcp_tool("other_claims-read-only", {"readOnlyHint": True}),
-            mcp_tool("other_allowlisted"),
-        ],
-        read_allowlist={"other_allowlisted"},
+        read_allowlist={"srv_list-mail"},
     )
 
-    pauses = {t.name: await pauses_for_approval(start_run, t) for t in [*trusted, *untrusted]}
+    pauses = {t.name: await pauses_for_approval(start_run, t) for t in classified}
 
     assert pauses == {
         "srv_list-mail": False,
         "srv_create-draft": True,
         "srv_no-annotations": True,
-        "other_claims-read-only": True,
-        "other_allowlisted": False,
+        "srv_claims-read-only": True,
     }
 
 
