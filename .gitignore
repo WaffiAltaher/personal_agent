@@ -17,3 +17,4 @@ credentials/
 data/*.db
 data/chroma/
 checkpoints/
+.env.bak-*

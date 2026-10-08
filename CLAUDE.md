@@ -67,6 +67,7 @@ Approval **fails closed**: every bound tool is classified read or Write action (
 ## Development notes
 
 - Python 3.13, managed with `uv`
+- Live credentials setup (Gemini, Anthropic, Informer, Azure/MS365 login, Langfuse): run `./scripts/setup_wizard.sh`
 - No linter is configured yet (pylint/flake8 disabled in `.vscode/settings.json`)
 - Langfuse traces to `http://localhost:3000` by default — needs a local Langfuse instance running
 - Google credentials file must be manually downloaded from GCP console and placed at `credentials/google_credentials.json`
