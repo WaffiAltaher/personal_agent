@@ -13,6 +13,8 @@ merged, deduplicated and ranked.
 
 import json
 import logging
+from collections import OrderedDict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from langchain_core.language_models import BaseChatModel
@@ -46,17 +48,57 @@ def create_rewrite_model(settings: Settings = default_settings) -> BaseChatModel
     return create_chat_model(settings.memory_rewrite_model, settings=settings)
 
 
+# Without an injected model, the rewriting model is built once per model setting, and each
+# request's rewrite is remembered: both memory tools (and repeated calls) rewrite the same
+# request, and each rewrite is an LLM call. Failed rewrites are not remembered.
+REWRITE_CACHE_SIZE = 128
+_rewrite_models: dict[str, BaseChatModel] = {}
+_rewrites: OrderedDict[tuple[str, str], RewrittenQuery] = OrderedDict()
+
+
+def clear_rewrite_cache() -> None:
+    """Forget the built rewriting models and remembered rewrites."""
+    _rewrite_models.clear()
+    _rewrites.clear()
+
+
+def _cached_rewrite_model(spec: str) -> BaseChatModel:
+    if spec not in _rewrite_models:
+        _rewrite_models[spec] = create_rewrite_model()
+    return _rewrite_models[spec]
+
+
 def rewrite_query(request: str, model: BaseChatModel | None = None) -> RewrittenQuery:
     """
     Ask the rewriting model for a semantic query and keyword variants.
 
-    Without an injected model, the rewriting model is built from settings.
+    Without an injected model, the rewriting model is built from settings (once),
+    and the rewrite of each request is remembered.
     Never raises: if the model can't be built, the call fails or its reply
     can't be parsed, the literal request is returned as the query, so memory
     search still works.
     """
+    if model is not None:
+        return _rewrite(request, lambda: model) or RewrittenQuery(semantic_query=request)
+
+    spec = default_settings.memory_rewrite_model or default_settings.model_name
+    key = (spec, request)
+    if key in _rewrites:
+        _rewrites.move_to_end(key)
+        return _rewrites[key]
+    rewritten = _rewrite(request, lambda: _cached_rewrite_model(spec))
+    if rewritten is None:
+        return RewrittenQuery(semantic_query=request)
+    _rewrites[key] = rewritten
+    if len(_rewrites) > REWRITE_CACHE_SIZE:
+        _rewrites.popitem(last=False)
+    return rewritten
+
+
+def _rewrite(request: str, get_model: Callable[[], BaseChatModel]) -> RewrittenQuery | None:
+    """One rewriting model call; None (logged) if the model can't be built, fails or can't be parsed."""
     try:
-        model = model or create_rewrite_model()
+        model = get_model()
         reply = model.invoke([SystemMessage(content=REWRITE_PROMPT), HumanMessage(content=request)])
         text = reply.text.strip().removeprefix("```json").removeprefix("```").removesuffix("```")
         data = json.loads(text)
@@ -66,7 +108,7 @@ def rewrite_query(request: str, model: BaseChatModel | None = None) -> Rewritten
         )
     except Exception as exc:
         logger.warning("Memory query rewriting failed, using the literal query: %s", exc)
-        return RewrittenQuery(semantic_query=request)
+        return None
 
 
 def recall_runs(
