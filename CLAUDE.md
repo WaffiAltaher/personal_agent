@@ -8,8 +8,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Install dependencies
 uv sync
 
-# Run the agent
+# Run the agent (add --fixtures to run against the seeded Fixture world instead of real data)
 python -m agent.cli "<question>"
+
+# Run evals against the Fixture world; compare two result files
+python -m agent.evals --model <provider:model> --judge-model <provider:model> [--repeats N]
+python -m agent.evals compare a.json b.json
 
 # Run all tests
 pytest tests/
@@ -23,7 +27,7 @@ pytest tests/test_tools.py::test_read_file -v
 
 ## Architecture
 
-This is a personal data agent built on LangGraph with a ReAct (Reason + Act) loop. It connects to Gmail, Google Calendar, local files, and web search (Tavily), then reasons over them using Gemini 2.0 Flash.
+This is a personal data agent built on LangGraph with a ReAct (Reason + Act) loop. It connects to Microsoft 365 (Outlook mail/calendar/contacts, via the third-party `@softeria/ms-365-mcp-server`), Informer accounting (via the self-authored MCP server in `src/informer_mcp/`), Gmail, Google Calendar, local files, and web search (Tavily). The model is chosen by `MODEL_NAME` as `provider:model` (default `google_genai:gemini-3.8-flash`; `anthropic:` models also supported). Business vocabulary is in `GLOSSARY.md`.
 
 ### Core flow
 
@@ -33,17 +37,21 @@ CLI → graph.py (LangGraph) → agent_node (LLM) → human_review_node → tool
 
 **`src/agent/graph.py`** — the heart of the agent. Key pieces:
 - `AgentState`: a single `messages` list with `add_messages` reducer (appends, never overwrites)
-- `agent_node`: calls Gemini with full message history
-- `human_review_node`: gates write tools (draft email, calendar events) behind `interrupt()` — pauses the graph for user approval
+- `agent_node`: calls the chat model with full message history; `build_graph(checkpointer, tools, model)` accepts an injected model (tests and evals use this)
+- `human_review_node`: gates Write actions (any tool not classified read) behind `interrupt()` — pauses the graph for user approval
 - `tools_with_fallback`: wraps `ToolNode` with a fallback that injects error `ToolMessage`s on exhausted retries so the graph continues
-- `RetryPolicy`: exponential backoff (1s, 2s, 4s) on transient errors (ConnectionError, TimeoutError, 429, 5xx only)
+- `retry_tool_call` + `TOOL_RETRY_POLICY`: per-tool-call backoff (up to 3 attempts) on transient errors (ConnectionError, TimeoutError, 429, 5xx only); Write actions are never retried
 - `SqliteSaver` checkpoints to `checkpoints/hitl.db` keyed by `thread_id` — interrupted runs can resume
 
 **`src/agent/cli.py`** — entry point. Drives the HITL loop: invoke graph → detect `__interrupt__` → show approval prompt → `Command(resume=decision)` → repeat.
 
-**`src/agent/tools/`** — all tools return strings (success or `"Error: ..."` on failure, never raise). `ALL_TOOLS` in `__init__.py` is the registry passed to the graph.
+**`src/agent/tools/`** — local tools return strings (success or `"Error: ..."` on failure, never raise). `LOCAL_TOOLS` in `__init__.py` lists local tools, each wrapped in `read_tool(...)` or `write_action(...)` (`classification.py`). `load_all_tools(fixtures=...)` adds MCP tools from the servers in `mcp_servers()`, loaded by `mcp_loader.py` (prefixed `ms365_` / `informer_`, classified per server; a server that fails to start is skipped with a notice).
 
-**`src/agent/config.py`** — Pydantic Settings loading from `.env`. Required: `GOOGLE_API_KEY`, `TAVILY_API_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`.
+**`src/fixture_world/`** — seeded stand-ins (MS365 MCP server, fake Informer API, web search) used by tests, evals and `--fixtures`.
+
+**`src/agent/evals/`** — eval harness: scenarios over the Fixture world, trajectory metrics, RAGAS generation metrics, cost/latency, model-comparison reports.
+
+**`src/agent/config.py`** — Pydantic Settings loading from `.env`. Required: `GOOGLE_API_KEY`, `TAVILY_API_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`. Optional: `ANTHROPIC_API_KEY` (required for `anthropic:` models), `MS365_MCP_*`, `INFORMER_*`, `MEMORY_REWRITE_MODEL`, `EVAL_JUDGE_MODEL`.
 
 **`src/agent/auth/google.py`** — OAuth2 for Gmail/Calendar. First run opens browser; token saved to `credentials/token.json` and auto-refreshes.
 
@@ -54,7 +62,7 @@ CLI → graph.py (LangGraph) → agent_node (LLM) → human_review_node → tool
 
 ### Human-in-the-loop
 
-`TOOLS_REQUIRING_APPROVAL` set in `graph.py` controls which tools need approval. When the LLM calls one, `human_review_node` calls `interrupt()`. The CLI collects "approve"/"reject", resumes via `Command(resume=decision)`. On reject, a rejection `ToolMessage` is injected so the agent can acknowledge gracefully.
+Approval **fails closed**: every bound tool is classified read or Write action (`src/agent/tools/classification.py`, ADR-010). Local tools declare it with `read_tool(...)` / `write_action(...)`; MCP tools are read only if on their server's explicit read allowlist. Anything unclassified is a Write action. **A new tool that changes external data must be wrapped in `write_action(...)` — never `read_tool(...)`, or it would run without approval and be retried.** When the LLM calls a Write action, `human_review_node` calls `interrupt()`. The CLI collects "approve"/"reject", resumes via `Command(resume=decision)`. On reject, a rejection `ToolMessage` is injected so the agent can acknowledge gracefully.
 
 ## Development notes
 
@@ -63,7 +71,7 @@ CLI → graph.py (LangGraph) → agent_node (LLM) → human_review_node → tool
 - Langfuse traces to `http://localhost:3000` by default — needs a local Langfuse instance running
 - Google credentials file must be manually downloaded from GCP console and placed at `credentials/google_credentials.json`
 - The `credentials/` and `checkpoints/` directories are gitignored
-- Phase roadmap is in `docs/MASTER_PLAN.md` — currently completed through Phase 2 (HITL + checkpointing)
+- Phase roadmap is in `docs/MASTER_PLAN.md`. Phases 5–7 are implemented on `feat/complete-phases-5-7` (spec and tickets in `.scratch/complete-phases-5-7/`); live credentials setup (ticket 01) is still pending
 
 ## Agent skills
 
