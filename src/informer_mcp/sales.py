@@ -5,6 +5,7 @@ Vocabulary follows GLOSSARY.md: Client, Sales invoice, Due date, Open amount, Ov
 Money leaves the server as exact decimal strings in EUR, dates as ISO strings.
 """
 
+import asyncio
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
@@ -104,6 +105,35 @@ def _overdue(raw: dict, as_of: date) -> bool:
     return money(raw["totals"]["open"]) > 0 and due is not None and date.fromisoformat(due) < as_of
 
 
+RELATION_LOOKUP_CONCURRENCY = 4  # one-by-one Relation requests in flight at once (each under the rate limiter)
+
+
+async def _relations_by_id(informer: InformerClient, settings: InformerSettings, ids: set[int]) -> dict[int, dict]:
+    """The raw Relations with these ids, in as few requests as Informer allows: the first page
+    of /relations, then whichever is cheaper for the rest, the remaining pages or one
+    GET /relations/{id} each (a few at a time)."""
+    if not ids:
+        return {}
+    params = {"records": settings.page_size}
+    first = await informer.get("/relations", {**params, "page": 1})
+    found = {r["id"]: r for r in first["relations"] if r["id"] in ids}
+    pages = first["pagination"]["pages"]
+    page = 1
+    while len(found) < len(ids) and page < pages and pages - page <= len(ids) - len(found):
+        page += 1
+        data = await informer.get("/relations", {**params, "page": page})
+        found |= {r["id"]: r for r in data["relations"] if r["id"] in ids}
+
+    slots = asyncio.Semaphore(RELATION_LOOKUP_CONCURRENCY)
+
+    async def fetch(relation_id: int) -> tuple[int, dict]:
+        async with slots:
+            return relation_id, await informer.get(f"/relations/{relation_id}")
+
+    found |= dict(await asyncio.gather(*(fetch(i) for i in ids - found.keys())))
+    return found
+
+
 def register_sales_tools(mcp: FastMCP, informer: InformerClient, settings: InformerSettings,
                          read_only, describe_relation) -> None:
     @mcp.tool(annotations=read_only)
@@ -144,9 +174,10 @@ def register_sales_tools(mcp: FastMCP, informer: InformerClient, settings: Infor
             if _overdue(raw, as_of_date):
                 by_client.setdefault(raw["relation_id"], []).append(raw)
 
+        relations = await _relations_by_id(informer, settings, set(by_client))
         clients = []
         for relation_id, invoices in by_client.items():
-            relation = describe_relation(await informer.get(f"/relations/{relation_id}"))
+            relation = describe_relation(relations[relation_id])
             invoices.sort(key=lambda raw: raw["expiry_date"])
             clients.append({
                 "relation_id": relation_id,

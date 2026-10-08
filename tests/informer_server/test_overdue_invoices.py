@@ -107,6 +107,39 @@ async def test_nothing_overdue_reports_an_empty_list_and_zero_total(connect, cal
     assert (payload["clients"], payload["total_open_amount"]) == ([], "0.00")
 
 
+def _relation_requests(fake_informer) -> list[str]:
+    return [path for path, _ in fake_informer.requests if path.startswith("/v2/relations")]
+
+
+@pytest.mark.asyncio
+async def test_clients_are_looked_up_with_one_relations_page_not_one_request_each(fake_informer, connect, call_tool):
+    async with connect() as session:
+        _, payload = await call_tool(session, "list_overdue_invoices", as_of="2026-10-07")
+
+    assert len(payload["clients"]) == 3
+    assert _relation_requests(fake_informer) == ["/v2/relations"]  # all six Relations fit on one page
+    assert len(fake_informer.requests) == 2  # plus one page of open Sales invoices
+
+
+@pytest.mark.asyncio
+async def test_clients_beyond_the_first_relations_page_are_fetched_one_by_one_when_that_is_cheaper(
+        fake_informer, informer_settings, connect, call_tool):
+    async with connect() as session:
+        _, expected = await call_tool(session, "list_overdue_invoices", as_of="2026-10-07")
+    fake_informer.requests.clear()
+    settings = informer_settings.model_copy(update={"page_size": 2})  # 3 pages of Relations
+
+    async with connect(settings) as session:
+        _, payload = await call_tool(session, "list_overdue_invoices", as_of="2026-10-07")
+
+    assert payload == expected
+    relation_requests = _relation_requests(fake_informer)
+    # the first page of Relations, then only the Clients it lacked, each once
+    assert relation_requests[0] == "/v2/relations"
+    assert len(relation_requests) < 1 + 3
+    assert len(set(relation_requests)) == len(relation_requests)
+
+
 @pytest.mark.asyncio
 async def test_as_of_must_be_an_iso_date(connect, call_tool):
     async with connect() as session:
