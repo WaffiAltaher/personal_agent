@@ -12,9 +12,13 @@
 
 **Blocked by:** None (can start immediately). Best done after ticket 15 lands, so every new setting exists.
 
-**Status:** ready-for-human
+**Status:** resolved
 
-- [ ] Wizard generated and run to completion
-- [ ] `.env` holds working Informer, Anthropic and Gemini credentials and the expected MS365 username
-- [ ] MS365 login cached for the pinned server version; `Mail.ReadWrite` granted
-- [ ] Local Langfuse reachable
+- [x] Wizard generated and run to completion
+- [x] `.env` holds working Informer, Anthropic and Gemini credentials and the expected MS365 username
+- [x] MS365 login cached for the pinned server version; `Mail.ReadWrite` granted
+- [x] Local Langfuse reachable
+
+## Comments
+
+- 2026-10-08: Done by the owner with `scripts/setup_wizard.sh` (all 9 stages). Existing Langfuse keys kept (verified working against the local instance).
