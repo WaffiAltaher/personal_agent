@@ -52,7 +52,7 @@ class LoginCheck:
 
     service: str  # what the user logs in to, e.g. "Microsoft 365"
     command: str  # the login command shown to the user
-    check_tool: str  # server tool (unprefixed, may be hidden) called at startup: an error or {"success": false} ⇒ not logged in
+    check_tool: str  # server tool (unprefixed, need not be exposed) called at startup: an error or {"success": false} ⇒ not logged in
     error_patterns: tuple[str, ...] = ()  # regexes: a tool error matching one means the login is missing or expired
 
 
@@ -63,11 +63,9 @@ class McpServer:
     name: str  # also the tool-name prefix: "<name>_<tool>"
     connection: Connection | None  # None when the server isn't configured
     unavailable_reason: str = ""  # why connection is None, shown to the user
-    hidden_tools: frozenset[str] = frozenset()  # server tool names (unprefixed) never bound
     # When set, only these server tool names (unprefixed) are bound, whatever their annotations say.
     exposed_tools: frozenset[str] | None = None
     read_allowlist: frozenset[str] = frozenset()  # server tool names (unprefixed) classified read
-    trust_read_only_hint: bool = False  # classify tools annotated readOnlyHint as read
     login: LoginCheck | None = None  # checked at startup; None when the server needs no login
     transient_errors: tuple[str, ...] = ()  # regexes: a tool error matching one is transient (retryable)
 
@@ -142,12 +140,10 @@ async def _load_server(server: McpServer) -> list[BaseTool]:
         else:  # can't check; tool errors will still name the login command (LoginCheck.error_patterns)
             logger.warning("MCP server %s has no %s tool; login not checked at startup",
                            server.name, server.login.check_tool)
-    hidden = {f"{server.name}_{name}" for name in server.hidden_tools}
     exposed = None if server.exposed_tools is None else {f"{server.name}_{name}" for name in server.exposed_tools}
     return classify_mcp_tools(
-        [tool for tool in tools if tool.name not in hidden and (exposed is None or tool.name in exposed)],
+        [tool for tool in tools if exposed is None or tool.name in exposed],
         read_allowlist={f"{server.name}_{name}" for name in server.read_allowlist},
-        trust_read_only_hint=server.trust_read_only_hint,
     )
 
 

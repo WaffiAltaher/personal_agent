@@ -11,7 +11,7 @@ from langfuse import propagate_attributes
 from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 
-from agent.chat_model import MissingApiKeyError, create_chat_model
+from agent.chat_model import ModelConfigError, create_chat_model
 from agent.graph import build_graph, get_checkpointer, log_run_to_memory
 from agent.tracing import flush_traces, get_callback_handler, verify_connection
 from agent.config import settings
@@ -201,7 +201,9 @@ async def main():
     if debug:
         _display_debug_trace(result)
 
-    log_run_to_memory(result, user_input)
+    # A Fixture-world run is about seeded stand-in data, not the owner's: keep it out of real memory.
+    if not fixtures:
+        log_run_to_memory(result, user_input)
     flush_traces()
 
 
@@ -212,6 +214,6 @@ if __name__ == "__main__":
         print("Stopped: the agent hit its step limit (~10 tool rounds) without a final answer. "
               "Try a narrower question.")
         sys.exit(1)
-    except MissingApiKeyError as exc:
+    except ModelConfigError as exc:
         print(f"Cannot start: {exc}")
         sys.exit(1)

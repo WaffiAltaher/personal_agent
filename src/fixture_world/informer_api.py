@@ -17,6 +17,7 @@ import math
 import re
 import threading
 import time
+from datetime import date, timedelta
 from decimal import Decimal
 from enum import Enum
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -24,8 +25,12 @@ from importlib.resources import files
 from urllib.parse import parse_qs, urlsplit
 
 API_PREFIX = "/v2"
-# Seeded Sales invoices' Due dates are fixed, written for `fixture_world.clock.SEED_TODAY`: run the
+# Seeded Sales invoices' Due dates are written for `fixture_world.clock.SEED_TODAY`: run the
 # server with INFORMER_TODAY at that date for a stable set of Overdue invoices (2265.30 EUR).
+# A fake made with `shift` moves the invoices' dates by that much, so INFORMER_TODAY at
+# SEED_TODAY + shift sees the same Overdue invoices (see fixture_world.clock.seed_shift).
+SALES_INVOICE_DATE_FIELDS = ("invoice_date", "expiry_date", "payment_date", "last_reminder_date",
+                             "last_edit", "created_at")
 
 
 class Failure(Enum):
@@ -68,6 +73,17 @@ def _in_filter(invoice: dict, status: str | None) -> bool:
     return False  # collect, accruals, collection_fines, payment_plans: none seeded
 
 
+def _shift_date(value: str | None, shift: timedelta) -> str | None:
+    """Move an Informer date ("YYYY-mm-dd", optionally followed by a time) by `shift`."""
+    if not value or not shift:
+        return value
+    return (date.fromisoformat(value[:10]) + shift).isoformat() + value[10:]
+
+
+def _shift_invoice(invoice: dict, shift: timedelta) -> dict:
+    return {**invoice, **{f: _shift_date(invoice.get(f), shift) for f in SALES_INVOICE_DATE_FIELDS if f in invoice}}
+
+
 def _paginate(items: list, query: dict) -> tuple[list, dict]:
     page = int(query.get("page", 1))
     records = int(query.get("records", 20))
@@ -83,12 +99,13 @@ def _dutch_amount(amount: Decimal) -> str:
 
 
 class FakeInformerApi:
-    def __init__(self, api_key: str = "fixture-api-key", security_code: str = "fixture-security-code"):
+    def __init__(self, api_key: str = "fixture-api-key", security_code: str = "fixture-security-code",
+                 shift: timedelta = timedelta(0)):
         self.api_key = api_key
         self.security_code = security_code
         self.failure: Failure | None = None
         self.relations: list[dict] = load_seed("relations")
-        self.sales_invoices: list[dict] = load_seed("sales_invoices")
+        self.sales_invoices: list[dict] = [_shift_invoice(i, shift) for i in load_seed("sales_invoices")]
         self.requests: list[tuple[str, dict]] = []  # (path, query) of every request received
         self.fail_after = 0  # serve this many requests normally before `failure` applies
         self.clock = time.monotonic  # replaceable, so rate-limit tests need not wait

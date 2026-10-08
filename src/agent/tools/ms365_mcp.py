@@ -1,7 +1,7 @@
 # src/agent/tools/ms365_mcp.py
 """The MS365 MCP server: the real one (@softeria/ms-365-mcp-server) or its Fixture world stand-in.
 
-Both are loaded under the same name ("ms365"), with the same hidden tools and the same
+Both are loaded under the same name ("ms365"), with the same exposed tools and the same
 classification, so the agent sees the same tools against either.
 
 The model sees exactly EXPOSED_TOOLS: the read tools that `--read-only --preset outlook`
@@ -64,15 +64,10 @@ DRAFT_TOOLS = frozenset({"create-draft-email", "create-reply-draft"})
 
 EXPOSED_TOOLS = READ_TOOLS | DRAFT_TOOLS
 
-# Login and account management stay out of the model's reach.
-HIDDEN_TOOLS = frozenset({
-    "login",
-    "logout",
-    "remove-account",
-    "select-account",
-    "verify-login",
-    "list-accounts",
-})
+# Login and account management (login, logout, verify-login, list-/select-/remove-account)
+# are not in EXPOSED_TOOLS, so they stay out of the model's reach. The real server serves
+# them whatever --enabled-tools says (in stdio mode it registers its auth tools separately
+# from the filtered Graph tools), so the loader can still call verify-login at startup.
 
 # A missing or expired login: checked at startup with verify-login, and recognised in
 # tool errors by the real server's wording (a token error, or Graph answering 401).
@@ -97,7 +92,6 @@ TRANSIENT_ERRORS = (r"Microsoft Graph API error: (429|5\d\d)\b",)
 # stand-in. Reads are classified by name, not by readOnlyHint, so no annotation can turn a
 # Draft tool into an unapproved read.
 _TOOL_POLICY = dict(
-    hidden_tools=HIDDEN_TOOLS,
     exposed_tools=EXPOSED_TOOLS,
     read_allowlist=READ_TOOLS,
     login=LOGIN,

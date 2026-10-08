@@ -22,13 +22,15 @@ def fake_informer():
 
 
 @pytest.fixture
-def informer_settings(fake_informer) -> InformerSettings:
-    """Server settings pointing at the fake, with the credentials it accepts."""
+def informer_settings(fake_informer, tmp_path) -> InformerSettings:
+    """Server settings pointing at the fake, with the credentials it accepts, and a rate-limit
+    budget of this test's own."""
     return InformerSettings(
         _env_file=None,
         api_key=fake_informer.api_key,
         security_code=fake_informer.security_code,
         base_url=fake_informer.base_url,
+        rate_limit_dir=tmp_path / "rate-limits",
     )
 
 

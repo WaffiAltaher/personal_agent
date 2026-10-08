@@ -31,7 +31,7 @@ from langchain_core.embeddings import Embeddings
 from langchain_core.language_models import BaseChatModel
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
-from agent.chat_model import MissingApiKeyError, create_chat_model
+from agent.chat_model import ModelConfigError, create_chat_model
 from agent.config import settings
 from agent.evals.compare import ResultsError, write_comparison
 from agent.evals.generation import RagasScorer
@@ -126,6 +126,6 @@ async def main(
 if __name__ == "__main__":
     try:
         asyncio.run(main(sys.argv[1:]))
-    except (MissingApiKeyError, ScenarioError, ResultsError) as exc:
+    except (ModelConfigError, ScenarioError, ResultsError) as exc:
         print(f"Cannot run evals: {exc}")
         sys.exit(1)

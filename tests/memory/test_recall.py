@@ -8,6 +8,7 @@ The rewriter is a scripted fake chat model, the stores are temporary, and
 embeddings are a fake that only knows a few topics — no network, no credentials.
 """
 
+import itertools
 import json
 from unittest.mock import patch
 
@@ -181,7 +182,46 @@ def tool_memory(monkeypatch, episodic, semantic, scripted_model):
     monkeypatch.setattr(agent.memory, "_semantic", semantic)
     rewriter = scripted_model([rewriter_reply("overdue Informer invoices", ["Informer", "overdue"])])
     monkeypatch.setattr(agent.memory.recall, "create_rewrite_model", lambda: rewriter)
+    agent.memory.recall.clear_rewrite_cache()
     return episodic, semantic
+
+
+@pytest.fixture
+def counted_rewriter(monkeypatch, tool_memory, scripted_model):
+    """A rewriter that answers every call, counting the models built and the calls made."""
+    import agent.memory.recall
+
+    counts = {"built": 0, "calls": []}
+
+    def reply(messages):
+        counts["calls"].append(messages[-1].content)
+        return rewriter_reply("overdue Informer invoices", ["Informer", "overdue"])
+
+    def build():
+        counts["built"] += 1
+        return scripted_model(itertools.repeat(reply))
+
+    monkeypatch.setattr(agent.memory.recall, "create_rewrite_model", build)
+    return counts
+
+
+def test_both_memory_tools_share_one_rewrite_of_the_same_request(counted_rewriter):
+    from agent.tools.memory import retrieve_episodic_memory, retrieve_memory
+
+    retrieve_episodic_memory.invoke({"query": REQUEST})
+    retrieve_memory.invoke({"query": REQUEST})
+
+    assert counted_rewriter["calls"] == [REQUEST]
+
+
+def test_the_rewrite_model_is_built_once_for_many_requests(counted_rewriter):
+    from agent.tools.memory import retrieve_memory
+
+    retrieve_memory.invoke({"query": REQUEST})
+    retrieve_memory.invoke({"query": "unpaid invoices"})
+
+    assert counted_rewriter["built"] == 1
+    assert counted_rewriter["calls"] == [REQUEST, "unpaid invoices"]
 
 
 def test_retrieve_episodic_memory_tool_rewrites_the_request(tool_memory):
