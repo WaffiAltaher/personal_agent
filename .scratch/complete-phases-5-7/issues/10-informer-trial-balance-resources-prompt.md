@@ -7,7 +7,7 @@
 
 **Blocked by:** 08
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] The fake Informer API serves the administration, ledgers and the column-balance report
 - [x] Seam-B tests for discovering and reading both resources, the trial-balance tool, and rendering the Payment reminder prompt

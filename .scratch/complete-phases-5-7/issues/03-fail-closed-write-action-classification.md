@@ -4,7 +4,7 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] Local tools declare their classification explicitly
 - [x] MCP tools are read only if they are on an explicit read allowlist or carry a trusted read-only annotation; everything else is a Write action

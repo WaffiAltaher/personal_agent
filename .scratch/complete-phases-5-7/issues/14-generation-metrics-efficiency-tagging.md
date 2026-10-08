@@ -7,7 +7,7 @@
 
 **Blocked by:** 13
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] RAGAS integrated with a configurable judge model
 - [x] Tokens, cost and latency per scenario run in the results JSON and report

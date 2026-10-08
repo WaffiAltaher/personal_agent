@@ -12,7 +12,7 @@ The harness scores trajectory metrics: tool-selection precision and recall, whet
 
 **Blocked by:** 06, 11
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] Versioned scenario format and loader
 - [x] Runner injects the model and applies the approval policy and failure injection

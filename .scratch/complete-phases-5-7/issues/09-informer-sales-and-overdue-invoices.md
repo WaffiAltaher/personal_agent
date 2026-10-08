@@ -9,7 +9,7 @@
 
 **Blocked by:** 08
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] The fake Informer API serves seeded Sales invoices with pagination and rate-limit headers, and can be switched to quota-exhausted and 5xx modes
 - [x] Seam-B tests for the Overdue boundaries: due today (not overdue), Open amount zero (not overdue), partially paid and past due (overdue with the remaining amount)

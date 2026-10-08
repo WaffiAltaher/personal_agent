@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] `provider:model` setting with default `gemini-3.8-flash`; the Anthropic API key is optional and required only when an Anthropic model is selected; a missing key for the chosen provider gives a clear startup error
 - [x] Anthropic provider dependency added

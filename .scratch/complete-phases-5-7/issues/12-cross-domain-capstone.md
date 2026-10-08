@@ -10,7 +10,7 @@ The whole run is one Langfuse trace.
 
 **Blocked by:** 05, 10, 11
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] New prompt version, tagged in Langfuse as today
 - [x] A seam-A test of the capstone against the Fixture world: one Draft per Client with the right invoices and amounts, recorded only after approval; Clients without an email address are reported; nothing is created when rejected

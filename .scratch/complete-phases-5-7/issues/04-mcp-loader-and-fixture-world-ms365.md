@@ -4,7 +4,7 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] Seed data is in versioned fixture files
 - [x] The stand-in MS365 server reproduces the real tool names and shapes for the tools used

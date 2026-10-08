@@ -4,7 +4,7 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] Both memory retrieval tools use the rewriting step
 - [x] The rewriting model is a separate setting, defaulting to the agent's model

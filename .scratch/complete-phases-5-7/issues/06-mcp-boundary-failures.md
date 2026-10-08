@@ -9,7 +9,7 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] Seam-A tests for: server down at startup, auth failure at startup, a tool error reported through MCP, a server crash in the middle of a run
 - [x] A transient MCP read error is retried; a permanent error is not

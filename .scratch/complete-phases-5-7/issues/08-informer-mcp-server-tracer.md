@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] Server package runnable on its own over stdio; configuration is API key, security code and base-URL override
 - [x] Sends the `Apikey` and `Securitycode` headers to Informer API v2

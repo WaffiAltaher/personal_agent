@@ -15,7 +15,7 @@ The real Gemini vs Claude run is ticket 17.
 
 **Blocked by:** 12, 14
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] 10–20 scenarios, each runnable against the Fixture world
 - [x] The repeats option produces per-scenario variation in the results

@@ -4,7 +4,7 @@
 
 **Blocked by:** 03, 04
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] `@softeria/ms-365-mcp-server` pinned to an exact current version (0.159.1 when researched; recheck)
 - [x] A test asserts the exact set of bound MS365 tool names against the stand-in; login and account-management tools stay hidden

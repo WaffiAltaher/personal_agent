@@ -4,7 +4,7 @@
 
 **Blocked by:** 03, 04, 09
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] Informer tools are bound with the `informer_` prefix and classified as read
 - [x] Missing credentials lead to a notice, and the agent still starts
