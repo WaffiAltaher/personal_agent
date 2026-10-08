@@ -4,6 +4,9 @@ first by itself, honours the quota headers, and reports failures in a usable for
 
 Time is a fake clock shared by the server's limiter and the fake API: nothing sleeps."""
 
+import subprocess
+import sys
+
 import pytest
 
 from fixture_world.informer_api import Failure
@@ -115,3 +118,67 @@ async def test_transient_failure_on_a_later_page_fails_the_call_rather_than_retu
 
     assert is_error
     assert "HTTP 503" in text
+
+
+# --- one budget per API key, across sessions and processes ---------------------------------
+#
+# The agent's MCP client starts a fresh Informer MCP server process for every tool call, so a
+# per-process limiter never limits anything. The budget is shared state, keyed by API key.
+
+@pytest.mark.asyncio
+async def test_separate_sessions_share_one_budget_per_api_key(fake_informer, informer_settings, connect,
+                                                             call_tool, clock):
+    def limiter():  # what each server process builds for itself, on the shared fake clock
+        return RateLimiter.for_key(informer_settings, clock=clock, sleep=clock.sleep)
+
+    async with connect(rate_limiter=limiter()) as session:
+        for _ in range(40):
+            await call_tool(session, "get_sales_invoice", invoice_id=5001)
+    async with connect(rate_limiter=limiter()) as session:
+        results = [await call_tool(session, "get_sales_invoice", invoice_id=5001) for _ in range(21)]
+
+    assert not any(is_error for is_error, _ in results)
+    assert clock.sleeps == [60.0]  # the 61st request of the minute waited, though in another session
+
+
+@pytest.mark.asyncio
+async def test_another_api_key_has_its_own_budget(informer_settings, clock):
+    other = informer_settings.model_copy(update={"api_key": "another-key"})
+    ours, theirs = (RateLimiter.for_key(s, clock=clock, sleep=clock.sleep) for s in (informer_settings, other))
+
+    for _ in range(60):
+        await ours.acquire()
+    await theirs.acquire()
+
+    assert clock.sleeps == []
+
+
+_ACQUIRE = """
+import asyncio, sys
+from informer_mcp.client import RateLimiter
+from informer_mcp.config import InformerSettings
+
+waits = []
+async def sleep(seconds):
+    waits.append(seconds)
+
+settings = InformerSettings(_env_file=None, api_key="key", security_code="code", rate_limit_dir=sys.argv[1])
+limiter = RateLimiter.for_key(settings, sleep=sleep)
+
+async def main():
+    for _ in range(int(sys.argv[2])):
+        await limiter.acquire()
+
+asyncio.run(main())
+print(len(waits))
+"""
+
+
+def test_separate_processes_share_one_budget(tmp_path):
+    def run(requests: int) -> int:
+        out = subprocess.run([sys.executable, "-c", _ACQUIRE, str(tmp_path), str(requests)],
+                             capture_output=True, text=True, check=True).stdout
+        return int(out)
+
+    assert run(60) == 0  # one process uses the minute's 60 requests
+    assert run(1) == 1  # the next process's first request has to wait

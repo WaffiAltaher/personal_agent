@@ -2,9 +2,15 @@
 """Thin async HTTP client for Informer API v2."""
 
 import asyncio
+import fcntl
+import hashlib
+import json
+import tempfile
 import time
 from collections import deque
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
+from pathlib import Path
 
 import httpx
 
@@ -33,11 +39,16 @@ TRANSIENT_ERROR_PREFIX = "Transient Informer failure"
 class RateLimiter:
     """Keeps requests at or under `limit` per `period` seconds (a sliding window), and
     pauses for a whole period when Informer says no requests remain this minute.
-    The clock and sleep are injectable so tests need not wait."""
+    The clock and sleep are injectable so tests need not wait.
+
+    With a `state_path`, the window lives in that file (under a file lock) instead of in
+    this process, so every process using it shares one budget: the agent starts a fresh
+    server process per tool call. `for_key` gives the shared limiter for an API key."""
 
     def __init__(self, limit: int = REQUESTS_PER_MINUTE, period: float = 60.0,
-                 clock: Callable[[], float] = time.monotonic,
-                 sleep: Callable[[float], Awaitable[None]] = asyncio.sleep):
+                 clock: Callable[[], float] = time.time,
+                 sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+                 state_path: Path | None = None):
         self._limit = limit
         self._period = period
         self._clock = clock
@@ -45,10 +56,40 @@ class RateLimiter:
         self._sent: deque[float] = deque()
         self._blocked_until = 0.0
         self._lock = asyncio.Lock()
+        self._state_path = state_path
+
+    @classmethod
+    def for_key(cls, settings: InformerSettings, **options) -> "RateLimiter":
+        """The limiter whose budget every process using `settings`' API key (at its base URL) shares."""
+        key = hashlib.sha256(f"{settings.base_url}\n{settings.api_key}".encode()).hexdigest()[:16]
+        directory = settings.rate_limit_dir or Path(tempfile.gettempdir()) / "informer_mcp"
+        return cls(state_path=Path(directory) / f"rate-limit-{key}.json", **options)
+
+    @asynccontextmanager
+    async def _shared_state(self) -> AsyncIterator[None]:
+        """Load the shared window, hold the file lock (also while waiting), and save it back."""
+        if self._state_path is None:
+            yield
+            return
+        self._state_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self._state_path.with_name(self._state_path.name + ".lock"), "a") as lock:
+            await asyncio.to_thread(fcntl.flock, lock, fcntl.LOCK_EX)
+            try:
+                try:
+                    state = json.loads(self._state_path.read_text())
+                except (FileNotFoundError, ValueError):
+                    state = {}
+                self._sent = deque(state.get("sent", []))
+                self._blocked_until = state.get("blocked_until", 0.0)
+                yield
+                self._state_path.write_text(json.dumps({"sent": list(self._sent),
+                                                        "blocked_until": self._blocked_until}))
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
 
     async def acquire(self) -> None:
         """Wait, if needed, until one more request is allowed, and count it."""
-        async with self._lock:
+        async with self._lock, self._shared_state():
             now = self._clock()
             while self._sent and now - self._sent[0] >= self._period:
                 self._sent.popleft()
@@ -59,16 +100,17 @@ class RateLimiter:
                 await self._sleep(wait)
             self._sent.append(self._clock())
 
-    def observe(self, remaining: int | None) -> None:
+    async def observe(self, remaining: int | None) -> None:
         """Honour Informer's X-RateLimit-Remaining: at zero, pause for a whole period."""
         if remaining is not None and remaining <= 0:
-            self._blocked_until = self._clock() + self._period
+            async with self._lock, self._shared_state():
+                self._blocked_until = self._clock() + self._period
 
 
 class InformerClient:
     def __init__(self, settings: InformerSettings, rate_limiter: RateLimiter | None = None):
         self._settings = settings
-        self._limiter = rate_limiter or RateLimiter()
+        self._limiter = rate_limiter or RateLimiter.for_key(settings)
 
     async def get(self, path: str, params: dict | None = None) -> dict:
         headers = {
@@ -85,7 +127,7 @@ class InformerClient:
                 f"{TRANSIENT_ERROR_PREFIX}: could not reach Informer at {self._settings.base_url} "
                 f"({type(e).__name__}: {e}). Retrying later may succeed."
             ) from e
-        self._limiter.observe(_int_header(response, "X-RateLimit-Remaining"))
+        await self._limiter.observe(_int_header(response, "X-RateLimit-Remaining"))
         if response.status_code == 429 and _int_header(response, "X-DailyLimit-Remaining") == 0:
             limit = response.headers.get("X-DailyLimit-Limit", "5000")
             raise InformerError(

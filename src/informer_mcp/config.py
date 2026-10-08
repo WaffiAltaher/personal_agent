@@ -1,5 +1,6 @@
 # src/informer_mcp/config.py
 from datetime import date
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -20,6 +21,9 @@ class InformerSettings(BaseSettings):
     # "Today" for Overdue invoices; unset means the current date in Amsterdam. Pin it to
     # run against the Fixture world, whose seeded Due dates are fixed.
     today: date | None = None
+    # Where the rate-limit budget per API key is kept, shared by every server process using
+    # the key (the agent starts one per tool call). Unset means a folder in the temp dir.
+    rate_limit_dir: Path | None = None
 
     model_config = SettingsConfigDict(
         env_prefix="INFORMER_",

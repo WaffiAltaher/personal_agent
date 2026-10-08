@@ -18,6 +18,7 @@ FIXTURE_WORLD_INFORMER_FAILURE=<mode> switches the fake into a failure mode for 
 """
 
 import os
+import tempfile
 
 from fixture_world import clock
 from fixture_world.informer_api import FakeInformerApi, Failure
@@ -29,7 +30,9 @@ FAILURE_ENV = "FIXTURE_WORLD_INFORMER_FAILURE"
 
 
 def main() -> None:
-    with FakeInformerApi(shift=clock.seed_shift()) as fake:
+    # Each process has a fake of its own, with its own 60/min limit: so the rate-limit budget
+    # is this process's own too, not one shared with earlier fakes that used the same port.
+    with FakeInformerApi(shift=clock.seed_shift()) as fake, tempfile.TemporaryDirectory() as budget:
         if mode := os.environ.get(FAILURE_ENV):
             fake.failure = Failure(mode)
         settings = InformerSettings(
@@ -38,6 +41,7 @@ def main() -> None:
             security_code=fake.security_code,
             base_url=fake.base_url,
             today=clock.today(),
+            rate_limit_dir=budget,
         )
         create_server(settings).run("stdio")
 
