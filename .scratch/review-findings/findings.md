@@ -39,6 +39,7 @@ All killing tests are in `notebooks/killing_tests/`. Each is verified to pass on
 | B7 | `log_run_to_memory` logs the last call's usage only, never `cost_usd` (`evals/pricing.py` could supply it), always `success=True`, and swallows errors without logging | `graph.py` | nb 04 Exp 4; rest read-only | latent (wrong data) | mech, plus decision on "success" |
 | B8 | Five retired Gmail/Calendar tools are still bound: part of the ~80% tool-definition overhead on every call | `tools/__init__.py` | nb 04 Exp 2 | latent (cost) | decision (c) |
 | B9 | CLI tracing wiring has no tests (resume, flush, step limit): see A, M18–M20 | `cli.py` | nb 04 Part C | n/a | mech (tests in A) |
+| B10 | No prompt caching: every model call re-sends the ~4.3k-token tools + system prefix at full input price (cached reads are 10%, `evals/pricing.py`). No `cache_control` for Anthropic models; whether Gemini's implicit caching hits is unchecked (Exp 3 prints `input_tokens` only, which includes cached tokens) | `agent_node` / model setup | nb 04 Exp 3; grep (no caching config in `src/`) | latent (cost) | decision (i) |
 
 ## C. Code issues, concepts 6–8 (from the Lesson 7 session; Exp N = `notebooks/05`, Part A)
 
@@ -79,3 +80,4 @@ All killing tests are in `notebooks/killing_tests/`. Each is verified to pass on
 - (f) Similarity metric and how to calibrate the threshold (M1)
 - (g) Episodic search and rewriting: FTS/BM25, embeddings, or a retrieval sub-agent; decide with eval evidence (M2, R1–R3)
 - (h) What is written to memory, where, and whether writes need approval (M5, M6)
+- (i) Prompt caching: explicit `cache_control` for Anthropic, verify Gemini's implicit caching, and keep the prefix stable (tool order, prompt version) so it can hit (B10)
