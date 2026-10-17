@@ -235,7 +235,9 @@ class FakeInformerApi:
         presentation-style report: rows keyed by index, each a list of text columns,
         amounts in Dutch notation. A header row first, a totals row last."""
         required = ("year", "period_from", "period_to", "ledger_number_from", "ledger_number_to")
-        missing = [name for name in required if name not in query]
+        # Real Informer also treats ledger_number_from=0 as missing (observed live, HTTP 422).
+        missing = [name for name in required
+                   if name not in query or (name == "ledger_number_from" and int(query[name]) == 0)]
         if missing:
             return 422, {"error": [f"{name} is verplicht." for name in missing], "response_code": 422}
         year, period_from, period_to, ledger_from, ledger_to = (int(query[name]) for name in required)

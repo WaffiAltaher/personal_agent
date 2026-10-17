@@ -126,7 +126,7 @@ def create_server(settings: InformerSettings, rate_limiter: RateLimiter | None =
         year: int,
         period_from: int = 1,
         period_to: int = LAST_PERIOD,
-        ledger_from: int = 0,
+        ledger_from: int = 1,  # Informer rejects 0 as a missing ledger_number_from
         ledger_to: int = LAST_LEDGER_NUMBER,
     ) -> dict:
         """Trial balance (proef- en saldibalans) for a year and a range of periods, in EUR.
