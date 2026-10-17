@@ -99,9 +99,9 @@ def _paginate(items: list, query: dict) -> tuple[list, dict] | None:
     return items[start:start + records], {"prev": prev, "next": nxt}
 
 
-def _dutch_amount(amount: Decimal) -> str:
-    """12100.5 -> "12.100,50", as Informer's reports print amounts."""
-    return f"{amount:,.2f}".replace(",", " ").replace(".", ",").replace(" ", ".")
+def _json_number(amount: float) -> int | float:
+    """964 or 512.8, as Informer's column-balance report gives amounts."""
+    return int(amount) if amount.is_integer() else amount
 
 
 class FakeInformerApi:
@@ -231,9 +231,10 @@ class FakeInformerApi:
         return 200, self.ledgers  # a plain array, unpaginated, as in Informer's spec
 
     def _column_balance(self, query: dict) -> tuple[int, dict]:
-        """The column balance (proef- en saldibalans) of the seeded journal, as a
-        presentation-style report: rows keyed by index, each a list of text columns,
-        amounts in Dutch notation. A header row first, a totals row last."""
+        """The column balance (proef- en saldibalans) of the seeded journal, shaped as
+        live Informer returns it: one entry per ledger with an opening balance or movements
+        in range, keyed by ledger id, amounts as JSON numbers. The opening balance is the
+        year's (balance ledgers carry earlier years forward), whatever the period range."""
         required = ("year", "period_from", "period_to", "ledger_number_from", "ledger_number_to")
         # Real Informer also treats ledger_number_from=0 as missing (observed live, HTTP 422).
         missing = [name for name in required
@@ -242,26 +243,39 @@ class FakeInformerApi:
             return 422, {"error": [f"{name} is verplicht." for name in missing], "response_code": 422}
         year, period_from, period_to, ledger_from, ledger_to = (int(query[name]) for name in required)
 
-        totals: dict[str, list[Decimal]] = {}
+        # Summed in floats, as live Informer evidently does (it returns e.g. 1141.6600000000035).
+        ledgers = {ledger["number"]: ledger for ledger in self.ledgers}
+        opening: dict[str, float] = {}  # debit minus credit
+        movements: dict[str, list[float]] = {}
         for m in self.ledger_movements:
-            if (m["year"] == year and period_from <= m["period"] <= period_to
-                    and ledger_from <= int(m["ledger_number"]) <= ledger_to):
-                debit_credit = totals.setdefault(m["ledger_number"], [Decimal(0), Decimal(0)])
-                debit_credit[0] += Decimal(m["debit"])
-                debit_credit[1] += Decimal(m["credit"])
+            number = m["ledger_number"]
+            if not ledger_from <= int(number) <= ledger_to:
+                continue
+            if m["year"] < year and ledgers[number]["type"] == "balance":
+                opening[number] = opening.get(number, 0.0) + float(m["debit"]) - float(m["credit"])
+            elif m["year"] == year and period_from <= m["period"] <= period_to:
+                debit_credit = movements.setdefault(number, [0.0, 0.0])
+                debit_credit[0] += float(m["debit"])
+                debit_credit[1] += float(m["credit"])
 
-        descriptions = {ledger["number"]: ledger["description"] for ledger in self.ledgers}
-        rows = [["Rekening", "Omschrijving", "Debet", "Credit", "Saldo debet", "Saldo credit"]]
-        sums = [Decimal(0)] * 4
-        for number in sorted(totals):
-            debit, credit = totals[number]
-            amounts = [debit, credit, max(debit - credit, Decimal(0)), max(credit - debit, Decimal(0))]
-            sums = [s + a for s, a in zip(sums, amounts)]
-            rows.append([number, descriptions[number], *map(_dutch_amount, amounts)])
-        rows.append(["", "Totaal", *map(_dutch_amount, sums)])
-
-        report = {str(i): {"columns": [{"text": text, "style": {}} for text in row]} for i, row in enumerate(rows)}
-        return 200, {"column_balance": report}
+        report = {}
+        for number in sorted(set(opening) | set(movements)):
+            start = opening.get(number, 0.0)
+            debit, credit = movements.get(number, [0.0, 0.0])
+            end = start + debit - credit
+            ledger = ledgers[number]
+            report[str(ledger["id"])] = {
+                "results": {str(year): {
+                    "opening_balance_debet": _json_number(max(start, 0.0)),
+                    "opening_balance_credit": _json_number(max(-start, 0.0)),
+                    "trial_balance_debet": _json_number(debit),
+                    "trial_balance_credit": _json_number(credit),
+                    "saldi_balance_debet": _json_number(max(end, 0.0)),
+                    "saldi_balance_credit": _json_number(max(-end, 0.0)),
+                }},
+                "data": {"description": ledger["description"], "number": ledger["number"], "rgs_code": ledger["rgs"]},
+            }
+        return 200, {"column_balance": report or []}  # live Informer gives an empty list, not {}
 
     # --- lifecycle ------------------------------------------------------------------
 

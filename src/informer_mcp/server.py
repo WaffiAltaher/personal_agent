@@ -2,8 +2,6 @@
 """The Informer MCP server: read-only tools over Informer API v2 (no write endpoints, ADR-006)."""
 
 import json
-import re
-from decimal import Decimal
 from typing import Annotated
 
 from mcp.server.fastmcp import FastMCP
@@ -12,13 +10,12 @@ from pydantic import Field
 
 from informer_mcp.client import InformerClient, RateLimiter
 from informer_mcp.config import InformerSettings
-from informer_mcp.sales import register_sales_tools
+from informer_mcp.sales import money, register_sales_tools
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=True)
 
 LAST_PERIOD = 13  # periods 1-12 plus the year-end closing period
 LAST_LEDGER_NUMBER = 99999999
-DUTCH_AMOUNT = re.compile(r"-?\d{1,3}(?:\.\d{3})*,\d{2}|-?\d+,\d{2}")
 
 def _person_name(*parts: str | None) -> str:
     return " ".join(p for p in parts if p)
@@ -85,12 +82,21 @@ def _ledger(raw: dict) -> dict:
     }
 
 
-def _report_text(text: str) -> str:
-    """A report cell as the model should see it: Dutch-notation amounts ("12.100,50")
-    become exact decimal strings ("12100.50"); any other text is kept as is."""
-    if DUTCH_AMOUNT.fullmatch(text.strip()):
-        return str(Decimal(text.strip().replace(".", "").replace(",", ".")))
-    return text
+def _trial_balance_ledger(raw: dict, year: int) -> dict:
+    """One ledger of Informer's column-balance report, under readable names. Informer gives
+    amounts as floats, at times with float noise (1141.6600000000035); they become exact cents."""
+    amounts = raw["results"][str(year)]
+    return {
+        "number": raw["data"]["number"],
+        "description": raw["data"]["description"],
+        "rgs_code": raw["data"].get("rgs_code"),
+        "opening_debit": str(money(amounts["opening_balance_debet"])),
+        "opening_credit": str(money(amounts["opening_balance_credit"])),
+        "debit": str(money(amounts["trial_balance_debet"])),
+        "credit": str(money(amounts["trial_balance_credit"])),
+        "balance_debit": str(money(amounts["saldi_balance_debet"])),
+        "balance_credit": str(money(amounts["saldi_balance_credit"])),
+    }
 
 
 def create_server(settings: InformerSettings, rate_limiter: RateLimiter | None = None) -> FastMCP:
@@ -132,8 +138,10 @@ def create_server(settings: InformerSettings, rate_limiter: RateLimiter | None =
         """Trial balance (proef- en saldibalans) for a year and a range of periods, in EUR.
         Periods run 1-13 (13 is the year-end closing period); the default is the whole year.
         `ledger_from`/`ledger_to` limit it to a range of ledger account numbers (see the
-        chart of accounts resource). Each row is a list of columns as Informer reports them,
-        with amounts converted to decimal strings; the first row names the columns."""
+        chart of accounts resource). One entry per ledger with an opening balance or movements,
+        by ledger number: the year's opening balance, the debit and credit movements in the
+        periods, and the resulting balance, as decimal strings. `rgs_code` is the ledger's
+        Dutch standard chart (RGS) code, e.g. revenue ledgers start with "WOmz"."""
         if not 1 <= period_from <= period_to <= LAST_PERIOD:
             raise ValueError(
                 f"Periods must run from 1 to {LAST_PERIOD}, with period_from <= period_to "
@@ -146,9 +154,12 @@ def create_server(settings: InformerSettings, rate_limiter: RateLimiter | None =
             "ledger_number_from": ledger_from,
             "ledger_number_to": ledger_to,
         })
-        report = data["column_balance"]
-        rows = [[_report_text(c["text"]) for c in report[key]["columns"]] for key in sorted(report, key=int)]
-        return {"year": year, "period_from": period_from, "period_to": period_to, "currency": "EUR", "rows": rows}
+        report = data["column_balance"] or {}  # an empty list when no ledger matches
+        ledgers = sorted(report.values(), key=lambda raw: int(raw["data"]["number"]))
+        return {
+            "year": year, "period_from": period_from, "period_to": period_to, "currency": "EUR",
+            "ledgers": [_trial_balance_ledger(raw, year) for raw in ledgers],
+        }
 
     @mcp.resource("informer://administration", name="administration", mime_type="application/json")
     async def administration() -> str:
