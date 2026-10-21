@@ -22,3 +22,5 @@ checkpoints/
 # Local-only
 data/evals/
 .cursor/
+learning/
+notebooks/
