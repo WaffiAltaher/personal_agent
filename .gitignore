@@ -18,3 +18,7 @@ data/*.db
 data/chroma/
 checkpoints/
 .env.bak-*
+
+# Local-only
+data/evals/
+.cursor/

@@ -1,6 +1,6 @@
 # 01: Manual setup (owner)
 
-**What to build:** Everything only the owner can do, done in one sitting so the live tickets (16, 17) can run. Generate the interactive setup wizard with the `/wizard` skill, then run it. It covers:
+**What to build:** Everything only the owner can do, done in one sitting so the live tickets (16, 17) and the model comparison (18) can run. Generate the interactive setup wizard with the `/wizard` skill, then run it. It covers:
 - Informer: create an API key (Settings → API keys) and copy the security code (Settings → account).
 - An Anthropic API key, for the Claude Sonnet 5.5 comparison.
 - Confirm the Gemini API key works with `gemini-3.8-flash`.

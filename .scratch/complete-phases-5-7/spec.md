@@ -302,5 +302,5 @@ Learning materials (notebooks, checkpoint answers) are written by the owner afte
   - MS365 server 0.159.1, with write tool names as listed above.
   - `mcp` 2.x is incompatible with `langchain-mcp-adapters` 0.3.x.
   - `gemini-2.0-flash` was shut down on 2026-06-01.
-- **Automated run boundary.** Ticket 01 is the owner's manual setup (`ready-for-human`). An automated `/implement-spec` run implements every ticket not blocked by 01, which is tickets 02–15. It treats ticket 01, and tickets 16 and 17 that depend on it, as outside the run: it does not wait for them, and it reports them as pending. Run 16 and 17 after the owner completes 01.
+- **Automated run boundary.** Ticket 01 is the owner's manual setup (`ready-for-human`). An automated `/implement-spec` run implements every ticket not blocked by 01, which is tickets 02–15. It treats ticket 01, and tickets 16, 17 and 18 that depend on it, as outside the run: it does not wait for them, and it reports them as pending. After the owner completes 01, run 16, then 17 (a person walks the live paths), then 18.
 - The integration branch is `feat/complete-phases-5-7`. The workflow never merges to `main`; the owner reviews and merges.

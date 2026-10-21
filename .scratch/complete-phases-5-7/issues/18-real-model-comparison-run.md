@@ -1,8 +1,8 @@
-# 17: Real model-comparison run
+# 18: Real model-comparison run
 
 **What to build:** Run the full scenario suite against the Fixture world with Gemini 3.8 Flash and Claude Sonnet 5.5, using the agreed number of repeats and a separate judge model. Generate the comparison report and commit the results JSON and the report.
 
-**Blocked by:** 01, 15
+**Blocked by:** 01, 15, 17
 
 **Status:** ready-for-agent
 

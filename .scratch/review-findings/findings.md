@@ -4,6 +4,8 @@ Findings from the Track B notebooks (concepts 1–5, `notebooks/01`–`04`) and 
 
 Every item is verified by running code unless marked *read-only*. Severity: **bug** = user-visible · **latent** = will bite under a reachable condition · **cosmetic**. Fix: **mech** = mechanical · **decision** = needs the owner's call (grouped at the end).
 
+Noise fixes: fix the cause when the message points at something we control; route it to a log file when it's legitimate log output in the wrong place. Never raise a log level or add a warning filter just to silence output.
+
 Do the notebooks' Part C drills **before** any of the test gaps below are closed. Adding a killing test to `tests/` turns its drill's answer from "survived" into "caught", so the drill teaches nothing after that.
 
 ## A. Test gaps: the mutant survives today, and a killing test is ready
@@ -70,6 +72,23 @@ All killing tests are in `notebooks/killing_tests/`. Each is verified to pass on
 
 (C-section items M4 = B7 and C6 = Lesson 5's finding, merged.)
 
+## D. Code issues, concepts 10 and 12 (from the Lesson 8 session; Exp N = `notebooks/06`)
+
+| # | Issue | Where | Verified | Sev. | Fix |
+|---|---|---|---|---|---|
+| D1 | MCP SDK is on the 1.x line (`mcp` 1.27.2, pinned `<2`), which speaks spec 2025-11-25. `mcp` 2.0 (2026-07-28) supports the 2026-07-28 revision and still serves 2025-era clients; 1.x is now in maintenance mode (security fixes only). **Blocked:** `langchain-mcp-adapters` 0.3.2 (latest) requires `mcp<2` (its PR #588, "constrain MCP SDK to v1"). Code impact when unblocked: `FastMCP` → `MCPServer` (decorator API unchanged), test helpers `ClientSession` / `create_connected_server_and_client_session` → `Client`, plus the adapters upgrade; no Roots, Sampling or Logging in use | `pyproject.toml`, `src/informer_mcp`, `src/fixture_world/ms365.py`, `tests/informer_server` | PyPI + SDK release notes, 2026-10-15; grep | latent (maintenance) | mech, once the adapters support `mcp` 2 |
+
+## E. Live-run issues (from manual live-path testing, ticket 17; run of 2026-10-17, `--debug`, real Gmail)
+
+| # | Issue | Where | Verified | Sev. | Fix |
+|---|---|---|---|---|---|
+| E1 | A dead Google refresh token (`invalid_grant`) raises `RefreshError` from `creds.refresh()`; the browser re-auth is only reached when there is no refresh token at all, so the user must delete `credentials/token.json` by hand. The docstring says Testing-mode tokens expire after "7 days … without use"; they expire 7 days after issue regardless of use | `auth/google.py` | live run; `token.json` expiry 2026-06-02 | bug (all Gmail/Calendar tools fail) | mech (catch `RefreshError` → delete token → re-auth) + decision (j) |
+| E2 | Google tools have no equivalent of MS365's `LoginCheck`: no startup check, and the error ToolMessage is the bare exception without the re-auth command. The model only stopped because the prompt told it to | `tools/gmail.py`, `tools/google_calendar.py`, `tools/__init__.py` | live run (ToolMessage [3]) | latent | mech: same pattern as `LoginCheck` |
+| E3 | ~70 lines of `Key 'additionalProperties' / '$schema' is not supported in schema, ignoring` per run, logged by `langchain_google_genai` while converting tool schemas for Gemini. 38 tools carry `$schema` and 39 carry `additionalProperties` (37 MS365 + Tavily, which has only `additionalProperties`); every `additionalProperties` is `true` (the JSON Schema default) except `ms365_download-bytes` (`false`, which Gemini can't express anyway). Still warns in the latest `langchain-google-genai` (4.4.2) | `graph.py` (`bind_tools`) | live run; scratch probe over the real bound tools; 4.4.2 source `_function_utils.py:122` | cosmetic | mech: normalise schemas at bind time (not in `mcp_loader`: Tavily isn't MCP) — drop `$schema` and `additionalProperties`, with a comment that `download-bytes`' `false` is dropped deliberately |
+| E4 | `[ms365-mcp] Ignored 1 variable(s) from .env: MS365_MCP_EXPECTED_USERNAME`, printed twice. The npx server reads our `.env` from its cwd on its own; harmless, since we pass the variable through `env`. Twice because startup launches the server twice (`get_tools`, then `_check_login`, each its own session) | `ms365_mcp.py`, `mcp_loader._load_server` | live run; scratch run counting `stdio_client` launches at startup (MS365 ×2, Informer ×1) | cosmetic | mech: spawn the server with a `cwd` outside the repo |
+| E5 | `LangChainPendingDeprecationWarning` (`allowed_objects`) on import: `langgraph-checkpoint` 4.0.1 builds `Reviver()` at module level without `allowed_objects` (`jsonplus.py:45`), so our code can't pass one. Fixed in 4.3.0 (`Reviver(allowed_objects="core")`, `jsonplus.py:47`) | upstream (langgraph-checkpoint) | live run; 4.0.1 and 4.3.0 source | cosmetic | mech: upgrade `langgraph-checkpoint` to ≥ 4.3.0; check `uv lock` resolves with langgraph 1.1.6 |
+| E6 | Langfuse being unreachable crashes every CLI run before the agent starts (`httpx.ConnectError: [Errno 61] Connection refused`), so it looks like a broken tool connection, though no tool was ever called. The CLI means to warn and continue ("observability failing shouldn't block the agent"), but `Langfuse.auth_check()` (4.1.0) returns `False` only on `AttributeError` and raises on everything else (refused connection, bad keys, no project), so the warning branch is dead. Trigger on 2026-10-21: Docker not running, so nothing on `localhost:3000` (`LANGFUSE_BASE_URL`). Asked: "How does my calender looks like for next week Monday? check both work and personal agendas", `google_genai:gemini-3.8-flash`, `--debug` | `tracing.verify_connection`, `cli.py:138` | live run (traceback); `curl` to `:3000` refused; `docker ps` (no daemon); langfuse 4.1.0 `auth_check` source | bug (whole CLI blocked by a tracing outage) | mech: catch the exception in `verify_connection`, return `False`, and include the base URL in the warning |
+
 ## Design decisions for the owner
 
 - (a) Approval granularity: per call instead of per batch? And what may happen to a thread while it's paused? (B1, B6)
@@ -81,3 +100,4 @@ All killing tests are in `notebooks/killing_tests/`. Each is verified to pass on
 - (g) Episodic search and rewriting: FTS/BM25, embeddings, or a retrieval sub-agent; decide with eval evidence (M2, R1–R3)
 - (h) What is written to memory, where, and whether writes need approval (M5, M6)
 - (i) Prompt caching: explicit `cache_control` for Anthropic, verify Gemini's implicit caching, and keep the prefix stable (tool order, prompt version) so it can hit (B10)
+- (j) Google re-authentication: when the refresh token is dead, open the browser mid-run, or fail with a message naming the re-auth command and add a Google step to `setup_wizard.sh`? And publish the OAuth app to Production so the token stops expiring every 7 days? (E1, E2)

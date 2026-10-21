@@ -185,7 +185,8 @@ finish() {
 # ──────────────────────────────────────────────────────────────────────────
 
 # Ticket 01 (.scratch/complete-phases-5-7/issues/01-manual-setup.md): every manual step
-# needed before the live check (ticket 16) and the real model comparison (ticket 17).
+# needed before the live check (ticket 16), the manual live path testing (ticket 17)
+# and the real model comparison (ticket 18).
 # Run from anywhere: ./scripts/setup_wizard.sh. Values go to .env only (no CI here).
 
 TOTAL_STAGES=9
@@ -365,7 +366,7 @@ for notice in notices:
     print(f"  ⚠ {notice}")
 print("  all integrations loaded" if not notices else "  some integrations are unavailable (see above)")
 PY
-note "Next: ticket 16 (live read-only check), then ticket 17 (real model comparison)."
+note "Next: ticket 16 (live read-only check), then ticket 17 (manual live path testing), then ticket 18 (real model comparison)."
 pause "Press Enter for the summary"
 
 finish
