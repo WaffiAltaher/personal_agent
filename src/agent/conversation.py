@@ -56,6 +56,11 @@ async def run_conversation(
     if pending:
         await _abandon_pending_approval(graph, config)
     return await graph.ainvoke(
-        {"messages": [HumanMessage(content=user_message)], "model_call_count": 0},
+        {
+            "messages": [HumanMessage(content=user_message)],
+            "model_call_count": 0,
+            "last_model_input_tokens": None,
+            "message_count_at_last_model_call": 0,
+        },
         config=config,
     )
