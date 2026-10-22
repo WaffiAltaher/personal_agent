@@ -24,7 +24,7 @@ not emulated, so that the agent's refusal to bind them is testable.
 Run over stdio with `python -m fixture_world.ms365`.
 
 The server can be switched into a failure mode (down, logged out, tool error, transient
-error, crash) from outside its process; see "failure injection" below.
+error, throttled (429), crash) from outside its process; see "failure injection" below.
 """
 
 import fcntl
@@ -368,6 +368,7 @@ class Failure(StrEnum):
     LOGGED_OUT = "logged-out"  # no (or an expired) MS365 login: verify-login and Graph tools fail
     TOOL_ERROR = "tool-error"  # Graph tools report a permanent Graph error (403) through MCP
     TRANSIENT = "transient"  # Graph tools report a transient Graph error (503) through MCP
+    THROTTLED = "throttled"  # Graph tools report throttling (429 Too Many Requests) through MCP
     CRASH = "crash"  # the server process dies in the middle of a Graph tool call
 
 
@@ -432,7 +433,8 @@ def _failing_as_switched(fn):
 
     @functools.wraps(fn)
     def tool(*args, **kwargs):
-        failure = take_failure(Failure.LOGGED_OUT, Failure.TOOL_ERROR, Failure.TRANSIENT, Failure.CRASH)
+        failure = take_failure(Failure.LOGGED_OUT, Failure.TOOL_ERROR, Failure.TRANSIENT, Failure.THROTTLED,
+                               Failure.CRASH)
         if failure is Failure.CRASH:
             os._exit(1)  # die mid-call, without answering
         if failure is Failure.LOGGED_OUT:
@@ -443,6 +445,9 @@ def _failing_as_switched(fn):
         if failure is Failure.TRANSIENT:
             return _server_error('Microsoft Graph API error: 503 Service Unavailable - {"error":{"code":'
                                  '"ServiceNotAvailable","message":"The service is temporarily unavailable."}}')
+        if failure is Failure.THROTTLED:
+            return _server_error('Microsoft Graph API error: 429 Too Many Requests - {"error":{"code":'
+                                 '"TooManyRequests","message":"Please retry again later."}}')
         return fn(*args, **kwargs)
 
     return tool

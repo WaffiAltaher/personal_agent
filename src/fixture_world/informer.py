@@ -14,7 +14,7 @@ so the fake moves them by whole weeks onto the current week, as the MS365 stand-
 seeded week (`clock.seed_shift()`).
 
 FIXTURE_WORLD_INFORMER_FAILURE=<mode> switches the fake into a failure mode for every request
-(`informer_api.Failure` values: unauthorized, quota_exhausted, server_error).
+(`informer_api.Failure` values: unauthorized, quota_exhausted, throttled, server_error).
 """
 
 import os
