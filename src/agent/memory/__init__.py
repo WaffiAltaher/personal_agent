@@ -1,4 +1,8 @@
 # src/agent/memory/__init__.py
+import shutil
+import tempfile
+from contextlib import contextmanager
+
 from agent.memory.budget import ContextBudgetManager, TokenCounter
 from agent.memory.episodic import EpisodicMemory, RunRecord
 from agent.memory.semantic import MemoryChunk, SemanticMemory
@@ -35,3 +39,17 @@ def get_semantic_memory() -> SemanticMemory:
     if _semantic is None:
         _semantic = SemanticMemory()
     return _semantic
+
+
+@contextmanager
+def fixtures_semantic_memory():
+    """Temp Chroma store for Fixture-world runs; restores the owner's store after."""
+    global _semantic
+    prev = _semantic
+    tmp = tempfile.mkdtemp(prefix="fixture-chroma-")
+    _semantic = SemanticMemory(persist_dir=tmp)
+    try:
+        yield
+    finally:
+        _semantic = prev
+        shutil.rmtree(tmp, ignore_errors=True)

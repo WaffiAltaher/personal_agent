@@ -101,6 +101,7 @@ class AgentState(TypedDict, total=False):
     runtime_clock_iso: str | None  # Europe/Amsterdam instant for the system prompt; fixed for the run
     last_model_input_tokens: int | None  # reported input tokens from the previous model call
     message_count_at_last_model_call: int  # len(state messages) before the previous model call
+    stubbed_tool_call_ids: list[str]  # tool results cleared in the model view; state stays full
 
 
 STEP_LIMIT_ANSWER = (
@@ -113,8 +114,7 @@ def is_step_limit_answer(message: BaseMessage | None) -> bool:
     return (
         isinstance(message, AIMessage)
         and not getattr(message, "tool_calls", None)
-        and isinstance(message.content, str)
-        and "step limit" in message.content.lower()
+        and message.content == STEP_LIMIT_ANSWER
     )
 
 
@@ -185,7 +185,7 @@ async def retry_tool_call(request, execute):
     for attempt in range(1, policy.max_attempts + 1):
         try:
             result = await execute(request)
-            if isinstance(result, ToolMessage) and isinstance(result.content, str):
+            if isinstance(result, ToolMessage):
                 capped = cap_tool_result_content(result.content)
                 if capped != result.content:
                     result = ToolMessage(
@@ -549,13 +549,14 @@ def build_graph(
         messages_before_call = len(state["messages"])
         system_text = _system_text_for_state(state, today)
         system_msg = system_message_for_model(system_text, llm)
-        view = build_model_view(
+        view, stubbed_ids = build_model_view(
             state["messages"],
             system_text=system_text,
             tools=tools,
             last_model_input_tokens=state.get("last_model_input_tokens"),
             message_count_at_last_model_call=state.get("message_count_at_last_model_call", 0),
             system_message=system_msg,
+            stubbed_tool_call_ids=set(state.get("stubbed_tool_call_ids") or []),
         )
         response = await llm.ainvoke(view)
         usage = getattr(response, "usage_metadata", None) or {}
@@ -564,6 +565,7 @@ def build_graph(
             "model_call_count": count + 1,
             "last_model_input_tokens": usage.get("input_tokens"),
             "message_count_at_last_model_call": messages_before_call,
+            "stubbed_tool_call_ids": sorted(stubbed_ids),
         }
         if not state.get("runtime_clock_iso"):
             update["runtime_clock_iso"] = new_runtime_clock_iso(today)
@@ -612,8 +614,10 @@ def build_graph(
         except GraphBubbleUp:
             raise  # interrupt() from a tool must pause the graph, not become an error
         except Exception as exc:
-            last_message = state["messages"][-1]
-            tool_calls = getattr(last_message, "tool_calls", [])
+            last_batch = _latest_ai_tool_batch(state["messages"])
+            tool_calls = (last_batch.tool_calls or []) if last_batch is not None else []
+            answered = _answered_tool_call_ids(state["messages"])
+            pending = [tc for tc in tool_calls if tc["id"] not in answered]
 
             logger.exception(
                 "Tool node failed unexpectedly",
@@ -623,7 +627,7 @@ def build_graph(
                 },
             )
 
-            if not tool_calls:
+            if not pending:
                 # Shouldn't happen, but handle it gracefully
                 return {
                     "messages": [],
@@ -649,7 +653,7 @@ def build_graph(
                     name=tc["name"],
                     status="error",
                 )
-                for tc in tool_calls
+                for tc in pending
             ]
             error_records = [
                 {
@@ -660,7 +664,7 @@ def build_graph(
                     "exception_type": type(exc).__name__,
                     "message": str(exc),
                 }
-                for tc in tool_calls
+                for tc in pending
             ]
             return {"messages": error_messages, "errors": error_records}
 

@@ -78,9 +78,10 @@ def validate_purchase_invoice_path(path_str: str, settings: InformerSettings) ->
     if not path_str or not str(path_str).strip():
         raise ValueError("Path is required.")
 
+    downloads = downloads_root(settings)
     raw = Path(path_str).expanduser()
     if not raw.is_absolute():
-        raw = Path.cwd() / raw
+        raw = downloads / raw
 
     try:
         resolved = raw.resolve(strict=True)
@@ -90,7 +91,6 @@ def validate_purchase_invoice_path(path_str: str, settings: InformerSettings) ->
     if not resolved.is_file():
         raise ValueError(f"Not a file: {path_str}")
 
-    downloads = downloads_root(settings)
     try:
         resolved.relative_to(downloads)
     except ValueError as exc:

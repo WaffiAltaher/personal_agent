@@ -7,6 +7,7 @@ from pathlib import Path
 
 from agent.evals.records import OutcomeScore, TrajectoryScore
 from agent.evals.scenarios import Scenario
+from agent.evals.trajectory import score_facts
 
 
 def read_upload_log(path: Path | None) -> list[tuple[str, bytes]]:
@@ -44,8 +45,12 @@ def score_outcome(
         if name != expected.upload_file:
             passed = False
             detail_parts.append(f"expected file {expected.upload_file!r}, got {name!r}")
-        elif expected_bytes and (want := expected_bytes.get(expected.upload_file)) is not None:
-            if content != want:
+        elif expected_bytes is not None:
+            want = expected_bytes.get(expected.upload_file)
+            if want is None:
+                passed = False
+                detail_parts.append("expected upload file is missing from the eval Downloads folder")
+            elif content != want:
                 passed = False
                 detail_parts.append("upload bytes do not match the expected file")
 
@@ -64,9 +69,17 @@ def score_outcome(
     )
 
 
-def run_passed(scenario: Scenario, trajectory: TrajectoryScore, outcome: OutcomeScore) -> bool:
+def run_passed(
+    scenario: Scenario,
+    trajectory: TrajectoryScore,
+    outcome: OutcomeScore,
+    *,
+    final_answer: str = "",
+) -> bool:
     """Whether the run passes trajectory checks and, when declared, the outcome grade."""
     if not trajectory.passed:
+        return False
+    if scenario.require_facts and score_facts(scenario, final_answer).missing:
         return False
     if scenario.expected_outcome is not None:
         return outcome.passed

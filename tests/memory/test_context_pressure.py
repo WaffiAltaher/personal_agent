@@ -60,7 +60,7 @@ def test_state_never_loses_messages_when_context_is_huge(small_context_limits):
 
 def test_reduced_view_keeps_first_user_message_and_answers_every_tool_call(small_context_limits):
     first_question = "What did I ask?"
-    big = _chars_for_tokens(300)
+    big = _chars_for_tokens(850)
     messages = [
         HumanMessage(content=first_question),
         AIMessage(content="searching", tool_calls=[{"id": "a1", "name": "search", "args": {}}]),
@@ -71,7 +71,7 @@ def test_reduced_view_keeps_first_user_message_and_answers_every_tool_call(small
         ToolMessage(content=big, tool_call_id="a2", name="search"),
     ]
     system = "system prompt"
-    view = build_model_view(
+    view, stubbed = build_model_view(
         messages,
         system_text=system,
         tools=[],
@@ -82,6 +82,7 @@ def test_reduced_view_keeps_first_user_message_and_answers_every_tool_call(small
     assert view, "view must not be empty"
     assert isinstance(view[0], SystemMessage)
     assert view[1].content == first_question
+    assert stubbed, "large tool results must be stubbed above the threshold"
 
     tool_ids = {
         tc["id"]
@@ -134,6 +135,29 @@ async def test_run_continues_after_truncating_a_huge_tool_result(scripted_model,
     assert result["messages"][-1].content == "ok"
 
 
+def test_new_user_turn_stubs_old_tool_results_on_first_model_call(small_context_limits):
+    """First call after a new user message must stub earlier tool results over the threshold."""
+    big = _chars_for_tokens(850)
+    messages = [
+        HumanMessage(content="first question"),
+        AIMessage(content="", tool_calls=[{"id": "old1", "name": "search", "args": {}}]),
+        ToolMessage(content=big, tool_call_id="old1", name="search"),
+        AIMessage(content="answered earlier"),
+        HumanMessage(content="follow up"),
+    ]
+    view, stubbed = build_model_view(
+        messages,
+        system_text="sys",
+        tools=[],
+        last_model_input_tokens=None,
+        message_count_at_last_model_call=0,
+    )
+    old_tool = next(m for m in view if isinstance(m, ToolMessage) and m.tool_call_id == "old1")
+    assert "result cleared" in old_tool.content
+    assert big not in old_tool.content
+    assert stubbed == {"old1"}
+
+
 def test_after_reduction_next_estimate_stays_below_clear_threshold(small_context_limits):
     big = _chars_for_tokens(850)
     messages = [
@@ -143,7 +167,7 @@ def test_after_reduction_next_estimate_stays_below_clear_threshold(small_context
         AIMessage(content="summary"),
     ]
     system = "sys"
-    view = build_model_view(
+    view, stubbed_ids = build_model_view(
         messages,
         system_text=system,
         tools=[],
@@ -168,16 +192,18 @@ def test_after_reduction_next_estimate_stays_below_clear_threshold(small_context
     ) + len(system) // 4
     assert reduced_total <= SMALL_CLEAR_TARGET
 
-    second_pass = build_model_view(
+    second_pass, second_stubbed = build_model_view(
         messages,
         system_text=system,
         tools=[],
         last_model_input_tokens=reduced_total,
         message_count_at_last_model_call=len(messages),
+        stubbed_tool_call_ids=stubbed_ids,
     )
     tool_in_view = next(m for m in second_pass if isinstance(m, ToolMessage))
-    assert big in tool_in_view.content
-    assert "result cleared" not in tool_in_view.content
+    assert big not in tool_in_view.content
+    assert "result cleared" in tool_in_view.content
+    assert second_stubbed == stubbed_ids
 
 
 def test_estimate_counts_assistant_reply_since_reported_input():

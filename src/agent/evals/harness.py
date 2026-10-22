@@ -13,6 +13,7 @@ owner's real Gmail, Google Calendar, memory store or files, and an auto-approved
 there would be real.
 """
 
+import json
 import os
 import tempfile
 import time
@@ -21,6 +22,9 @@ from collections.abc import Awaitable, Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
+
+import agent.memory as memory_module
+from agent.memory.episodic import EpisodicMemory, RunRecord
 
 from langchain_core.callbacks import UsageMetadataCallbackHandler
 from langchain_core.language_models import BaseChatModel
@@ -48,6 +52,43 @@ from fixture_world import clock, informer as fixture_informer, ms365 as fixture_
 
 # Backstop only: the graph's model-call counter enforces settings.max_iterations.
 RECURSION_LIMIT = max(settings.max_iterations * 5 + 10, 40)
+
+EVAL_EPISODIC_SEED = Path(__file__).parent / "fixtures" / "episodic_seed.json"
+EVAL_DOWNLOAD_PDFS: dict[str, bytes] = {
+    "supplier-march.pdf": b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n",
+    "fail-me.pdf": b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n",
+}
+
+
+def _scenario_user_message(scenario: Scenario, downloads_path: Path) -> str:
+    """Include the eval Downloads path for every upload scenario, including reject and failure."""
+    if scenario.workflow == "upload":
+        return f"{scenario.input}\n\n(Downloads folder: {downloads_path})"
+    return scenario.input
+
+
+def _seed_eval_downloads(downloads_path: Path) -> None:
+    downloads_path.mkdir(parents=True, exist_ok=True)
+    for name, data in EVAL_DOWNLOAD_PDFS.items():
+        (downloads_path / name).write_bytes(data)
+
+
+@contextmanager
+def _isolated_eval_episodic(workdir: Path, scenario: Scenario) -> Iterator[None]:
+    """Point episodic memory at a temp DB seeded for memory scenarios; restore after."""
+    if scenario.workflow != "memory":
+        yield
+        return
+    prev = memory_module._episodic
+    mem = EpisodicMemory(db_path=str(workdir / "episodic.db"))
+    for row in json.loads(EVAL_EPISODIC_SEED.read_text()):
+        mem.log_run(RunRecord(**row))
+    memory_module._episodic = mem
+    try:
+        yield
+    finally:
+        mem.close()
+        memory_module._episodic = prev
 
 # Local tools that touch nothing real in Fixture-world mode: safe to bind in an eval. (The web
 # search is the Fixture world's seeded one there, under the real tool's name.)
@@ -161,14 +202,13 @@ async def run_scenario(
     failure = scenario.inject_failure
     recorded_uploads: list[tuple[str, bytes]] = []
     upload_log_path_str: str | None = None
-    downloads_path = Path()
+    expected_bytes: dict[str, bytes] | None = None
     with tempfile.TemporaryDirectory(prefix="eval-") as workdir:
-        drafts_path = Path(workdir) / "drafts.jsonl"
-        upload_log_path = Path(workdir) / "purchase-uploads.jsonl"
-        downloads_path = Path(os.environ["INFORMER_DOWNLOADS_DIR"]) if os.environ.get(
-            "INFORMER_DOWNLOADS_DIR"
-        ) else Path(workdir) / "Downloads"
-        downloads_path.mkdir(parents=True, exist_ok=True)
+        work = Path(workdir)
+        drafts_path = work / "drafts.jsonl"
+        upload_log_path = work / "purchase-uploads.jsonl"
+        downloads_path = work / "Downloads"
+        _seed_eval_downloads(downloads_path)
         switch = fixture_ms365.FailureSwitch(Path(workdir) / "ms365-failure")
         env = {
             clock.TODAY_ENV: clock.SEED_TODAY.isoformat(),
@@ -188,7 +228,7 @@ async def run_scenario(
                 else os.environ.get(HANDOVER_FAIL_ENV)
             ),
         }
-        with _environment(env):
+        with _isolated_eval_episodic(work, scenario), _environment(env):
             tools, notices = await load_tools()
             if failure and failure.server == "ms365":
                 switch.set(failure.mode, failure.times)  # after loading: it hits the run, not startup
@@ -211,7 +251,7 @@ async def run_scenario(
                         graph,
                         config,
                         tools=tools,
-                        user_message=scenario.input,
+                        user_message=_scenario_user_message(scenario, downloads_path),
                         today=clock.today(),
                     )
                     while "__interrupt__" in result:
@@ -240,6 +280,12 @@ async def run_scenario(
             drafts = fixture_ms365.recorded_drafts(drafts_path)
             recorded_uploads = read_upload_log(upload_log_path)
             upload_log_path_str = str(upload_log_path)
+            if scenario.expected_outcome and scenario.expected_outcome.upload_file:
+                upload_name = scenario.expected_outcome.upload_file
+                candidate = downloads_path / upload_name
+                expected_bytes = (
+                    {upload_name: candidate.read_bytes()} if candidate.is_file() else {upload_name: None}
+                )
 
     if is_step_limit_answer(messages[-1] if messages else None):
         status = "step_limit"
@@ -247,11 +293,6 @@ async def run_scenario(
     tool_calls = _tool_call_records(messages, rejected)
     final_answer = _final_answer(messages) if status == "completed" else ""
     trajectory = score_trajectory(scenario, tool_calls, completed=status == "completed" and bool(final_answer))
-    expected_bytes = None
-    if scenario.expected_outcome and scenario.expected_outcome.upload_file:
-        candidate = downloads_path / scenario.expected_outcome.upload_file
-        if candidate.is_file():
-            expected_bytes = {scenario.expected_outcome.upload_file: candidate.read_bytes()}
     outcome = score_outcome(
         scenario,
         recorded_uploads,
@@ -274,7 +315,7 @@ async def run_scenario(
         trajectory=trajectory,
         outcome=outcome,
         answer_facts=score_facts(scenario, final_answer),
-        passed=run_passed(scenario, trajectory, outcome),
+        passed=run_passed(scenario, trajectory, outcome, final_answer=final_answer),
         upload_log_path=upload_log_path_str,
         efficiency=efficiency(usage.usage_metadata, latency_s=latency_s, on=datetime.now(timezone.utc).date()),
         trace_id=trace.trace_id if tracer else None,

@@ -90,6 +90,7 @@ class Scenario(_Strict):
     ordering: list[OrderingConstraint] = []
     forbidden_tools: list[str] = []
     expected_facts: list[str] = []
+    require_facts: bool = False  # when true, every expected_fact must appear in the final answer
     expected_outcome: ExpectedOutcome | None = None
 
 

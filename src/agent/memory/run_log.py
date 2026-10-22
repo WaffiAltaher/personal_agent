@@ -82,11 +82,15 @@ def _sum_usage_metadata(messages: list[BaseMessage]) -> tuple[dict | None, dict 
 
 
 def _is_step_limit_answer(message: BaseMessage | None) -> bool:
+    # Keep in sync with agent.graph.STEP_LIMIT_ANSWER (avoid importing graph here).
+    step_limit_answer = (
+        "Stopped: the agent hit its step limit without a final answer. "
+        "Try a narrower question."
+    )
     return (
         isinstance(message, AIMessage)
         and not getattr(message, "tool_calls", None)
-        and isinstance(message.content, str)
-        and "step limit" in message.content.lower()
+        and message.content == step_limit_answer
     )
 
 

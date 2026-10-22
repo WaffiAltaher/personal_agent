@@ -59,7 +59,9 @@ async def run_conversation(
 
     assert user_message is not None
     if pending:
-        await _abandon_pending_approval(graph, config)
+        result = await graph.ainvoke(_abandon_resume_command(), config=config)
+        while "__interrupt__" in result:
+            result = await graph.ainvoke(_abandon_resume_command(), config=config)
     return await graph.ainvoke(
         {
             "messages": [HumanMessage(content=user_message)],
@@ -67,6 +69,7 @@ async def run_conversation(
             "runtime_clock_iso": new_runtime_clock_iso(today),
             "last_model_input_tokens": None,
             "message_count_at_last_model_call": 0,
+            "stubbed_tool_call_ids": [],
         },
         config=config,
     )

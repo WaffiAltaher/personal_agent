@@ -50,6 +50,16 @@ def _answer(text: str) -> AIMessage:
     return AIMessage(content=text)
 
 
+def test_every_upload_scenario_is_told_the_seeded_downloads_folder():
+    from agent.evals.harness import _scenario_user_message
+
+    folder = Path("/tmp/eval-downloads")
+    for scenario in _upload_scenarios():
+        assert str(folder) in _scenario_user_message(scenario, folder)
+    other = next(s for s in DATASET.scenarios if s.workflow != "upload")
+    assert str(folder) not in _scenario_user_message(other, folder)
+
+
 def test_upload_scenarios_declare_expected_outcomes_and_trajectories():
     approved = next(s for s in _upload_scenarios() if s.id == "upload-purchase-approved")
     assert approved.approval == "approve"
@@ -89,7 +99,7 @@ async def test_approved_upload_passes_with_exactly_one_matching_file(scripted_mo
     )
     [run] = results.runs
     assert run.outcome.passed
-    assert run_passed(scenario, run.trajectory, run.outcome)
+    assert run_passed(scenario, run.trajectory, run.outcome, final_answer=run.final_answer)
 
 
 @pytest.mark.asyncio
@@ -113,7 +123,7 @@ async def test_scripted_run_with_right_tools_but_wrong_file_fails_on_outcome(scr
     [run] = results.runs
     assert run.trajectory.passed
     assert not run.outcome.passed
-    assert not run_passed(scenario, run.trajectory, run.outcome)
+    assert not run_passed(scenario, run.trajectory, run.outcome, final_answer=run.final_answer)
 
 
 def test_rejected_upload_scenario_fails_if_any_upload_was_recorded():
@@ -193,6 +203,7 @@ async def test_mixed_scenario_passes_only_with_vat_amount_and_no_upload(scripted
     [run] = results.runs
     assert run.outcome.passed
     assert not run.answer_facts.missing
+    assert run.passed
     assert run.outcome.upload_count == 0
 
 
@@ -204,9 +215,6 @@ async def test_eval_report_shows_outcome_column(scripted_model, tmp_path):
     pdf = tmp_path / "supplier-march.pdf"
     pdf.write_bytes(MINIMAL_PDF)
     path = str(pdf)
-    import os
-
-    os.environ["INFORMER_DOWNLOADS_DIR"] = str(tmp_path)
     run = await run_scenario(
         scenario,
         model=scripted_model([

@@ -113,6 +113,46 @@ async def test_new_message_on_pending_approval_rejects_writes_then_answers(scrip
 
 
 @pytest.mark.asyncio
+async def test_new_message_rejects_every_pending_write_before_the_new_turn(scripted_model):
+    @write_action
+    @tool("send_mail")
+    async def send_mail() -> str:
+        """Sends mail."""
+        return "sent"
+
+    tools = [send_mail]
+    graph = build_graph(
+        checkpointer=InMemorySaver(),
+        tools=tools,
+        model=scripted_model(
+            [
+                AIMessage(content="", tool_calls=[{"id": "w1", "name": "send_mail", "args": {}}]),
+                AIMessage(content="", tool_calls=[{"id": "w2", "name": "send_mail", "args": {}}]),
+                AIMessage(content="The weather is fine."),
+                AIMessage(content="The weather is fine."),
+            ]
+        ),
+    )
+    config = {"configurable": {"thread_id": "t-multi-reject"}}
+    await run_conversation(graph, config, tools=tools, user_message="send mail")
+    result = await run_conversation(graph, config, tools=tools, user_message="What's the weather?")
+
+    rejections = [
+        m for m in result["messages"] if isinstance(m, ToolMessage) and m.status == "error"
+    ]
+    assert len(rejections) == 2
+    assert result["messages"][-1].content == "The weather is fine."
+    pending = [
+        tc
+        for msg in result["messages"]
+        if isinstance(msg, AIMessage)
+        for tc in msg.tool_calls or []
+        if not any(isinstance(m, ToolMessage) and m.tool_call_id == tc["id"] for m in result["messages"])
+    ]
+    assert pending == []
+
+
+@pytest.mark.asyncio
 async def test_resume_without_decision_is_refused(scripted_model):
     @write_action
     @tool("send_mail")

@@ -58,10 +58,6 @@ def _script(scenario: Scenario, *, amount_in_answer: str) -> list[AIMessage]:
     ]
 
 
-def _run_passes(scenario: Scenario, run) -> bool:
-    return run.trajectory.passed and not run.answer_facts.missing
-
-
 @pytest.fixture(autouse=True)
 def no_backoff_wait(monkeypatch):
     monkeypatch.setattr(
@@ -80,6 +76,7 @@ def test_financial_scenarios_use_the_revenue_or_vat_tool_and_exact_amount_facts(
         assert "informer_trial_balance" in scenario.forbidden_tools
         amount = EXPECTED_AMOUNTS[scenario.id]
         assert amount in scenario.expected_facts
+        assert scenario.require_facts
 
 
 @pytest.mark.asyncio
@@ -95,7 +92,7 @@ async def test_scripted_run_with_exact_amount_passes(scenario, scripted_model):
     [run] = results.runs
     assert run.status == "completed"
     assert [c.name for c in run.tool_calls] == scenario.required_tools
-    assert _run_passes(scenario, run)
+    assert run.passed
 
 
 @pytest.mark.asyncio
@@ -110,7 +107,7 @@ async def test_scripted_run_quoting_a_rounded_amount_fails(scripted_model):
     [run] = results.runs
     assert run.trajectory.passed
     assert run.answer_facts.missing == ["2500.00"]
-    assert not _run_passes(scenario, run)
+    assert not run.passed
 
 
 def test_rounded_amount_without_cents_is_not_treated_as_exact():

@@ -10,10 +10,8 @@ import pytest
 from langchain_core.messages import AIMessage
 
 import agent.graph as graph_module
-import agent.memory
 from agent.evals.harness import run_eval
 from agent.evals.scenarios import DEFAULT_DATASET, Dataset, Scenario, load_dataset
-from agent.memory.episodic import EpisodicMemory, RunRecord
 from fixture_world import clock
 
 DATASET = load_dataset(DEFAULT_DATASET)
@@ -36,30 +34,6 @@ def no_backoff_wait(monkeypatch):
     )
 
 
-@pytest.fixture
-def seeded_episodic(tmp_path, monkeypatch):
-    mem = EpisodicMemory(db_path=str(tmp_path / "eval-episodic.db"))
-    today = clock.today()
-    last_week = today - timedelta(days=5)
-    mem.log_run(
-        RunRecord(
-            user_input="How much VAT do I owe for Q3 2026?",
-            final_output="The VAT position is -375.00 EUR.",
-            timestamp=last_week.isoformat(),
-        )
-    )
-    mem.log_run(
-        RunRecord(
-            user_input="When is the October payroll run due?",
-            final_output="Payroll is due on the 25th.",
-            timestamp=(today - timedelta(days=2)).isoformat(),
-        )
-    )
-    monkeypatch.setattr(agent.memory, "_episodic", mem)
-    yield mem
-    mem.close()
-
-
 def _call(name: str, args: dict, call_id: str) -> AIMessage:
     return AIMessage(content="", tool_calls=[{"id": call_id, "name": name, "args": args}])
 
@@ -76,7 +50,7 @@ def test_past_run_scenarios_are_in_the_dataset():
 
 
 @pytest.mark.asyncio
-async def test_vat_last_week_scenario_passes_with_scripted_search(scripted_model, seeded_episodic):
+async def test_vat_last_week_scenario_passes_with_scripted_search(scripted_model):
     scenario = next(s for s in _past_run_scenarios() if s.id == "memory-vat-last-week")
     today = clock.today()
     since = (today - timedelta(days=7)).isoformat()
@@ -101,12 +75,12 @@ async def test_vat_last_week_scenario_passes_with_scripted_search(scripted_model
 
 
 @pytest.mark.asyncio
-async def test_retry_scenario_calls_search_twice_when_the_first_is_empty(scripted_model, seeded_episodic):
+async def test_retry_scenario_calls_search_twice_when_the_first_is_empty(scripted_model):
     scenario = next(s for s in _past_run_scenarios() if s.id == "memory-search-retry")
     script = [
-        _call("retrieve_episodic_memory", {"terms": "salary slip"}, "mem-1"),
-        _call("retrieve_episodic_memory", {"terms": "payroll"}, "mem-2"),
-        _answer("You asked when the October payroll run is due."),
+        _call("retrieve_episodic_memory", {"terms": "October payroll"}, "mem-1"),
+        _call("retrieve_episodic_memory", {"terms": "25th"}, "mem-2"),
+        _answer("You asked when the salary payment date is — your October payroll question."),
     ]
     results = await run_eval(
         Dataset(format_version=1, dataset_version="test", scenarios=[scenario]),
@@ -118,4 +92,4 @@ async def test_retry_scenario_calls_search_twice_when_the_first_is_empty(scripte
     assert run.trajectory.passed
     assert [c.name for c in run.tool_calls].count("retrieve_episodic_memory") == 2
     assert run.tool_calls[0].output == "No matching runs found in episodic memory."
-    assert "payroll" in run.tool_calls[1].output.lower()
+    assert "25th" in run.tool_calls[1].output.lower()
