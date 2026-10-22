@@ -6,7 +6,7 @@
 
 **Blocked by:** 03, 13
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 **Closes:** H1 (trial balance misdescribes balance-sheet ledgers); ADR-012; decisions on financial questions and on `vat_position`
 
