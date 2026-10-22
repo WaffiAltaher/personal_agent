@@ -1,26 +1,21 @@
 # src/informer_mcp/sales.py
-"""Sales invoice tools, and the Overdue invoice calculation Informer itself lacks.
+"""Sales invoice tools.
 
-Vocabulary follows GLOSSARY.md: Client, Sales invoice, Due date, Open amount, Overdue invoice.
+Vocabulary follows GLOSSARY.md: Client, Sales invoice, Due date, Open amount.
 Money leaves the server as exact decimal strings in EUR, dates as ISO strings.
 """
 
-import asyncio
-from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
-from zoneinfo import ZoneInfo
 
 from mcp.server.fastmcp import FastMCP
 
 from informer_mcp.client import InformerClient
-from informer_mcp.config import InformerSettings
 
-ITTOPIA_TZ = ZoneInfo("Europe/Amsterdam")
 CURRENCY = "EUR"
 CENT = Decimal("0.01")
 
-# Informer's own sales-invoice status filters. It has no "overdue" filter: use list_overdue_invoices.
+# Informer's own sales-invoice status filters.
 SalesInvoiceStatus = Literal["concept", "open", "collect", "accruals", "collection_fines", "payment_plans"]
 
 
@@ -84,67 +79,14 @@ def _invoice_detail(raw: dict) -> dict:
     }
 
 
-def _today(settings: InformerSettings) -> date:
-    return settings.today or datetime.now(ITTOPIA_TZ).date()
+def register_sales_tools(mcp: FastMCP, informer: InformerClient, read_only, describe_relation) -> None:
+    del describe_relation  # reserved for future Relation-enriched invoice tools
 
-
-def _as_of_date(as_of: str | None, settings: InformerSettings) -> date:
-    if not as_of:
-        return _today(settings)
-    try:
-        return date.fromisoformat(as_of)
-    except ValueError:
-        raise ValueError(f"as_of must be an ISO date (YYYY-MM-DD), got {as_of!r}") from None
-
-
-def _overdue(raw: dict, as_of: date) -> bool:
-    """GLOSSARY.md: an Open amount greater than zero and a Due date before the as-of date."""
-    if raw["concept"] == "1":  # a concept was never issued, so it is not a Sales invoice yet
-        return False
-    due = iso_date(raw["expiry_date"])
-    return money(raw["totals"]["open"]) > 0 and due is not None and date.fromisoformat(due) < as_of
-
-
-RELATION_LOOKUP_CONCURRENCY = 4  # one-by-one Relation requests in flight at once (each under the rate limiter)
-
-
-async def _relations_by_id(informer: InformerClient, settings: InformerSettings, ids: set[int]) -> dict[int, dict]:
-    """The raw Relations with these ids, in as few requests as Informer allows: page 0
-    of /relations, then further pages while more than one Relation is still missing
-    (`next` says another page exists; Informer does not say how many), otherwise one
-    GET /relations/{id} each (a few at a time)."""
-    if not ids:
-        return {}
-    params = {"records": settings.page_size}
-    first = await informer.get("/relations", {**params, "page": 0})
-    found = {r["id"]: r for r in first["relations"] if r["id"] in ids}
-    # Informer sends `next` (another page exists) and not how many pages remain.
-    # One more list page is cheaper than one GET per missing Relation only when
-    # more than one is still missing; a single missing Relation is one GET.
-    page = first["pagination"]["next"]
-    while len(found) < len(ids) and page is not None and len(ids) - len(found) > 1:
-        data = await informer.get("/relations", {**params, "page": page})
-        found |= {r["id"]: r for r in data["relations"] if r["id"] in ids}
-        page = data["pagination"]["next"]
-
-    slots = asyncio.Semaphore(RELATION_LOOKUP_CONCURRENCY)
-
-    async def fetch(relation_id: int) -> tuple[int, dict]:
-        async with slots:
-            return relation_id, await informer.get(f"/relations/{relation_id}")
-
-    found |= dict(await asyncio.gather(*(fetch(i) for i in ids - found.keys())))
-    return found
-
-
-def register_sales_tools(mcp: FastMCP, informer: InformerClient, settings: InformerSettings,
-                         read_only, describe_relation) -> None:
     @mcp.tool(annotations=read_only)
     async def list_sales_invoices(status: SalesInvoiceStatus | None = None, relation_id: int | None = None) -> dict:
         """List Sales invoices (invoices ITtopia issued), optionally filtered by Informer
         status ("open" = not yet fully paid, "concept" = not yet issued, ...) and/or by one
-        Relation's `id`. Amounts are decimal strings in EUR; `due_date` is the Due date.
-        For Overdue invoices use list_overdue_invoices instead."""
+        Relation's `id`. Amounts are decimal strings in EUR; `due_date` is the Due date."""
         params: dict = {}
         if status:
             params["filter"] = status
@@ -162,53 +104,3 @@ def register_sales_tools(mcp: FastMCP, informer: InformerClient, settings: Infor
         """Get one Sales invoice by its Informer id (the `id` from list_sales_invoices),
         including its lines. Amounts are decimal strings in EUR."""
         return {"currency": CURRENCY, **_invoice_detail(await informer.get(f"/invoices/sales/{invoice_id}"))}
-
-    @mcp.tool(annotations=read_only)
-    async def list_overdue_invoices(as_of: str | None = None) -> dict:
-        """List Overdue invoices: Sales invoices with an Open amount above zero whose Due
-        date is before `as_of` (an ISO date, YYYY-MM-DD; default today). An invoice due on
-        `as_of` itself is not overdue yet. Grouped by Client, each with its email addresses
-        and total Open amount, largest total first. Open amounts are the current ones, also
-        for a past `as_of`. Amounts are decimal strings in EUR."""
-        as_of_date = _as_of_date(as_of, settings)
-        paged = await informer.get_pages("/invoices/sales", "invoices", {"filter": "open"})
-        by_client: dict[int, list[dict]] = {}
-        for raw in paged.items:
-            if _overdue(raw, as_of_date):
-                by_client.setdefault(raw["relation_id"], []).append(raw)
-
-        relations = await _relations_by_id(informer, settings, set(by_client))
-        clients = []
-        for relation_id, invoices in by_client.items():
-            relation = describe_relation(relations[relation_id])
-            invoices.sort(key=lambda raw: raw["expiry_date"])
-            clients.append({
-                "relation_id": relation_id,
-                "name": relation["name"],
-                "email": relation["email"],
-                "email_invoice": relation["email_invoice"],
-                "total_open_amount": sum((money(i["totals"]["open"]) for i in invoices), Decimal("0.00")),
-                "invoices": [
-                    {
-                        "id": raw["id"],
-                        "number": raw["number"],
-                        "invoice_date": iso_date(raw["invoice_date"]),
-                        "due_date": iso_date(raw["expiry_date"]),
-                        "days_overdue": (as_of_date - date.fromisoformat(raw["expiry_date"][:10])).days,
-                        "total_incl_vat": str(money(raw["totals"]["incl_vat"])),
-                        "open_amount": str(money(raw["totals"]["open"])),
-                    }
-                    for raw in invoices
-                ],
-            })
-        clients.sort(key=lambda c: (-c["total_open_amount"], c["name"]))
-        total = sum((c["total_open_amount"] for c in clients), Decimal("0.00"))
-        for client in clients:
-            client["total_open_amount"] = str(client["total_open_amount"])
-        return {
-            "as_of": as_of_date.isoformat(),
-            "currency": CURRENCY,
-            "total_open_amount": str(total),
-            "clients": clients,
-            **paged.notice("open sales invoices"),
-        }

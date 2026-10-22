@@ -41,9 +41,10 @@ def test_dataset_loads_with_its_version_and_scenarios():
     assert reply.inject_failure.times == 1
     assert rejected.approval == "reject"
     assert rejected.inject_failure is None
-    assert rejected.ordering[0].before == "informer_list_overdue_invoices"
+    assert rejected.id == "reply-sanne-rejected"
+    assert rejected.ordering[0].before == "ms365_list-mail-messages"
     assert rejected.forbidden_tools == ["create_draft_email", "ms365_send-mail"]
-    assert rejected.expected_facts == ["Noordzee Advies"]
+    assert rejected.expected_facts == ["Sanne"]
 
 
 @pytest.mark.parametrize("change, complaint", [
@@ -64,6 +65,7 @@ def test_invalid_dataset_is_rejected_with_the_reason(tmp_path, change, complaint
 # --- running and scoring -------------------------------------------------------------------
 
 QUESTION_ID = "AAMkAGZpeHR1cmUAMESSAGE02"  # Jan de Bakker's question about invoice 2026-031
+SANNE_MESSAGE_ID = "AAMkAGZpeHR1cmUAMESSAGE04"
 
 
 # Every scripted reply reports the usage a Claude Sonnet 5.5 call would: 1000 tokens in, 100 out.
@@ -80,12 +82,6 @@ def _answer(text: str) -> AIMessage:
     return AIMessage(content=text, usage_metadata=USAGE, response_metadata=METADATA)
 
 
-REMINDER = {"body": {
-    "subject": "Payment reminder",
-    "body": {"contentType": "text", "content": "Dear client, please pay."},
-    "toRecipients": [{"emailAddress": {"address": "facturen@goudenbol.example"}}],
-}}
-
 SCRIPTS = {
     # Well behaved: finds the mail (the mailbox fails once and the read is retried), then
     # proposes the reply Draft, which the harness approves.
@@ -95,12 +91,14 @@ SCRIPTS = {
               {"messageId": QUESTION_ID, "body": {"Comment": "Happy to go through the hours on Tuesday."}}, "reply"),
         _answer("I saved a reply to Jan in your Drafts: you'll go through the hours on Tuesday."),
     ],
-    # Gets the trajectory wrong: tries Gmail (forbidden), then drafts a reminder without
-    # reading Informer first. The harness rejects both.
-    "overdue-reminders-rejected": [
-        _call("create_draft_email", {"to": "facturen@goudenbol.example", "subject": "Reminder", "body": "Pay"}, "gmail"),
-        _call("ms365_create-draft-email", REMINDER, "draft"),
-        _answer("Understood, I did not save any reminders."),
+    # Gets the trajectory wrong: tries Gmail (forbidden), then drafts a reply without reading
+    # the mailbox first. The harness rejects both.
+    "reply-sanne-rejected": [
+        _call("create_draft_email", {"to": "sanne@example", "subject": "Re:", "body": "ok"}, "gmail"),
+        _call("ms365_create-reply-draft",
+              {"messageId": SANNE_MESSAGE_ID, "body": {"Comment": "I'll look at your examples before Friday."}},
+              "reply"),
+        _answer("Understood, I did not save a reply."),
     ],
 }
 
@@ -157,35 +155,35 @@ async def test_well_behaved_run_passes_and_recovers_from_the_injected_failure(ev
 
 @pytest.mark.asyncio
 async def test_wrong_trajectory_fails_with_the_reasons_scored(evaluate):
-    results = await evaluate("overdue-reminders-rejected")
+    results = await evaluate("reply-sanne-rejected")
 
     [run] = results.runs
     assert run.status == "completed"
     assert [(c.name, c.status) for c in run.tool_calls] == [
         ("create_draft_email", "rejected"),
-        ("ms365_create-draft-email", "rejected"),
+        ("ms365_create-reply-draft", "rejected"),
     ]
     assert [i.decision for i in run.interrupts] == ["reject", "reject"]
     assert run.drafts == []  # rejected: nothing reached Outlook
 
     score = run.trajectory
     assert score.precision == 0.5  # the Gmail call was not required
-    assert score.recall == 0.5  # Informer was never read
+    assert score.recall == 0.5  # the mailbox was never read
     assert [(o.before, o.after, o.met) for o in score.ordering] == [
-        ("informer_list_overdue_invoices", "ms365_create-draft-email", False),
+        ("ms365_list-mail-messages", "ms365_create-reply-draft", False),
     ]
     assert score.ordering_met is False
     assert score.forbidden_violations == ["create_draft_email"]
     assert score.recovered is None  # no failure injected
     assert score.passed is False
-    assert run.answer_facts.missing == ["Noordzee Advies"]
+    assert run.answer_facts.missing == ["Sanne"]
 
 
 @pytest.mark.asyncio
 async def test_summary_aggregates_both_runs(evaluate):
     results = await evaluate()
 
-    assert [r.scenario_id for r in results.runs] == ["reply-flaky-mailbox", "overdue-reminders-rejected"]
+    assert [r.scenario_id for r in results.runs] == ["reply-flaky-mailbox", "reply-sanne-rejected"]
     summary = results.summary
     assert (summary.runs, summary.passed, summary.pass_rate) == (2, 1, 0.5)
     assert summary.mean_precision == 0.75
@@ -229,7 +227,7 @@ async def test_repeats_run_each_scenario_again_and_record_each_runs_variation(sc
 
     results = await run_eval(load_dataset(DATASET), model_name="scripted",
                              model_factory=lambda scenario: scripted_model(next(scripts)),
-                             scenario_filter="reply", repeats=2)
+                             scenario_filter="flaky", repeats=2)
 
     assert results.repeats == 2
     assert [(r.scenario_id, r.repeat) for r in results.runs] == [("reply-flaky-mailbox", 0), ("reply-flaky-mailbox", 1)]
@@ -252,7 +250,7 @@ async def test_by_default_each_scenario_runs_once(evaluate):
 
 @pytest.mark.asyncio
 async def test_command_runs_the_given_number_of_repeats(scripted_model, tmp_path, langfuse_spans):
-    await main(["--model", "anthropic:claude-sonnet-5-5", "--dataset", str(DATASET), "--scenario", "reply",
+    await main(["--model", "anthropic:claude-sonnet-5-5", "--dataset", str(DATASET), "--scenario", "flaky",
                 "--repeats", "3", "--out", str(tmp_path), "--no-ragas"],
                create_model=lambda name: scripted_model(itertools.repeat(_answer("Nothing found."))))
 
@@ -286,7 +284,7 @@ async def test_the_model_under_test_is_told_the_fixture_worlds_date(scripted_mod
         return _answer("Nothing to do.")
 
     await run_eval(load_dataset(DATASET), model_name="scripted",
-                   model_factory=lambda scenario: scripted_model([reply]), scenario_filter="reply")
+                   model_factory=lambda scenario: scripted_model([reply]), scenario_filter="flaky")
 
     assert "Current date/time: 2026-10-07T09:00:00+02:00" in seen[0]
 
@@ -296,7 +294,7 @@ async def test_usage_from_a_model_without_a_price_has_no_cost(scripted_model):
     unpriced = [AIMessage(content="Nothing to do.", usage_metadata=USAGE, response_metadata={"model_name": "gpt-9"})]
     results = await run_eval(load_dataset(DATASET), model_name="scripted",
                              model_factory=lambda scenario: scripted_model(unpriced),
-                             scenario_filter="reply")
+                             scenario_filter="flaky")
 
     [run] = results.runs
     assert run.efficiency.total_tokens == 1100
@@ -386,7 +384,7 @@ async def test_ragas_scores_the_answer_against_the_tool_outputs_with_the_judge(e
 
 @pytest.mark.asyncio
 async def test_metrics_without_contexts_are_not_scored_and_say_why(evaluate_with_judge):
-    results = await evaluate_with_judge("overdue-reminders-rejected")
+    results = await evaluate_with_judge("reply-sanne-rejected")
 
     [run] = results.runs
     g = run.generation
@@ -415,7 +413,7 @@ async def test_a_judge_failure_is_recorded_not_raised(scripted_model):
         load_dataset(DATASET),
         model_name="scripted",
         model_factory=lambda scenario: scripted_model(SCRIPTS[scenario.id]),
-        scenario_filter="reply",
+        scenario_filter="flaky",
         scorer=RagasScorer(judge=garbled, embeddings=ScriptedEmbeddings()),
     )
 
@@ -428,7 +426,7 @@ async def test_a_judge_failure_is_recorded_not_raised(scripted_model):
 
 @pytest.mark.asyncio
 async def test_without_a_scorer_generation_is_not_scored(evaluate, tmp_path):
-    results = await evaluate("reply")
+    results = await evaluate("flaky")
 
     assert results.runs[0].generation is None
     assert results.summary.mean_faithfulness is None
@@ -450,7 +448,7 @@ async def test_report_shows_the_judge_and_the_generation_scores(evaluate_with_ju
     assert "| Faithfulness (mean) | 0.50 |" in report
     assert "| Answer relevancy (mean) | 0.60 |" in report
     assert "| reply-flaky-mailbox | 0.50 | 0.60 | 0.50 | 0.50 | 2 |" in report
-    assert "| overdue-reminders-rejected | n/a | 0.60 | n/a | n/a | 0 |" in report
+    assert "| reply-sanne-rejected | n/a | 0.60 | n/a | n/a | 0 |" in report
 
 
 # --- Langfuse tagging ----------------------------------------------------------------------
@@ -465,7 +463,7 @@ async def test_each_run_is_one_langfuse_trace_tagged_with_model_prompt_scenario_
         load_dataset(DATASET),
         model_name="anthropic:claude-sonnet-5-5",
         model_factory=lambda scenario: scripted_model(SCRIPTS[scenario.id]),
-        scenario_filter="reply",
+        scenario_filter="flaky",
         tracer=langfuse_trace,
     )
 
@@ -492,7 +490,7 @@ async def test_each_run_is_one_langfuse_trace_tagged_with_model_prompt_scenario_
 
 @pytest.mark.asyncio
 async def test_without_a_tracer_runs_have_no_trace(evaluate):
-    results = await evaluate("reply")
+    results = await evaluate("flaky")
 
     assert results.runs[0].trace_id is None
 
@@ -514,10 +512,10 @@ async def test_results_json_and_report_are_written_side_by_side(evaluate, tmp_pa
     assert "| Passed | 1/2 (50%) |" in report
     assert "| Recovery after injected failure | 100% |" in report
     assert "| reply-flaky-mailbox | PASS |" in report
-    assert "| overdue-reminders-rejected | FAIL |" in report
+    assert "| reply-sanne-rejected | FAIL |" in report
     # A failing run says why.
-    assert "missing required tools: informer_list_overdue_invoices" in report
-    assert "ordering not met: informer_list_overdue_invoices before ms365_create-draft-email" in report
+    assert "missing required tools: ms365_list-mail-messages" in report
+    assert "ordering not met: ms365_list-mail-messages before ms365_create-reply-draft" in report
     assert "forbidden tools called: create_draft_email" in report
     # Efficiency: totals in the summary, tokens and cost per scenario run.
     assert "| Total tokens | 6600 |" in report
@@ -538,7 +536,7 @@ async def test_command_runs_the_chosen_model_on_filtered_scenarios_and_writes_bo
         chosen.append(name)
         return scripted_model(SCRIPTS["reply-flaky-mailbox"])
 
-    await main(["--model", "anthropic:claude-sonnet-5-5", "--dataset", str(DATASET), "--scenario", "reply",
+    await main(["--model", "anthropic:claude-sonnet-5-5", "--dataset", str(DATASET), "--scenario", "flaky",
                 "--out", str(tmp_path), "--no-ragas"], create_model=create_model)
 
     assert chosen == ["anthropic:claude-sonnet-5-5"]  # --no-ragas: no judge
@@ -572,7 +570,7 @@ def models(scripted_model):
 async def test_command_grades_answers_with_the_judge_model_and_traces_each_run(
         models, tmp_path, capsys, langfuse_spans):
     await main(["--model", "google_genai:gemini-3.8-flash", "--judge-model", "anthropic:claude-sonnet-5-5",
-                "--dataset", str(DATASET), "--scenario", "reply", "--out", str(tmp_path)],
+                "--dataset", str(DATASET), "--scenario", "flaky", "--out", str(tmp_path)],
                create_model=models, create_embeddings=ScriptedEmbeddings)
 
     assert models.chosen == ["google_genai:gemini-3.8-flash", "anthropic:claude-sonnet-5-5"]
@@ -591,7 +589,7 @@ async def test_without_a_judge_model_the_model_under_test_grades_and_the_command
     from agent.config import settings
     monkeypatch.setattr(settings, "eval_judge_model", None)
 
-    await main(["--model", "google_genai:gemini-3.8-flash", "--dataset", str(DATASET), "--scenario", "reply",
+    await main(["--model", "google_genai:gemini-3.8-flash", "--dataset", str(DATASET), "--scenario", "flaky",
                 "--out", str(tmp_path)], create_model=models, create_embeddings=ScriptedEmbeddings)
 
     assert models.chosen == ["google_genai:gemini-3.8-flash"] * 2
@@ -605,7 +603,7 @@ async def test_the_judge_model_defaults_to_the_setting(models, tmp_path, langfus
     from agent.config import settings
     monkeypatch.setattr(settings, "eval_judge_model", "anthropic:claude-sonnet-5-5")
 
-    await main(["--model", "google_genai:gemini-3.8-flash", "--dataset", str(DATASET), "--scenario", "reply",
+    await main(["--model", "google_genai:gemini-3.8-flash", "--dataset", str(DATASET), "--scenario", "flaky",
                 "--out", str(tmp_path)], create_model=models, create_embeddings=ScriptedEmbeddings)
 
     assert models.chosen == ["google_genai:gemini-3.8-flash", "anthropic:claude-sonnet-5-5"]

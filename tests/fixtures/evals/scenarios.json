@@ -14,14 +14,14 @@
       "expected_facts": ["Tuesday", "Drafts"]
     },
     {
-      "id": "overdue-reminders-rejected",
-      "workflow": "overdue-invoice capstone",
-      "input": "Which clients are overdue on payment? Draft reminder emails.",
+      "id": "reply-sanne-rejected",
+      "workflow": "rejection",
+      "input": "Reply to Sanne that I'll look at her website examples before Friday's call.",
       "approval": "reject",
-      "required_tools": ["informer_list_overdue_invoices", "ms365_create-draft-email"],
-      "ordering": [{"before": "informer_list_overdue_invoices", "after": "ms365_create-draft-email"}],
+      "required_tools": ["ms365_list-mail-messages", "ms365_create-reply-draft"],
+      "ordering": [{"before": "ms365_list-mail-messages", "after": "ms365_create-reply-draft"}],
       "forbidden_tools": ["create_draft_email", "ms365_send-mail"],
-      "expected_facts": ["Noordzee Advies"]
+      "expected_facts": ["Sanne"]
     }
   ]
 }
