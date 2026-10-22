@@ -15,9 +15,8 @@ from agent.memory.context_view import (
     cap_tool_result_content,
     estimate_context_tokens,
 )
-from agent.memory.recall import RewrittenQuery
-from agent.memory.recall import recall_chunks
 from agent.memory.semantic import MemoryChunk
+from agent.tools.memory import retrieve_memory
 from agent.tools.classification import read_tool
 
 SMALL_CLEAR_THRESHOLD = 800
@@ -226,10 +225,8 @@ def test_token_count_includes_system_tools_and_tool_call_arguments(small_context
 
 
 def test_memory_retrieval_stops_at_budget(small_context_limits, monkeypatch):
-    monkeypatch.setattr(
-        "agent.memory.recall.rewrite_query",
-        lambda request, model=None: RewrittenQuery(semantic_query=request),
-    )
+    import agent.memory
+
     chunks = [
         MemoryChunk(content=_chars_for_tokens(40), source="documents", score=0.95),
         MemoryChunk(content=_chars_for_tokens(40), source="documents", score=0.90),
@@ -240,7 +237,10 @@ def test_memory_retrieval_stops_at_budget(small_context_limits, monkeypatch):
         def search_all(self, _query, k=5):
             return chunks
 
-    selected = recall_chunks("query", FakeSemantic(), k=5)
-    tokens = ContextBudgetManager().estimate_tokens("".join(c.content for c in selected))
+    monkeypatch.setattr(agent.memory, "_semantic", FakeSemantic())
+    result = retrieve_memory.invoke({"query": "query"})
+    selected = ContextBudgetManager().trim_memory_results(chunks, budget=SMALL_MEMORY_BUDGET)
+    tokens = ContextBudgetManager().estimate_tokens(result)
     assert tokens <= SMALL_MEMORY_BUDGET
     assert len(selected) >= 1
+    assert "No relevant memory found." not in result

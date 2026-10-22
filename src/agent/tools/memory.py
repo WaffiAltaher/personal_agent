@@ -5,6 +5,7 @@ from langchain_core.tools import tool
 
 from agent.config import settings
 from agent.memory import get_episodic_memory, get_semantic_memory
+from agent.memory.budget import ContextBudgetManager
 from agent.tools.classification import write_action
 
 
@@ -31,6 +32,7 @@ def retrieve_memory(query: str) -> str:
     or when background context from prior sessions could improve the answer.
     """
     chunks = get_semantic_memory().search_all(query, k=settings.memory_top_k)
+    chunks = ContextBudgetManager().trim_memory_results(chunks, budget=settings.memory_budget)
 
     if not chunks:
         return "No relevant memory found."
