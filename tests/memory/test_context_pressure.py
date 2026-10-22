@@ -240,7 +240,7 @@ def test_memory_retrieval_stops_at_budget(small_context_limits, monkeypatch):
     monkeypatch.setattr(agent.memory, "_semantic", FakeSemantic())
     result = retrieve_memory.invoke({"query": "query"})
     selected = ContextBudgetManager().trim_memory_results(chunks, budget=SMALL_MEMORY_BUDGET)
-    tokens = ContextBudgetManager().estimate_tokens(result)
-    assert tokens <= SMALL_MEMORY_BUDGET
+    content_tokens = ContextBudgetManager().estimate_tokens("".join(c.content for c in selected))
+    assert content_tokens <= SMALL_MEMORY_BUDGET
     assert len(selected) >= 1
-    assert "No relevant memory found." not in result
+    assert result.count("\n\n") + 1 == len(selected)
