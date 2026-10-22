@@ -6,7 +6,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** claimed
+**Status:** resolved
 
 **Closes:** M3 (k03)
 
@@ -16,3 +16,7 @@
 - [ ] Temporarily removing the reducer makes it fail (check by hand; don't commit the mutant)
 
 Spec: `../spec.md`. Decisions: `../findings.md` ("Decisions taken").
+
+## Comments
+
+- Resolved on `ticket/06-two-failures`. Killing test k03 added as `tests/test_k03_two_failures_in_one_batch.py` (no source change; the existing `errors` reducer already satisfies it). Passes on real code; with the `operator.add` reducer removed by hand it fails with `InvalidUpdateError`, and that mutant was reverted, not committed. Full suite: 245 passed, 1 deselected (live), after merging `feat/review-findings`.
