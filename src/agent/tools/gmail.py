@@ -30,10 +30,11 @@ from email.mime.text import MIMEText
 
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from langchain_core.tools import tool
+from langchain_core.tools import StructuredTool, tool
 from pydantic import BaseModel, Field
 
 from agent.auth.google import get_google_credentials
+from fixture_world import google as fixture_google
 
 
 def _get_gmail_service():
@@ -335,3 +336,23 @@ def get_gmail_message(message_id: str) -> str:
         return f"Error: Gmail API error {e.status_code}: {e.reason}"
     except Exception as e:
         return f"Error: {type(e).__name__}: {e}"
+
+
+fixture_search_gmail = StructuredTool.from_function(
+    func=fixture_google.search_gmail,
+    name=search_gmail.name,
+    description=search_gmail.description,
+    args_schema=SearchGmailInput,
+)
+fixture_get_gmail_message = StructuredTool.from_function(
+    func=fixture_google.get_gmail_message,
+    name=get_gmail_message.name,
+    description=get_gmail_message.description,
+    args_schema=GetGmailMessageInput,
+)
+fixture_create_draft_email = StructuredTool.from_function(
+    func=fixture_google.create_draft_email,
+    name=create_draft_email.name,
+    description=create_draft_email.description,
+    args_schema=CreateDraftEmailInput,
+)

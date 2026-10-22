@@ -88,8 +88,12 @@ async def test_summary_compares_trajectory_quality_cost_tokens_and_latency(repor
     assert _row(report, "| Tool-selection recall (mean) |") == "| Tool-selection recall (mean) | 0.75 | 0.25 |"
     assert _row(report, "| Tool-selection precision (mean) |") == "| Tool-selection precision (mean) | 0.75 | 1.00 |"
     assert _row(report, "| Recovery after injected failure |") == "| Recovery after injected failure | 100% | 100% |"
-    assert _row(report, "| Faithfulness (mean) |") == "| Faithfulness (mean) | 0.50 | n/a |"
-    assert _row(report, "| Answer relevancy (mean) |") == "| Answer relevancy (mean) | 0.60 | n/a |"
+    assert _row(report, "| Faithfulness (mean) |") == (
+        "| Faithfulness (mean) | 0.50 (2/4 runs scored, unvalidated LLM judge) | n/a |"
+    )
+    assert _row(report, "| Answer relevancy (mean) |") == (
+        "| Answer relevancy (mean) | 0.60 (4/4 runs scored, unvalidated LLM judge) | n/a |"
+    )
     # A: 3 + 3 model calls per repeat; B: 3 + 1 + 1 + 1. 1100 tokens, $0.003 per call.
     assert _row(report, "| Total tokens |") == "| Total tokens | 13200 | 6600 |"
     assert _row(report, "| Tokens per run (mean) |") == "| Tokens per run (mean) | 3300 | 1650 |"

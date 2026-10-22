@@ -1,5 +1,9 @@
 """
 cli.py — Entry point with Langfuse tracing wired in.
+
+Real-mode runs check the Google login before the agent starts. If Gmail or Calendar
+would need a new browser login, startup stops and names ``python -m agent.auth.google``.
+Use ``--fixtures`` for the seeded Fixture world (no Google login check).
 """
 
 import asyncio
@@ -11,6 +15,7 @@ from langfuse import propagate_attributes
 from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 
+from agent.auth.google import GoogleLoginRequired, check_google_login
 from agent.chat_model import ModelConfigError, create_chat_model
 from agent.graph import build_graph, get_checkpointer, log_run_to_memory
 from agent.tracing import flush_traces, get_callback_handler, verify_connection
@@ -133,11 +138,22 @@ async def main():
     # stops the run here, before any MCP server is started.
     model = create_chat_model()
 
-    # Verify Langfuse is reachable before we do any work.
-    # This fails loudly rather than running the agent and silently losing traces.
-    if not verify_connection():
-        print("Warning: Langfuse connection failed. Traces will not be recorded.")
-        # We continue anyway — observability failing shouldn't block the agent.
+    # Verify Langfuse is reachable before we do any work. If it isn't, say which address
+    # was tried and run untraced: observability failing shouldn't block the agent.
+    langfuse_connected = verify_connection()
+    if not langfuse_connected:
+        print(f"Warning: Langfuse connection failed at {settings.langfuse_base_url}. "
+              "Traces will not be recorded.")
+
+    if not fixtures:
+        try:
+            check_google_login()
+        except GoogleLoginRequired as exc:
+            print(f"Cannot start: {exc}")
+            sys.exit(1)
+        except FileNotFoundError as exc:
+            print(f"Cannot start: {exc}")
+            sys.exit(1)
 
     # Each CLI run gets a fresh thread_id so runs are independent.
     # The checkpointer uses this to namespace the checkpoint.
@@ -147,11 +163,11 @@ async def main():
     # We derive it from thread_id so the two IDs stay linked.
     langfuse_trace_id = thread_id.replace("-", "")
 
-    # One handler per run = one trace in Langfuse.
-    langfuse_handler = get_callback_handler(trace_id=langfuse_trace_id)
+    # One handler per run = one trace in Langfuse. With Langfuse down there is no handler: the run is untraced.
+    callbacks = [get_callback_handler(trace_id=langfuse_trace_id)] if langfuse_connected else []
 
     config = {
-        "callbacks": [langfuse_handler],
+        "callbacks": callbacks,
         "configurable": {"thread_id": thread_id},
         # One tool round is 4 super-steps (budget → agent → human_review → tools),
         # so 40 caps a run at ~10 tool rounds instead of LangGraph's default 10,007.

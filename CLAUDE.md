@@ -11,6 +11,9 @@ uv sync
 # Run the agent (add --fixtures to run against the seeded Fixture world instead of real data)
 python -m agent.cli "<question>"
 
+# Log in to Google (Gmail/Calendar) when startup says the token is missing or dead
+python -m agent.auth.google
+
 # Run evals against the Fixture world; compare two result files
 python -m agent.evals --model <provider:model> --judge-model <provider:model> [--repeats N]
 python -m agent.evals compare a.json b.json
@@ -53,7 +56,7 @@ CLI → graph.py (LangGraph) → agent_node (LLM) → human_review_node → tool
 
 **`src/agent/config.py`** — Pydantic Settings loading from `.env`. Required: `GOOGLE_API_KEY`, `TAVILY_API_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`. Optional: `ANTHROPIC_API_KEY` (required for `anthropic:` models), `MS365_MCP_*`, `INFORMER_*`, `MEMORY_REWRITE_MODEL`, `EVAL_JUDGE_MODEL`.
 
-**`src/agent/auth/google.py`** — OAuth2 for Gmail/Calendar. First run opens browser; token saved to `credentials/token.json` and auto-refreshes.
+**`src/agent/auth/google.py`** — OAuth2 for Gmail/Calendar. Real-mode CLI startup checks the token before the run; a missing or dead refresh token stops startup and names `python -m agent.auth.google` (the only command that opens a browser). Token saved to `credentials/token.json` and auto-refreshes while valid. Testing-mode refresh tokens expire seven days after issue, regardless of use.
 
 ### Tool failure resilience (two layers)
 
