@@ -38,15 +38,15 @@ from agent.evals.outcome import read_upload_log, run_passed, score_outcome
 from agent.evals.trajectory import score_facts, score_trajectory, summarise
 from fixture_world.purchase_handover import HANDOVER_FAIL_ENV, UPLOAD_LOG_ENV
 from agent.conversation import run_conversation
-from agent.graph import build_graph
+from agent.graph import build_graph, is_step_limit_answer
 from agent.tracing import TraceAttributes
 from agent.tools import LOCAL_TOOLS, load_all_tools
 from agent.tools.classification import is_read
 from agent.tools.web import web_search
 from fixture_world import clock, informer as fixture_informer, ms365 as fixture_ms365
 
-# One tool round is 4 super-steps, so 40 caps a run at ~10 tool rounds (as in the CLI).
-RECURSION_LIMIT = 40
+# Backstop only: the graph's model-call counter enforces settings.max_iterations.
+RECURSION_LIMIT = max(settings.max_iterations * 5 + 10, 40)
 
 # Local tools that touch nothing real in Fixture-world mode: safe to bind in an eval. (The web
 # search is the Fixture world's seeded one there, under the real tool's name.)
@@ -233,6 +233,9 @@ async def run_scenario(
             drafts = fixture_ms365.recorded_drafts(drafts_path)
             recorded_uploads = read_upload_log(upload_log_path)
             upload_log_path_str = str(upload_log_path)
+
+    if is_step_limit_answer(messages[-1] if messages else None):
+        status = "step_limit"
 
     tool_calls = _tool_call_records(messages, rejected)
     final_answer = _final_answer(messages) if status == "completed" else ""

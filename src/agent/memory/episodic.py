@@ -25,6 +25,7 @@ class RunRecord:
     cost_usd: float | None = None
     success: bool = True
     error_message: str | None = None
+    outcome: str = "completed"
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     timestamp: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
@@ -38,6 +39,7 @@ class EpisodicMemory:
         self._conn = sqlite3.connect(str(path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._create_table()
+        self._migrate_schema()
 
     def _create_table(self) -> None:
         self._conn.execute("""
@@ -50,18 +52,27 @@ class EpisodicMemory:
                 token_usage   TEXT,
                 cost_usd      REAL,
                 success       INTEGER NOT NULL DEFAULT 1,
-                error_message TEXT
+                error_message TEXT,
+                outcome       TEXT NOT NULL DEFAULT 'completed'
             )
         """)
         self._conn.commit()
+
+    def _migrate_schema(self) -> None:
+        columns = {row[1] for row in self._conn.execute("PRAGMA table_info(runs)")}
+        if "outcome" not in columns:
+            self._conn.execute(
+                "ALTER TABLE runs ADD COLUMN outcome TEXT NOT NULL DEFAULT 'completed'"
+            )
+            self._conn.commit()
 
     def log_run(self, run: RunRecord) -> str:
         """Insert a new run record. Returns the run_id."""
         self._conn.execute(
             """INSERT INTO runs
                (id, timestamp, user_input, final_output, tools_called,
-                token_usage, cost_usd, success, error_message)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                token_usage, cost_usd, success, error_message, outcome)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 run.id,
                 run.timestamp,
@@ -72,6 +83,7 @@ class EpisodicMemory:
                 run.cost_usd,
                 int(run.success),
                 run.error_message,
+                run.outcome,
             ),
         )
         self._conn.commit()
@@ -106,6 +118,7 @@ class EpisodicMemory:
             cost_usd=row["cost_usd"],
             success=bool(row["success"]),
             error_message=row["error_message"],
+            outcome=row["outcome"] if "outcome" in row.keys() else "completed",
         )
 
     def close(self) -> None:
