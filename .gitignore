@@ -25,3 +25,5 @@ data/evals/
 learning/
 notebooks/
 docs/
+.agents/skills/
+.claude/skills/
