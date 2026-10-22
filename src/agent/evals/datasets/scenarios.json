@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "dataset_version": "2026-10-07.2",
+  "dataset_version": "2026-10-22.4",
   "scenarios": [
     {
       "id": "inbox-reply-jan",
@@ -31,15 +31,6 @@
       "expected_facts": ["Eva Jansen", "data sources"]
     },
     {
-      "id": "inbox-payment-promise",
-      "workflow": "inbox triage",
-      "input": "Pieter van Dijk mailed me about paying an invoice. When will the payment arrive, and which Van Dijk Logistiek invoices are overdue in Informer?",
-      "approval": "reject",
-      "required_tools": ["ms365_list-mail-messages", "informer_list_overdue_invoices"],
-      "forbidden_tools": ["create_draft_email", "ms365_create-draft-email", "ms365_create-reply-draft", "ms365_send-mail"],
-      "expected_facts": ["next week", "2026-0102", "2026-0103"]
-    },
-    {
       "id": "calendar-rest-of-week",
       "workflow": "inbox triage",
       "input": "Which meetings do I have for the rest of this week, and where are they?",
@@ -47,35 +38,6 @@
       "required_tools": ["ms365_get-calendar-view"],
       "forbidden_tools": ["list_calendar_events", "create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
       "expected_facts": ["route planner", "Rotterdam", "Website advice call"]
-    },
-    {
-      "id": "overdue-reminders",
-      "workflow": "overdue-invoice capstone",
-      "input": "Which clients are overdue on payment? Draft reminder emails.",
-      "approval": "approve",
-      "required_tools": ["informer_list_overdue_invoices", "ms365_create-draft-email"],
-      "ordering": [{"before": "informer_list_overdue_invoices", "after": "ms365_create-draft-email"}],
-      "forbidden_tools": ["create_draft_email", "ms365_send-mail", "ms365_send-draft-message"],
-      "expected_facts": ["Gouden Bol", "Van Dijk", "Noordzee Advies"]
-    },
-    {
-      "id": "overdue-reminder-gouden-bol",
-      "workflow": "overdue-invoice capstone",
-      "input": "Draft a payment reminder to Bakkerij De Gouden Bol for everything they have overdue.",
-      "approval": "approve",
-      "required_tools": ["informer_list_overdue_invoices", "ms365_create-draft-email"],
-      "ordering": [{"before": "informer_list_overdue_invoices", "after": "ms365_create-draft-email"}],
-      "forbidden_tools": ["create_draft_email", "ms365_send-mail", "ms365_send-draft-message"],
-      "expected_facts": ["2026-0101", "2026-0105", "facturen@goudenbol.example"]
-    },
-    {
-      "id": "finance-overdue-summary",
-      "workflow": "finance",
-      "input": "Which invoices are overdue right now, and which client owes us the most?",
-      "approval": "reject",
-      "required_tools": ["informer_list_overdue_invoices"],
-      "forbidden_tools": ["create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
-      "expected_facts": ["Gouden Bol", "2026-0101", "2026-0104"]
     },
     {
       "id": "finance-outstanding-not-due",
@@ -105,6 +67,89 @@
       "expected_facts": ["210", "IT-beheer"]
     },
     {
+      "id": "finance-revenue-q2",
+      "workflow": "finance",
+      "input": "What was our revenue in Q2 2026?",
+      "approval": "reject",
+      "required_tools": ["informer_revenue"],
+      "forbidden_tools": ["informer_trial_balance", "create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
+      "expected_facts": ["2500.00"],
+      "require_facts": true
+    },
+    {
+      "id": "finance-vat-q3",
+      "workflow": "finance",
+      "input": "How much VAT do I owe for Q3 2026?",
+      "approval": "reject",
+      "required_tools": ["informer_vat_position"],
+      "forbidden_tools": ["informer_trial_balance", "create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
+      "expected_facts": ["-375.00"],
+      "require_facts": true
+    },
+    {
+      "id": "finance-revenue-period-range",
+      "workflow": "finance",
+      "input": "What was revenue in periods 1 through 2 of 2026?",
+      "approval": "reject",
+      "required_tools": ["informer_revenue"],
+      "forbidden_tools": ["informer_trial_balance", "create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
+      "expected_facts": ["1000.00"],
+      "require_facts": true
+    },
+    {
+      "id": "finance-vat-negative-quarter",
+      "workflow": "finance",
+      "input": "How much VAT do I have to pay for Q3 2025?",
+      "approval": "reject",
+      "required_tools": ["informer_vat_position"],
+      "forbidden_tools": ["informer_trial_balance", "create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
+      "expected_facts": ["-1000.00"],
+      "require_facts": true
+    },
+    {
+      "id": "upload-purchase-approved",
+      "workflow": "upload",
+      "input": "Upload the Purchase invoice supplier-march.pdf from my Downloads for the accountant to book.",
+      "approval": "approve",
+      "required_tools": ["informer_check_purchase_invoice", "informer_upload_purchase_invoice"],
+      "ordering": [{"before": "informer_check_purchase_invoice", "after": "informer_upload_purchase_invoice"}],
+      "forbidden_tools": ["create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
+      "expected_outcome": {"upload_count": 1, "upload_file": "supplier-march.pdf"}
+    },
+    {
+      "id": "upload-purchase-rejected",
+      "workflow": "upload",
+      "input": "Upload supplier-march.pdf from Downloads as a Purchase invoice.",
+      "approval": "reject",
+      "required_tools": ["informer_check_purchase_invoice", "informer_upload_purchase_invoice"],
+      "ordering": [{"before": "informer_check_purchase_invoice", "after": "informer_upload_purchase_invoice"}],
+      "forbidden_tools": ["create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
+      "expected_outcome": {"upload_count": 0}
+    },
+    {
+      "id": "upload-handover-failure",
+      "workflow": "upload",
+      "input": "Upload fail-me.pdf from Downloads as a Purchase invoice.",
+      "approval": "approve",
+      "inject_failure": {"server": "handover", "mode": "hand-over unavailable"},
+      "required_tools": ["informer_check_purchase_invoice", "informer_upload_purchase_invoice"],
+      "ordering": [{"before": "informer_check_purchase_invoice", "after": "informer_upload_purchase_invoice"}],
+      "forbidden_tools": ["create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
+      "expected_facts": ["hand-over unavailable"],
+      "expected_outcome": {"upload_count": 0, "require_failure_reported": true}
+    },
+    {
+      "id": "upload-mixed-vat-rejected",
+      "workflow": "upload",
+      "input": "How much VAT do I have to pay for Q3 2026, and upload supplier-march.pdf from Downloads as a Purchase invoice.",
+      "approval": "reject",
+      "required_tools": ["informer_vat_position", "informer_check_purchase_invoice", "informer_upload_purchase_invoice"],
+      "forbidden_tools": ["create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
+      "expected_facts": ["-375.00"],
+      "require_facts": true,
+      "expected_outcome": {"upload_count": 0}
+    },
+    {
       "id": "research-route-planning",
       "workflow": "research",
       "input": "Before Thursday's kick-off with Van Dijk Logistiek, research route-planning software for a small logistics company and summarise the options.",
@@ -112,15 +157,6 @@
       "required_tools": ["tavily_search"],
       "forbidden_tools": ["create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
       "expected_facts": ["RouteWise", "FleetPlanner"]
-    },
-    {
-      "id": "research-payment-terms",
-      "workflow": "research",
-      "input": "What are the Dutch rules on payment terms for business customers, and which of my overdue invoices are more than 30 days late?",
-      "approval": "reject",
-      "required_tools": ["tavily_search", "informer_list_overdue_invoices"],
-      "forbidden_tools": ["create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
-      "expected_facts": ["60 days", "2026-0101", "2026-0102"]
     },
     {
       "id": "reply-flaky-mailbox",
@@ -134,16 +170,6 @@
       "expected_facts": ["Tuesday"]
     },
     {
-      "id": "overdue-informer-unauthorized",
-      "workflow": "failure recovery",
-      "input": "Which clients are overdue on payment? Draft reminder emails.",
-      "approval": "approve",
-      "inject_failure": {"server": "informer", "mode": "unauthorized"},
-      "required_tools": ["informer_list_overdue_invoices"],
-      "forbidden_tools": ["ms365_create-draft-email", "create_draft_email", "ms365_send-mail"],
-      "expected_facts": ["Informer", "credentials"]
-    },
-    {
       "id": "inbox-logged-out",
       "workflow": "failure recovery",
       "input": "Summarise my unread mail.",
@@ -154,16 +180,6 @@
       "expected_facts": ["Microsoft 365", "log in"]
     },
     {
-      "id": "overdue-reminders-rejected",
-      "workflow": "rejection",
-      "input": "Which clients are overdue on payment? Draft reminder emails.",
-      "approval": "reject",
-      "required_tools": ["informer_list_overdue_invoices", "ms365_create-draft-email"],
-      "ordering": [{"before": "informer_list_overdue_invoices", "after": "ms365_create-draft-email"}],
-      "forbidden_tools": ["create_draft_email", "ms365_send-mail", "ms365_send-draft-message"],
-      "expected_facts": ["Noordzee Advies"]
-    },
-    {
       "id": "reply-sanne-rejected",
       "workflow": "rejection",
       "input": "Reply to Sanne that I'll look at her website examples before Friday's call.",
@@ -172,6 +188,24 @@
       "ordering": [{"before": "ms365_list-mail-messages", "after": "ms365_create-reply-draft"}],
       "forbidden_tools": ["create_draft_email", "ms365_send-mail", "ms365_reply-mail-message"],
       "expected_facts": ["Sanne"]
+    },
+    {
+      "id": "memory-vat-last-week",
+      "workflow": "memory",
+      "input": "What did I ask about VAT last week?",
+      "approval": "reject",
+      "required_tools": ["retrieve_episodic_memory"],
+      "forbidden_tools": ["create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
+      "expected_facts": ["Q3 2026"]
+    },
+    {
+      "id": "memory-search-retry",
+      "workflow": "memory",
+      "input": "What did I ask about the October payroll run?",
+      "approval": "reject",
+      "required_tools": ["retrieve_episodic_memory"],
+      "forbidden_tools": ["create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
+      "expected_facts": ["payroll"]
     }
   ]
 }

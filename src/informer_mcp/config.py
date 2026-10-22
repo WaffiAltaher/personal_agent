@@ -18,12 +18,24 @@ class InformerSettings(BaseSettings):
     # stops and says the result is truncated.
     page_size: int = 100
     max_pages: int = 10
-    # "Today" for Overdue invoices; unset means the current date in Amsterdam. Pin it to
-    # run against the Fixture world, whose seeded Due dates are fixed.
+    # Optional pinned "today" (Amsterdam); the Fixture world sets this from its clock.
     today: date | None = None
     # Where the rate-limit budget per API key is kept, shared by every server process using
     # the key (the agent starts one per tool call). Unset means a folder in the temp dir.
     rate_limit_dir: Path | None = None
+    # Purchase invoice upload: only paths under this folder (default ~/Downloads).
+    downloads_dir: Path | None = None
+    # Maximum Purchase invoice PDF size in bytes (default 2 MB).
+    purchase_upload_max_bytes: int = 2 * 1024 * 1024
+    # Ledger numbers for financial tools (ticket 03 defaults; comma-separated).
+    revenue_ledger_numbers: str = "8000"
+    vat_charged_ledger_numbers: str = "1500,1542"
+    vat_paid_ledger_numbers: str = "1520,1543"
+    vat_closing_target_ledger: int = 1551
+    # The upload log: one JSON line (content fingerprint, date) per successful hand-over, so a
+    # repeat of the same contents is noticed. Every server process shares it, so it is a file.
+    # Unset means ~/.informer_mcp/purchase-uploads.jsonl.
+    purchase_upload_log: Path | None = None
 
     model_config = SettingsConfigDict(
         env_prefix="INFORMER_",

@@ -1,11 +1,23 @@
 # src/agent/tools/__init__.py
 from langchain_core.tools import BaseTool
 
-from agent.tools.classification import read_tool, write_action
+from agent.tools.classification import ACTION_CLASS_KEY, READ, read_tool, write_action
 from agent.tools.filesystem import list_directory, read_file
-from agent.tools.gmail import create_draft_email, get_gmail_message, search_gmail
-from agent.tools.google_calendar import get_calendar_event, list_calendar_events
-from agent.tools.memory import retrieve_episodic_memory, retrieve_memory
+from agent.tools.gmail import (
+    create_draft_email,
+    fixture_create_draft_email,
+    fixture_get_gmail_message,
+    fixture_search_gmail,
+    get_gmail_message,
+    search_gmail,
+)
+from agent.tools.google_calendar import (
+    fixture_get_calendar_event,
+    fixture_list_calendar_events,
+    get_calendar_event,
+    list_calendar_events,
+)
+from agent.tools.memory import remember, retrieve_episodic_memory, retrieve_memory
 from agent.tools.web import fixture_web_search, web_search
 from agent.tools.mcp_loader import McpServer, load_mcp_tools
 from agent.tools.ms365_mcp import ms365_fixture_server, ms365_server
@@ -24,12 +36,33 @@ LOCAL_TOOLS = [
     write_action(create_draft_email),  # saves a draft to Gmail
     read_tool(retrieve_memory),
     read_tool(retrieve_episodic_memory),
+    write_action(remember),
 ]
 
 
-# In Fixture-world mode the web search is the Fixture world's (seeded results, same name and
+# In Fixture-world mode, web search and the Google tools are seeded stand-ins (same names and
 # arguments); the other local tools are unchanged.
-FIXTURE_LOCAL_TOOLS = [read_tool(fixture_web_search) if t is web_search else t for t in LOCAL_TOOLS]
+_FIXTURE_STAND_INS_BY_NAME = {
+    web_search.name: fixture_web_search,
+    search_gmail.name: fixture_search_gmail,
+    get_gmail_message.name: fixture_get_gmail_message,
+    create_draft_email.name: fixture_create_draft_email,
+    list_calendar_events.name: fixture_list_calendar_events,
+    get_calendar_event.name: fixture_get_calendar_event,
+}
+
+
+def _fixture_local_tool(tool: BaseTool) -> BaseTool:
+    stand_in = _FIXTURE_STAND_INS_BY_NAME.get(tool.name)
+    if stand_in is None:
+        return tool
+    action = (tool.metadata or {}).get(ACTION_CLASS_KEY)
+    if action == READ:
+        return read_tool(stand_in)
+    return write_action(stand_in)
+
+
+FIXTURE_LOCAL_TOOLS = [_fixture_local_tool(t) for t in LOCAL_TOOLS]
 
 
 def mcp_servers(*, fixtures: bool = False) -> list[McpServer]:

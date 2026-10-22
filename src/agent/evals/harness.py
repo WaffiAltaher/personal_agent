@@ -4,8 +4,8 @@
 Each scenario run gets a fresh Fixture world: the clock pinned to the seeded date (which the
 model is told as "today" too), its own Drafts file, and the scenario's injected failure. The
 tools are loaded as `--fixtures` loads them, the chat model is injected into the graph, and
-every approval prompt is answered with the scenario's approval policy by resuming with
-`Command(resume=...)`, as the CLI does with the owner's answer.
+every approval prompt is answered with the scenario's approval policy through
+`run_conversation`, as the CLI does with the owner's answer.
 
 Only tools that stay inside the Fixture world are bound: the Fixture world's MCP tools plus
 the local tools in EVAL_LOCAL_TOOLS (the seeded web search). The other local tools reach the
@@ -13,6 +13,7 @@ owner's real Gmail, Google Calendar, memory store or files, and an auto-approved
 there would be real.
 """
 
+import json
 import os
 import tempfile
 import time
@@ -22,33 +23,76 @@ from contextlib import AbstractContextManager, contextmanager, nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 
+import agent.memory as memory_module
+from agent.memory.episodic import EpisodicMemory, RunRecord
+
 from langchain_core.callbacks import UsageMetadataCallbackHandler
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.errors import GraphRecursionError
-from langgraph.types import Command
-
 from agent.config import settings
 from agent.evals.efficiency import efficiency, efficiency_totals
 from agent.evals.generation import GenerationScorer, generation_means, generation_sample
 from agent.evals.records import EvalResults, InterruptRecord, RunResult, ToolCallRecord
 from agent.evals.report import render_report
 from agent.evals.scenarios import Dataset, Scenario
+from agent.evals.outcome import read_upload_log, run_passed, score_outcome
 from agent.evals.trajectory import score_facts, score_trajectory, summarise
-from agent.graph import build_graph
+from fixture_world.purchase_handover import HANDOVER_FAIL_ENV, UPLOAD_LOG_ENV
+from agent.conversation import run_conversation
+from agent.graph import build_graph, is_step_limit_answer
 from agent.tracing import TraceAttributes
 from agent.tools import LOCAL_TOOLS, load_all_tools
+from agent.tools.classification import is_read
+from agent.tools.memory import retrieve_episodic_memory
 from agent.tools.web import web_search
 from fixture_world import clock, informer as fixture_informer, ms365 as fixture_ms365
 
-# One tool round is 4 super-steps, so 40 caps a run at ~10 tool rounds (as in the CLI).
-RECURSION_LIMIT = 40
+# Backstop only: the graph's model-call counter enforces settings.max_iterations.
+RECURSION_LIMIT = max(settings.max_iterations * 5 + 10, 40)
+
+EVAL_EPISODIC_SEED = Path(__file__).parent / "fixtures" / "episodic_seed.json"
+EVAL_DOWNLOAD_PDFS: dict[str, bytes] = {
+    "supplier-march.pdf": b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n",
+    "fail-me.pdf": b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n",
+}
+
+
+def _scenario_user_message(scenario: Scenario, downloads_path: Path) -> str:
+    """Include the eval Downloads path for every upload scenario, including reject and failure."""
+    if scenario.workflow == "upload":
+        return f"{scenario.input}\n\n(Downloads folder: {downloads_path})"
+    return scenario.input
+
+
+def _seed_eval_downloads(downloads_path: Path) -> None:
+    downloads_path.mkdir(parents=True, exist_ok=True)
+    for name, data in EVAL_DOWNLOAD_PDFS.items():
+        (downloads_path / name).write_bytes(data)
+
+
+@contextmanager
+def _isolated_eval_episodic(workdir: Path, scenario: Scenario) -> Iterator[None]:
+    """Point episodic memory at a temp DB seeded for memory scenarios; restore after."""
+    if scenario.workflow != "memory":
+        yield
+        return
+    prev = memory_module._episodic
+    mem = EpisodicMemory(db_path=str(workdir / "episodic.db"))
+    for row in json.loads(EVAL_EPISODIC_SEED.read_text()):
+        mem.log_run(RunRecord(**row))
+    memory_module._episodic = mem
+    try:
+        yield
+    finally:
+        mem.close()
+        memory_module._episodic = prev
 
 # Local tools that touch nothing real in Fixture-world mode: safe to bind in an eval. (The web
 # search is the Fixture world's seeded one there, under the real tool's name.)
-EVAL_LOCAL_TOOLS = frozenset({web_search.name})
+EVAL_LOCAL_TOOLS = frozenset({web_search.name, retrieve_episodic_memory.name})
 
 ModelFactory = Callable[[Scenario], BaseChatModel]
 ToolLoader = Callable[[], Awaitable[tuple[list[BaseTool], list[str]]]]
@@ -156,19 +200,35 @@ async def run_scenario(
     a crash or the step limit is recorded in the result's status. With a `scorer`, the final
     answer also gets generation metrics (RAGAS); with a `tracer`, the run is one tagged trace."""
     failure = scenario.inject_failure
+    recorded_uploads: list[tuple[str, bytes]] = []
+    upload_log_path_str: str | None = None
+    expected_bytes: dict[str, bytes] | None = None
     with tempfile.TemporaryDirectory(prefix="eval-") as workdir:
-        drafts_path = Path(workdir) / "drafts.jsonl"
+        work = Path(workdir)
+        drafts_path = work / "drafts.jsonl"
+        upload_log_path = work / "purchase-uploads.jsonl"
+        downloads_path = work / "Downloads"
+        _seed_eval_downloads(downloads_path)
         switch = fixture_ms365.FailureSwitch(Path(workdir) / "ms365-failure")
         env = {
             clock.TODAY_ENV: clock.SEED_TODAY.isoformat(),
             fixture_ms365.DRAFTS_ENV: str(drafts_path),
+            fixture_informer.UPLOAD_LOG_ENV: str(Path(workdir) / "informer-uploads.jsonl"),  # no uploads carry over between runs
             fixture_ms365.DRAFT_FAILURE_ENV: None,
             fixture_ms365.FAILURE_ENV: None,
             **switch.env,
             # The Informer stand-in reads its failure mode at each tool call's process start.
             fixture_informer.FAILURE_ENV: failure.mode if failure and failure.server == "informer" else None,
+            UPLOAD_LOG_ENV: str(upload_log_path),
+            fixture_informer.DOWNLOADS_ENV: str(downloads_path),  # the server process only sees FIXTURE_WORLD_* vars
+            "INFORMER_DOWNLOADS_DIR": str(downloads_path),
+            HANDOVER_FAIL_ENV: (
+                failure.mode
+                if failure and failure.server == "handover"
+                else os.environ.get(HANDOVER_FAIL_ENV)
+            ),
         }
-        with _environment(env):
+        with _isolated_eval_episodic(work, scenario), _environment(env):
             tools, notices = await load_tools()
             if failure and failure.server == "ms365":
                 switch.set(failure.mode, failure.times)  # after loading: it hits the run, not startup
@@ -187,14 +247,28 @@ async def run_scenario(
                 }
                 started = time.perf_counter()
                 try:
-                    result = await graph.ainvoke({"messages": [HumanMessage(content=scenario.input)]}, config=config)
+                    result = await run_conversation(
+                        graph,
+                        config,
+                        tools=tools,
+                        user_message=_scenario_user_message(scenario, downloads_path),
+                        today=clock.today(),
+                    )
                     while "__interrupt__" in result:
                         for pending in result["__interrupt__"]:
                             interrupts.append(InterruptRecord(actions=pending.value.get("actions", ""),
                                                               decision=scenario.approval))
                         if scenario.approval == "reject":
-                            rejected |= {call["id"] for call in result["messages"][-1].tool_calls}
-                        result = await graph.ainvoke(Command(resume=scenario.approval), config=config)
+                            tool_by_name = {t.name: t for t in tools}
+                            rejected |= {
+                                call["id"]
+                                for call in result["messages"][-1].tool_calls
+                                if tool_by_name.get(call["name"]) is None
+                                or not is_read(tool_by_name[call["name"]])
+                            }
+                        result = await run_conversation(
+                            graph, config, tools=tools, resume_decision=scenario.approval,
+                        )
                 except GraphRecursionError:
                     status = "step_limit"
                 except Exception as exc:  # an eval records a crashing run instead of stopping
@@ -204,9 +278,27 @@ async def run_scenario(
             # The checkpointed state holds the messages so far, also after a crash.
             messages = (await graph.aget_state(config)).values.get("messages", [])
             drafts = fixture_ms365.recorded_drafts(drafts_path)
+            recorded_uploads = read_upload_log(upload_log_path)
+            upload_log_path_str = str(upload_log_path)
+            if scenario.expected_outcome and scenario.expected_outcome.upload_file:
+                upload_name = scenario.expected_outcome.upload_file
+                candidate = downloads_path / upload_name
+                expected_bytes = (
+                    {upload_name: candidate.read_bytes()} if candidate.is_file() else {upload_name: None}
+                )
+
+    if is_step_limit_answer(messages[-1] if messages else None):
+        status = "step_limit"
 
     tool_calls = _tool_call_records(messages, rejected)
     final_answer = _final_answer(messages) if status == "completed" else ""
+    trajectory = score_trajectory(scenario, tool_calls, completed=status == "completed" and bool(final_answer))
+    outcome = score_outcome(
+        scenario,
+        recorded_uploads,
+        final_answer=final_answer,
+        expected_bytes=expected_bytes,
+    )
     run = RunResult(
         scenario_id=scenario.id,
         workflow=scenario.workflow,
@@ -220,8 +312,11 @@ async def run_scenario(
         interrupts=interrupts,
         notices=notices,
         drafts=drafts,
-        trajectory=score_trajectory(scenario, tool_calls, completed=status == "completed" and bool(final_answer)),
+        trajectory=trajectory,
+        outcome=outcome,
         answer_facts=score_facts(scenario, final_answer),
+        passed=run_passed(scenario, trajectory, outcome, final_answer=final_answer),
+        upload_log_path=upload_log_path_str,
         efficiency=efficiency(usage.usage_metadata, latency_s=latency_s, on=datetime.now(timezone.utc).date()),
         trace_id=trace.trace_id if tracer else None,
     )

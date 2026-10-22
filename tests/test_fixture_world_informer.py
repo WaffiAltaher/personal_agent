@@ -15,7 +15,6 @@ from agent.graph import build_graph
 from agent.tools import load_all_tools
 from agent.tools.classification import is_read
 
-# Seeded Due dates are fixed; on the seeded Wednesday, 2265.30 EUR is overdue.
 SEEDED_TODAY = "2026-10-07"
 
 
@@ -48,29 +47,21 @@ def fixture_tools(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_whats_outstanding_is_answered_from_informer(fixture_tools, scripted_model):
-    """'What's outstanding?': Overdue invoices per Client, from Informer, end to end."""
+async def test_trial_balance_is_read_from_informer_end_to_end(fixture_tools, scripted_model):
     tools = await fixture_tools()
     model = scripted_model([
-        _call("informer_list_overdue_invoices", {}, "overdue"),
-        AIMessage(content="2265.30 EUR is overdue across three Clients."),
+        _call("informer_trial_balance", {"year": 2026}, "tb"),
+        AIMessage(content="Bank balance and software spend are in the trial balance."),
     ])
     graph = build_graph(model=model, tools=tools)
 
-    result = await graph.ainvoke({"messages": [HumanMessage(content="What's outstanding?")]})
+    result = await graph.ainvoke({"messages": [HumanMessage(content="2026 trial balance?")]})
 
-    overdue = _tool_results(result)["overdue"]
-    assert overdue.status != "error"
-    payload = _payload(overdue)
-    assert (payload["as_of"], payload["currency"], payload["total_open_amount"]) == (SEEDED_TODAY, "EUR", "2265.30")
-    assert [(c["name"], c["total_open_amount"], c["email"]) for c in payload["clients"]] == [
-        ("Bakkerij De Gouden Bol B.V.", "1515.00", "administratie@goudenbol.example"),
-        ("Noordzee Advies", "450.00", None),
-        ("Van Dijk Logistiek B.V.", "300.30", "info@vandijklogistiek.example"),
-    ]
-    # A read tool: it ran without pausing for approval.
+    tb = _tool_results(result)["tb"]
+    assert tb.status != "error"
+    payload = _payload(tb)
+    assert payload["year"] == 2026
     assert "__interrupt__" not in result
-    assert result["messages"][-1].content == "2265.30 EUR is overdue across three Clients."
 
 
 @pytest.mark.asyncio
@@ -79,31 +70,16 @@ async def test_informer_tools_are_bound_with_the_prefix_and_all_read(fixture_too
 
     informer_tools = [t for t in tools if t.name.startswith("informer_")]
     assert sorted(t.name for t in informer_tools) == [
+        "informer_check_purchase_invoice",
         "informer_get_relation",
         "informer_get_sales_invoice",
-        "informer_list_overdue_invoices",
         "informer_list_relations",
         "informer_list_sales_invoices",
+        "informer_revenue",
         "informer_trial_balance",
+        "informer_upload_purchase_invoice",
+        "informer_vat_position",
     ]
-    assert all(is_read(t) for t in informer_tools)
-
-
-@pytest.mark.asyncio
-async def test_informer_follows_a_pinned_date_outside_the_seeded_week(monkeypatch, scripted_model):
-    """One "today": pinned two weeks after the seeded week, Informer's as-of date is the pinned
-    date (as the model and MS365 see it), and seeded dates move along by the same two weeks,
-    so the same invoices are overdue by the same number of days."""
-    monkeypatch.setenv("FIXTURE_WORLD_TODAY", "2026-10-21")
-    tools, notices = await load_all_tools(fixtures=True)
-    assert notices == []
-    model = scripted_model([_call("informer_list_overdue_invoices", {}, "overdue"), AIMessage(content="Done.")])
-
-    result = await build_graph(model=model, tools=tools).ainvoke({"messages": [HumanMessage(content="Overdue?")]})
-
-    payload = _payload(_tool_results(result)["overdue"])
-    assert (payload["as_of"], payload["total_open_amount"]) == ("2026-10-21", "2265.30")
-    invoices = {i["number"]: i for c in payload["clients"] for i in c["invoices"]}
-    # seeded: invoiced 2026-08-01, due 2026-08-31, 37 days overdue on 2026-10-07
-    assert (invoices["2026-0101"]["invoice_date"], invoices["2026-0101"]["due_date"],
-            invoices["2026-0101"]["days_overdue"]) == ("2026-08-15", "2026-09-14", 37)
+    upload = next(t for t in informer_tools if t.name == "informer_upload_purchase_invoice")
+    assert not is_read(upload)
+    assert all(is_read(t) for t in informer_tools if t is not upload)

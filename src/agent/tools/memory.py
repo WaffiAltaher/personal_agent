@@ -3,20 +3,36 @@
 
 from langchain_core.tools import tool
 
+from agent.config import settings
 from agent.memory import get_episodic_memory, get_semantic_memory
-from agent.memory.recall import recall_chunks, recall_runs
+from agent.memory.budget import ContextBudgetManager
+from agent.tools.classification import write_action
+
+
+@write_action
+@tool
+def remember(fact: str) -> str:
+    """
+    Store an explicit fact in long-term semantic memory after owner approval.
+
+    Use when the owner asks you to remember something for future sessions.
+    Do not call this unless they want the fact persisted.
+    """
+    memory_id = get_semantic_memory().remember(fact)
+    return f"Stored memory {memory_id}."
 
 
 @tool
 def retrieve_memory(query: str) -> str:
     """
-    Search past agent interactions and ingested documents for context relevant
+    Search approved memories and ingested documents for context relevant
     to the query. Returns the top matches with source and relevance score.
-    Pass the user's request as phrased; it is rewritten into a search query.
+    Write the search query yourself from the user's request.
     Use this when the user references something they may have asked before,
     or when background context from prior sessions could improve the answer.
     """
-    chunks = recall_chunks(query, get_semantic_memory(), k=5)
+    chunks = get_semantic_memory().search_all(query, k=settings.memory_top_k)
+    chunks = ContextBudgetManager().trim_memory_results(chunks, budget=settings.memory_budget)
 
     if not chunks:
         return "No relevant memory found."
@@ -29,14 +45,20 @@ def retrieve_memory(query: str) -> str:
 
 
 @tool
-def retrieve_episodic_memory(query: str = "", recent: int = 5) -> str:
+def retrieve_episodic_memory(
+    terms: str = "",
+    since: str | None = None,
+    until: str | None = None,
+    recent: int = 5,
+) -> str:
     """
     Look up past agent runs from episodic memory.
 
-    If `query` is provided, searches run history by keyword (matches against
-    what the user asked and what the agent answered). Pass the user's request
-    as phrased; it is rewritten into keyword variants. If `query` is empty,
-    returns the `recent` most recent runs.
+    When `terms` is non-empty, searches run history with SQLite full-text search
+    (whole words, ranked by relevance), optionally limited to runs between `since`
+    and `until` (ISO dates or timestamps). Write the search terms and date range
+    yourself from the user's question. When `terms` is empty, returns the
+    `recent` most recent runs instead.
 
     Use this when the user asks things like:
     - "what did I ask you yesterday?"
@@ -46,9 +68,9 @@ def retrieve_episodic_memory(query: str = "", recent: int = 5) -> str:
     """
     mem = get_episodic_memory()
 
-    if query:
-        runs = recall_runs(query, mem, n=recent)
-        header = f'Runs matching "{query}"'
+    if terms.strip():
+        runs = mem.search_runs(terms, n=recent, since=since, until=until)
+        header = f'Runs matching "{terms.strip()}"'
     else:
         runs = mem.get_recent_runs(n=recent)
         header = f"Last {recent} runs"
@@ -59,7 +81,7 @@ def retrieve_episodic_memory(query: str = "", recent: int = 5) -> str:
     parts = [header]
     for i, run in enumerate(runs, 1):
         tools = ", ".join(run.tools_called) if run.tools_called else "none"
-        status = "✓" if run.success else "✗"
+        status = run.outcome
         tokens = (
             f"{run.token_usage['total']} tokens" if run.token_usage else "n/a"
         )

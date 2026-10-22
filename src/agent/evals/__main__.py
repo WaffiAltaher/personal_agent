@@ -2,7 +2,7 @@
 """Run the eval suite against the Fixture world with a chosen model.
 
     uv run python -m agent.evals --model google_genai:gemini-3.8-flash
-    uv run python -m agent.evals --model anthropic:claude-sonnet-5-5 --scenario overdue
+    uv run python -m agent.evals --model anthropic:claude-sonnet-5-5 --scenario finance-trial-balance
     uv run python -m agent.evals --model google_genai:gemini-3.8-flash --judge-model anthropic:claude-sonnet-5-5
 
 Writes `<eval-run-id>.json` (raw results) and `<eval-run-id>.md` (report) to --out.

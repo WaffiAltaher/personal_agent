@@ -2,9 +2,33 @@
   {"year": 2025, "period": 12, "ledger_number": "1300", "description": "Licentie 2026", "debit": "500.00", "credit": "0.00"},
   {"year": 2025, "period": 12, "ledger_number": "8100", "description": "Licentie 2026", "debit": "0.00", "credit": "500.00"},
 
+  {"year": 2025, "period": 1, "ledger_number": "1500", "description": "Q1 omzet btw", "debit": "0.00", "credit": "3000.00"},
+  {"year": 2025, "period": 1, "ledger_number": "1520", "description": "Q1 inkopen", "debit": "2500.00", "credit": "0.00"},
+  {"year": 2025, "period": 1, "ledger_number": "1520", "description": "Q1 correctie voorbelasting", "debit": "0.00", "credit": "50.00"},
+  {"year": 2025, "period": 1, "ledger_number": "1542", "description": "Q1 reverse charge", "debit": "0.00", "credit": "100.00"},
+  {"year": 2025, "period": 1, "ledger_number": "1543", "description": "Q1 reverse charge", "debit": "100.00", "credit": "0.00"},
+
+  {"year": 2025, "period": 4, "ledger_number": "1500", "description": "Q2 omzet btw", "debit": "0.00", "credit": "1000.00"},
+  {"year": 2025, "period": 4, "ledger_number": "1500", "description": "Q2 correctie af te dragen", "debit": "86.69", "credit": "0.00"},
+  {"year": 2025, "period": 4, "ledger_number": "1520", "description": "Q2 inkopen", "debit": "500.00", "credit": "0.00"},
+
+  {"year": 2025, "period": 7, "ledger_number": "1500", "description": "Q3 omzet btw", "debit": "0.00", "credit": "2000.00"},
+  {"year": 2025, "period": 7, "ledger_number": "1520", "description": "Q3 inkopen", "debit": "3000.00", "credit": "0.00"},
+
+  {"year": 2025, "period": 11, "ledger_number": "1500", "description": "Jaarafsluiting btw", "debit": "5913.31", "credit": "0.00"},
+  {"year": 2025, "period": 11, "ledger_number": "1551", "description": "Jaarafsluiting btw", "debit": "0.00", "credit": "5913.31"},
+  {"year": 2025, "period": 11, "ledger_number": "1520", "description": "Jaarafsluiting btw", "debit": "0.00", "credit": "5950.00"},
+  {"year": 2025, "period": 11, "ledger_number": "1551", "description": "Jaarafsluiting btw", "debit": "5950.00", "credit": "0.00"},
+  {"year": 2025, "period": 11, "ledger_number": "1542", "description": "Jaarafsluiting btw", "debit": "100.00", "credit": "0.00"},
+  {"year": 2025, "period": 11, "ledger_number": "1551", "description": "Jaarafsluiting btw", "debit": "0.00", "credit": "100.00"},
+  {"year": 2025, "period": 11, "ledger_number": "1543", "description": "Jaarafsluiting btw", "debit": "0.00", "credit": "100.00"},
+  {"year": 2025, "period": 11, "ledger_number": "1551", "description": "Jaarafsluiting btw", "debit": "100.00", "credit": "0.00"},
+
   {"year": 2026, "period": 1, "ledger_number": "1300", "description": "Factuur dienstverlening januari", "debit": "1210.00", "credit": "0.00"},
   {"year": 2026, "period": 1, "ledger_number": "8000", "description": "Factuur dienstverlening januari", "debit": "0.00", "credit": "1000.00"},
   {"year": 2026, "period": 1, "ledger_number": "1800", "description": "Factuur dienstverlening januari", "debit": "0.00", "credit": "210.00"},
+  {"year": 2026, "period": 1, "ledger_number": "1500", "description": "Q1 omzet btw", "debit": "0.00", "credit": "500.00"},
+  {"year": 2026, "period": 1, "ledger_number": "1520", "description": "Q1 inkopen", "debit": "400.00", "credit": "0.00"},
 
   {"year": 2026, "period": 2, "ledger_number": "1100", "description": "Ontvangst factuur januari", "debit": "1210.00", "credit": "0.00"},
   {"year": 2026, "period": 2, "ledger_number": "1300", "description": "Ontvangst factuur januari", "debit": "0.00", "credit": "1210.00"},
@@ -15,5 +39,17 @@
   {"year": 2026, "period": 3, "ledger_number": "8000", "description": "Factuur project maart", "debit": "0.00", "credit": "10000.00"},
   {"year": 2026, "period": 3, "ledger_number": "1800", "description": "Factuur project maart", "debit": "0.00", "credit": "2100.00"},
   {"year": 2026, "period": 3, "ledger_number": "4000", "description": "Huur kantoor maart", "debit": "1250.00", "credit": "0.00"},
-  {"year": 2026, "period": 3, "ledger_number": "1100", "description": "Huur kantoor maart", "debit": "0.00", "credit": "1250.00"}
+  {"year": 2026, "period": 3, "ledger_number": "1100", "description": "Huur kantoor maart", "debit": "0.00", "credit": "1250.00"},
+
+  {"year": 2026, "period": 4, "ledger_number": "1500", "description": "Q2 omzet btw", "debit": "0.00", "credit": "300.00"},
+  {"year": 2026, "period": 5, "ledger_number": "1500", "description": "Q2 omzet btw", "debit": "0.00", "credit": "200.00"},
+  {"year": 2026, "period": 4, "ledger_number": "1520", "description": "Q2 inkopen", "debit": "150.00", "credit": "0.00"},
+  {"year": 2026, "period": 5, "ledger_number": "1520", "description": "Q2 inkopen", "debit": "250.00", "credit": "0.00"},
+  {"year": 2026, "period": 6, "ledger_number": "8000", "description": "Omzet april-juni", "debit": "0.00", "credit": "2500.00"},
+
+  {"year": 2026, "period": 8, "ledger_number": "1500", "description": "Q3 omzet btw", "debit": "0.00", "credit": "100.00"},
+  {"year": 2026, "period": 8, "ledger_number": "1520", "description": "Q3 inkopen", "debit": "500.00", "credit": "0.00"},
+  {"year": 2026, "period": 8, "ledger_number": "1542", "description": "Q3 reverse charge", "debit": "0.00", "credit": "75.00"},
+  {"year": 2026, "period": 8, "ledger_number": "1543", "description": "Q3 reverse charge", "debit": "75.00", "credit": "0.00"},
+  {"year": 2026, "period": 8, "ledger_number": "1520", "description": "Q3 correctie voorbelasting", "debit": "0.00", "credit": "25.00"}
 ]

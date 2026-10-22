@@ -54,7 +54,7 @@ from zoneinfo import ZoneInfo
 
 from googleapiclient.errors import HttpError
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, RemoveMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.errors import GraphBubbleUp
@@ -66,7 +66,14 @@ from typing_extensions import TypedDict
 
 from agent.chat_model import create_chat_model
 from agent.config import settings
-from agent.memory import ContextBudgetManager, RunRecord, TokenCounter, get_episodic_memory, get_semantic_memory
+from agent.model_binding import bind_agent_tools, system_message_for_model
+from agent.memory import get_episodic_memory
+from agent.memory.context_view import (
+    build_model_view,
+    cap_tool_result_content,
+    estimate_context_tokens,
+)
+from agent.memory.run_log import build_run_record
 from agent.tools import LOCAL_TOOLS
 from agent.tools.classification import is_read
 from agent.tools.mcp_loader import TransientMcpError
@@ -82,13 +89,33 @@ logger = logging.getLogger(__name__)
 # Every node receives it, every node returns a partial update to it.
 #
 # `add_messages` is a reducer: instead of overwriting the messages list
-# on each node return, it *appends* the new messages to the existing list.
-# This is what gives the agent its memory within a single run.
+# on each node return, it *merges* the returned messages into the list by ID.
+# A message whose ID is already in the list replaces that message; any other
+# message is appended. This is what gives the agent its memory within a single run.
 
 class AgentState(TypedDict, total=False):
     messages: Annotated[list[BaseMessage], add_messages]
     token_usage_estimate: dict | None  # set by check_context_budget each iteration
     errors: Annotated[list[dict], operator.add]
+    model_call_count: int  # model calls this user turn; reset on a new user message, not on resume
+    runtime_clock_iso: str | None  # Europe/Amsterdam instant for the system prompt; fixed for the run
+    last_model_input_tokens: int | None  # reported input tokens from the previous model call
+    message_count_at_last_model_call: int  # len(state messages) before the previous model call
+    stubbed_tool_call_ids: list[str]  # tool results cleared in the model view; state stays full
+
+
+STEP_LIMIT_ANSWER = (
+    "Stopped: the agent hit its step limit without a final answer. "
+    "Try a narrower question."
+)
+
+
+def is_step_limit_answer(message: BaseMessage | None) -> bool:
+    return (
+        isinstance(message, AIMessage)
+        and not getattr(message, "tool_calls", None)
+        and message.content == STEP_LIMIT_ANSWER
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -157,7 +184,17 @@ async def retry_tool_call(request, execute):
     interval = policy.initial_interval
     for attempt in range(1, policy.max_attempts + 1):
         try:
-            return await execute(request)
+            result = await execute(request)
+            if isinstance(result, ToolMessage):
+                capped = cap_tool_result_content(result.content)
+                if capped != result.content:
+                    result = ToolMessage(
+                        content=capped,
+                        tool_call_id=result.tool_call_id,
+                        name=result.name,
+                        status=getattr(result, "status", None),
+                    )
+            return result
         except GraphBubbleUp:
             # interrupt() and other LangGraph control flow are exceptions too;
             # they must reach the runtime, not become an error ToolMessage.
@@ -209,13 +246,19 @@ LOCAL_TIMEZONE = ZoneInfo("Europe/Amsterdam")
 PINNED_TIME_OF_DAY = time(9, 0)
 
 
-def build_runtime_context(today: date | None = None) -> str:
+def build_runtime_context(
+    at: datetime | None = None,
+    *,
+    today: date | None = None,
+) -> str:
     """Return runtime facts the model needs but cannot infer reliably.
 
-    With `today` (a run against the Fixture world), the date is that day at 09:00 local
-    time, so the model's "today" is the Fixture world's and a run is repeatable.
+    Pass `at` for the run's fixed clock. With `today` only (Fixture world before the
+    clock is stored), the date is that day at 09:00 local time.
     """
-    if today is None:
+    if at is not None:
+        now = at
+    elif today is None:
         now = datetime.now(LOCAL_TIMEZONE)
     else:
         now = datetime.combine(today, PINNED_TIME_OF_DAY, tzinfo=LOCAL_TIMEZONE)
@@ -228,45 +271,104 @@ def build_runtime_context(today: date | None = None) -> str:
         "unless the user explicitly asks for another timezone."
     )
 
-def check_context_budget(state: AgentState) -> dict:
-    """Monitor context window usage before each LLM call.
 
-    - Logs a DEBUG budget report every iteration (zero overhead in normal operation).
-    - Logs a WARNING if the warning threshold is exceeded.
-    - If the hard limit is exceeded, removes old messages from state via RemoveMessage
-      so the LLM never receives a context that would cause an API error.
-    - Always writes token_usage_estimate into state for downstream inspection.
-    The node itself is visible in Langfuse as a span — no separate event needed.
-    """
-    counter = TokenCounter()
-    counts = counter.count_messages(state.get("messages", []))
-    report = counter.build_budget_report(state.get("messages", []), [])
-    total = counts["total"]
-
-    if total > settings.context_hard_limit:
-        logger.warning(
-            "Context hard limit exceeded (%d tokens). Trimming messages.\n%s",
-            total,
-            report,
-        )
-        cbm = ContextBudgetManager()
-        trimmed = cbm.trim_messages(state.get("messages", []), settings.context_hard_limit)
-        kept_ids = {m.id for m in trimmed if getattr(m, "id", None)}
-        to_remove = [
-            RemoveMessage(id=m.id)
-            for m in state.get("messages", [])
-            if getattr(m, "id", None) and m.id not in kept_ids
-        ]
-        update: dict = {"token_usage_estimate": counts}
-        if to_remove:
-            update["messages"] = to_remove
-        return update
-    elif total > settings.context_warning_threshold:
-        logger.warning("Context warning threshold exceeded (%d tokens).\n%s", total, report)
+def new_runtime_clock_iso(today: date | None = None) -> str:
+    """Read the clock once when a user turn starts."""
+    if today is None:
+        now = datetime.now(LOCAL_TIMEZONE)
     else:
-        logger.debug("Context budget check:\n%s", report)
+        now = datetime.combine(today, PINNED_TIME_OF_DAY, tzinfo=LOCAL_TIMEZONE)
+    return now.isoformat()
 
-    return {"token_usage_estimate": counts}
+
+def _runtime_instant(state: AgentState, today: date | None) -> datetime:
+    iso = state.get("runtime_clock_iso")
+    if iso:
+        return datetime.fromisoformat(iso)
+    return datetime.fromisoformat(new_runtime_clock_iso(today))
+
+
+def _system_text_for_state(state: AgentState, today: date | None) -> str:
+    return f"{SYSTEM_PROMPT}\n\n{build_runtime_context(_runtime_instant(state, today))}"
+
+
+def make_check_context_budget(bound_tools: list, today: date | None):
+    def check_context_budget(state: AgentState) -> dict:
+        return _check_context_budget(state, bound_tools, today)
+
+    return check_context_budget
+
+
+def _check_context_budget(state: AgentState, bound_tools: list, today: date | None) -> dict:
+    """Estimate context size before each LLM call; never mutates message state."""
+    system_text = _system_text_for_state(state, today)
+    messages = state.get("messages", [])
+    total = estimate_context_tokens(
+        state_messages=messages,
+        system_text=system_text,
+        tools=bound_tools,
+        last_model_input_tokens=state.get("last_model_input_tokens"),
+        message_count_at_last_model_call=state.get("message_count_at_last_model_call", 0),
+    )
+    counts = {"total": total, "message_count": len(messages)}
+
+    if total > settings.context_clear_threshold:
+        logger.warning(
+            "Context above clear threshold (%d tokens); tool results will be stubbed in the model view.",
+            total,
+        )
+    else:
+        logger.debug("Context estimate before model call: %d tokens", total)
+
+    update: dict = {"token_usage_estimate": counts}
+    if not state.get("runtime_clock_iso"):
+        update["runtime_clock_iso"] = new_runtime_clock_iso(today)
+    return update
+
+
+def check_context_budget(state: AgentState) -> dict:
+    """Default hook for tests; production graphs use make_check_context_budget(tools)."""
+    return _check_context_budget(state, [], None)
+
+
+def _answered_tool_call_ids(messages: list[BaseMessage]) -> set[str]:
+    return {m.tool_call_id for m in messages if isinstance(m, ToolMessage)}
+
+
+def _latest_ai_tool_batch(messages: list[BaseMessage]) -> AIMessage | None:
+    for message in reversed(messages):
+        if isinstance(message, AIMessage) and getattr(message, "tool_calls", None):
+            return message
+    return None
+
+
+def pending_write_tool_calls(messages: list[BaseMessage], read_tool_names: frozenset[str]) -> list[dict]:
+    """Write tool calls on the latest AIMessage that do not yet have a ToolMessage."""
+    last_ai = next(
+        (m for m in reversed(messages) if isinstance(m, AIMessage) and getattr(m, "tool_calls", None)),
+        None,
+    )
+    if last_ai is None:
+        return []
+    answered = _answered_tool_call_ids(messages)
+    return [
+        tc for tc in last_ai.tool_calls
+        if tc["name"] not in read_tool_names and tc["id"] not in answered
+    ]
+
+
+OWNER_REJECTED = (
+    "The owner rejected this action. Do not retry this action. Acknowledge the cancellation."
+)
+
+
+def build_write_rejection_message(tool_call: dict, *, reason: str) -> ToolMessage:
+    return ToolMessage(
+        content=f"Action '{tool_call['name']}' was rejected by the user. {reason}",
+        tool_call_id=tool_call["id"],
+        name=tool_call["name"],
+        status="error",
+    )
 
 
 def human_review_node(state: AgentState, read_tool_names: frozenset[str]) -> Command[Literal["tools", "agent"]]:
@@ -283,9 +385,9 @@ def human_review_node(state: AgentState, read_tool_names: frozenset[str]) -> Com
     When the user responds, the graph resumes with their decision.
 
     On 'approve': routes to tools, execution continues normally.
-    On 'reject':  injects a ToolMessage for each pending tool call so the
-                  message history stays well-formed, then routes back to
-                  agent so the LLM can acknowledge the cancellation.
+    On reject:    injects an error ToolMessage for each pending Write action,
+                  runs reads in the tools stage, then routes to agent so the
+                  LLM can acknowledge the cancellation.
 
     Why Command instead of a plain dict return?
     Command lets a node specify both a state update AND the next node to
@@ -325,19 +427,16 @@ def human_review_node(state: AgentState, read_tool_names: frozenset[str]) -> Com
     if decision == "approve":
         return Command(goto="tools")
 
-    # Rejected — inject a ToolMessage for every pending tool call so the
-    # message history stays well-formed, then route back to agent.
+    if isinstance(decision, dict) and decision.get("kind") == "reject_writes":
+        reason = decision.get("reason") or OWNER_REJECTED
+    else:
+        reason = OWNER_REJECTED
+
     rejection_messages = [
-        ToolMessage(
-            content=(
-                f"Action '{tc['name']}' was rejected by the user. "
-                "Do not retry this action. Acknowledge the cancellation."
-            ),
-            tool_call_id=tc["id"],
-        )
-        for tc in tool_calls  # ALL tool calls, not just those needing approval
+        build_write_rejection_message(tc, reason=reason)
+        for tc in pending_write_tool_calls(state["messages"], read_tool_names)
     ]
-    return Command(goto="agent", update={"messages": rejection_messages})
+    return Command(goto="tools", update={"messages": rejection_messages})
 
 
 # ---------------------------------------------------------------------------
@@ -425,7 +524,7 @@ def build_graph(
     # the model API expects, so the model knows what tools it can call and how.
     if model is None:
         model = create_chat_model()  # provider:model from settings.model_name
-    llm = model.bind_tools(tools)
+    llm = bind_agent_tools(model, tools)
 
     # ToolNode handles the mechanical work of tool execution:
     # - reads the AIMessage's tool_calls field
@@ -435,17 +534,42 @@ def build_graph(
     # awrap_tool_call wraps each individual call with retry + error handling.
     tool_node = ToolNode(tools, awrap_tool_call=retry_tool_call)
 
+    max_iterations = settings.max_iterations
+
     async def agent_node(state: AgentState) -> dict:
         """
         The reasoning node. Calls the LLM with the current message history.
-        Returns a dict with a `messages` key. The add_messages reducer appends
-        it to state rather than overwriting.
+        Returns a dict with a `messages` key. The add_messages reducer merges
+        it into state by message ID rather than overwriting the list.
         """
-        messages = [
-            SystemMessage(content=f"{SYSTEM_PROMPT}\n\n{build_runtime_context(today)}")
-        ] + state["messages"]
-        response = await llm.ainvoke(messages)
-        return {"messages": [response]}
+        count = state.get("model_call_count", 0)
+        if count >= max_iterations:
+            return {"messages": [AIMessage(content=STEP_LIMIT_ANSWER)]}
+
+        messages_before_call = len(state["messages"])
+        system_text = _system_text_for_state(state, today)
+        system_msg = system_message_for_model(system_text, llm)
+        view, stubbed_ids = build_model_view(
+            state["messages"],
+            system_text=system_text,
+            tools=tools,
+            last_model_input_tokens=state.get("last_model_input_tokens"),
+            message_count_at_last_model_call=state.get("message_count_at_last_model_call", 0),
+            system_message=system_msg,
+            stubbed_tool_call_ids=set(state.get("stubbed_tool_call_ids") or []),
+        )
+        response = await llm.ainvoke(view)
+        usage = getattr(response, "usage_metadata", None) or {}
+        update: dict = {
+            "messages": [response],
+            "model_call_count": count + 1,
+            "last_model_input_tokens": usage.get("input_tokens"),
+            "message_count_at_last_model_call": messages_before_call,
+            "stubbed_tool_call_ids": sorted(stubbed_ids),
+        }
+        if not state.get("runtime_clock_iso"):
+            update["runtime_clock_iso"] = new_runtime_clock_iso(today)
+        return update
 
     async def tools_with_fallback(state: AgentState) -> dict:
         """
@@ -465,12 +589,35 @@ def build_graph(
         the next LLM invocation.
         """
         try:
-            return await tool_node.ainvoke(state)
+            last_batch = _latest_ai_tool_batch(state["messages"])
+            if last_batch is None:
+                return {}
+
+            tool_calls = last_batch.tool_calls or []
+            answered = _answered_tool_call_ids(state["messages"])
+            pending = [tc for tc in tool_calls if tc["id"] not in answered]
+            if not pending:
+                return {}
+            if len(pending) == len(tool_calls):
+                return await tool_node.ainvoke(state)
+
+            filtered_ai = AIMessage(
+                content=last_batch.content,
+                tool_calls=pending,
+                id=getattr(last_batch, "id", None),
+            )
+            without_batch = [
+                m for m in state["messages"] if m is not last_batch and getattr(m, "id", None) != getattr(last_batch, "id", None)
+            ]
+            filtered_state = {**state, "messages": without_batch + [filtered_ai]}
+            return await tool_node.ainvoke(filtered_state)
         except GraphBubbleUp:
             raise  # interrupt() from a tool must pause the graph, not become an error
         except Exception as exc:
-            last_message = state["messages"][-1]
-            tool_calls = getattr(last_message, "tool_calls", [])
+            last_batch = _latest_ai_tool_batch(state["messages"])
+            tool_calls = (last_batch.tool_calls or []) if last_batch is not None else []
+            answered = _answered_tool_call_ids(state["messages"])
+            pending = [tc for tc in tool_calls if tc["id"] not in answered]
 
             logger.exception(
                 "Tool node failed unexpectedly",
@@ -480,7 +627,7 @@ def build_graph(
                 },
             )
 
-            if not tool_calls:
+            if not pending:
                 # Shouldn't happen, but handle it gracefully
                 return {
                     "messages": [],
@@ -499,12 +646,14 @@ def build_graph(
                     content=(
                         f"Tool '{tc['name']}' failed unexpectedly. "
                         f"Error: {type(exc).__name__}: {exc}. "
-                        "Please let the user know this tool is temporarily unavailable "
-                        "and suggest they try again later or use an alternative approach."
+                        "This was a crash in the tool layer, not a normal tool result, so the "
+                        "outcome is unknown: do not treat it as a success, and tell the user what failed."
                     ),
                     tool_call_id=tc["id"],
+                    name=tc["name"],
+                    status="error",
                 )
-                for tc in tool_calls
+                for tc in pending
             ]
             error_records = [
                 {
@@ -515,13 +664,13 @@ def build_graph(
                     "exception_type": type(exc).__name__,
                     "message": str(exc),
                 }
-                for tc in tool_calls
+                for tc in pending
             ]
             return {"messages": error_messages, "errors": error_records}
 
     graph = StateGraph(AgentState)
 
-    graph.add_node("check_context_budget", check_context_budget)
+    graph.add_node("check_context_budget", make_check_context_budget(tools, today))
     graph.add_node("agent", agent_node)
     def human_review(state: AgentState) -> Command[Literal["tools", "agent"]]:
         return human_review_node(state, read_tool_names)
@@ -562,65 +711,30 @@ def build_graph(
 # 8. Post-run memory logging
 # ---------------------------------------------------------------------------
 
-def log_run_to_memory(result: dict, user_input: str) -> None:
+def log_run_to_memory(
+    result: dict,
+    user_input: str,
+    *,
+    model_name: str | None = None,
+    run_date: date | None = None,
+    error: str | None = None,
+) -> None:
     """
-    Extract run data from a completed graph result dict and persist it to both
-    episodic memory (SQLite) and semantic memory (Chroma interactions).
+    Persist an episodic run log entry from a completed (or failed) graph result.
 
-    Call this after agent_graph.invoke() returns (outside any interrupt loop).
-    Failures are silently caught so memory issues never break the main flow.
+    Call this after the conversation driver finishes (outside any interrupt loop).
+    Write failures are logged and do not crash the caller.
     """
     try:
-        messages: list[BaseMessage] = result.get("messages", [])
+        from agent.config import settings as _settings
 
-        # Final answer: last AIMessage without pending tool calls
-        final_output = ""
-        for msg in reversed(messages):
-            if isinstance(msg, AIMessage) and not getattr(msg, "tool_calls", None):
-                if isinstance(msg.content, str):
-                    final_output = msg.content
-                elif isinstance(msg.content, list):
-                    final_output = " ".join(
-                        block["text"]
-                        for block in msg.content
-                        if isinstance(block, dict) and block.get("type") == "text"
-                    )
-                break
-
-        # All tool names called during the run
-        tools_called: list[str] = [
-            tc["name"]
-            for msg in messages
-            if isinstance(msg, AIMessage)
-            for tc in getattr(msg, "tool_calls", [])
-        ]
-
-        # Token usage from the last AI message that carries usage_metadata
-        token_usage: dict | None = None
-        for msg in reversed(messages):
-            if isinstance(msg, AIMessage):
-                meta = getattr(msg, "usage_metadata", None)
-                if meta:
-                    token_usage = {
-                        "prompt": meta.get("input_tokens", 0),
-                        "completion": meta.get("output_tokens", 0),
-                        "total": meta.get("total_tokens", 0),
-                    }
-                    break
-
-        run = RunRecord(
-            user_input=user_input,
-            final_output=final_output,
-            tools_called=tools_called,
-            token_usage=token_usage,
-            success=True,
+        run = build_run_record(
+            result,
+            user_input,
+            model_name=model_name or _settings.model_name,
+            run_date=run_date or date.today(),
+            error=error,
         )
-
-        run_id = get_episodic_memory().log_run(run)
-
-        if final_output:
-            get_semantic_memory().ingest_interaction(user_input, final_output, run_id)
-
-    except Exception:
-        # Memory failures must not crash the agent
-        pass
+        get_episodic_memory().log_run(run)
+    except Exception as exc:
+        logger.warning("Failed to write run log: %s", exc)

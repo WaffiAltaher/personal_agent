@@ -8,15 +8,15 @@ A dataset is one JSON file:
       "dataset_version": "2026-10-07",  # the scenarios' own version, recorded in every result
       "scenarios": [
         {
-          "id": "overdue-reminders",          # unique; what the --scenario filter matches
-          "workflow": "overdue-invoice capstone",
-          "input": "Which clients are overdue on payment? Draft reminder emails.",
+          "id": "reply-flaky-mailbox",        # unique; what the --scenario filter matches
+          "workflow": "failure recovery",
+          "input": "Find Jan's mail about invoice 2026-031 and draft a reply.",
           "approval": "approve",              # every approval prompt is approved, or "reject"ed
           "inject_failure": {"server": "ms365", "mode": "transient", "times": 1},  # optional
-          "required_tools": ["informer_list_overdue_invoices", "ms365_create-draft-email"],
-          "ordering": [{"before": "informer_list_overdue_invoices", "after": "ms365_create-draft-email"}],
+          "required_tools": ["ms365_list-mail-messages", "ms365_create-reply-draft"],
+          "ordering": [{"before": "ms365_list-mail-messages", "after": "ms365_create-reply-draft"}],
           "forbidden_tools": ["create_draft_email", "ms365_send-mail"],
-          "expected_facts": ["Noordzee Advies"]   # strings the final answer should contain
+          "expected_facts": ["Tuesday"]       # strings the final answer should contain
         }
       ]
     }
@@ -49,12 +49,16 @@ class _Strict(BaseModel):
 
 
 class FailureInjection(_Strict):
-    server: Literal["ms365", "informer"]
+    server: Literal["ms365", "informer", "handover"]
     mode: str
     times: int | None = None
 
     @model_validator(mode="after")
     def _known_mode(self):
+        if self.server == "handover":
+            if self.times is not None:
+                raise ValueError("a hand-over failure applies to every upload attempt; it takes no 'times'")
+            return self
         modes = {m.value for m in (Ms365Failure if self.server == "ms365" else InformerFailure)}
         if self.mode not in modes:
             raise ValueError(f"unknown {self.server} failure mode {self.mode!r}; one of {sorted(modes)}")
@@ -69,6 +73,13 @@ class OrderingConstraint(_Strict):
     after: str
 
 
+class ExpectedOutcome(_Strict):
+    """What the run should achieve beyond tool selection (uploads, failure reported in the answer)."""
+    upload_count: int
+    upload_file: str | None = None  # when upload_count is 1: required file name and byte-for-byte content
+    require_failure_reported: bool = False  # answer must contain every expected_fact (case-insensitive)
+
+
 class Scenario(_Strict):
     id: str
     workflow: str = ""
@@ -79,6 +90,8 @@ class Scenario(_Strict):
     ordering: list[OrderingConstraint] = []
     forbidden_tools: list[str] = []
     expected_facts: list[str] = []
+    require_facts: bool = False  # when true, every expected_fact must appear in the final answer
+    expected_outcome: ExpectedOutcome | None = None
 
 
 class Dataset(_Strict):

@@ -1,0 +1,38 @@
+[
+  {
+    "id": "gmsg001",
+    "from": "appointments@tandartscentrum.example",
+    "fromName": "Tandarts Centrum",
+    "to": "jen.personal@gmail.example",
+    "date": "2026-10-01T09:15:00Z",
+    "subject": "Reminder: dentist check-up",
+    "snippet": "Please bring your insurance card to your appointment next week.",
+    "body": "Dear Jen,\n\nThis is a reminder for your dental check-up. Please bring your insurance card.\n\nTandarts Centrum",
+    "isRead": true,
+    "cc": ""
+  },
+  {
+    "id": "gmsg002",
+    "from": "newsletter@yogastudio.example",
+    "fromName": "Amsterdam Yoga Studio",
+    "to": "jen.personal@gmail.example",
+    "date": "2026-10-03T07:00:00Z",
+    "subject": "New evening classes in October",
+    "snippet": "We added two evening classes this month, including Sam's vinyasa slot.",
+    "body": "Hi Jen,\n\nWe added two evening classes this month. Sam's vinyasa slot on Wednesdays is now open for booking.\n\nNamaste,\nAmsterdam Yoga Studio",
+    "isRead": false,
+    "cc": ""
+  },
+  {
+    "id": "gmsg003",
+    "from": "maria@friends.example",
+    "fromName": "Maria van Berg",
+    "to": "jen.personal@gmail.example",
+    "date": "2026-10-05T18:22:00Z",
+    "subject": "Weekend hike?",
+    "snippet": "Fancy a walk in the Veluwe on Saturday if the weather holds?",
+    "body": "Hi Jen,\n\nFancy a walk in the Veluwe on Saturday if the weather holds? I'll bring coffee.\n\nMaria",
+    "isRead": true,
+    "cc": ""
+  }
+]

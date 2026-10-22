@@ -1,18 +1,24 @@
 """
 cli.py — Entry point with Langfuse tracing wired in.
+
+Real-mode runs check the Google login before the agent starts. If Gmail or Calendar
+would need a new browser login, startup stops and names ``python -m agent.auth.google``.
+Use ``--fixtures`` for the seeded Fixture world (no Google login check).
 """
 
 import asyncio
 import sys
 import uuid
+from contextlib import nullcontext
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langfuse import propagate_attributes
 from langgraph.errors import GraphRecursionError
-from langgraph.types import Command
-
+from agent.auth.google import GoogleLoginRequired, check_google_login
 from agent.chat_model import ModelConfigError, create_chat_model
+from agent.conversation import run_conversation
 from agent.graph import build_graph, get_checkpointer, log_run_to_memory
+from agent.memory import fixtures_semantic_memory
 from agent.tracing import flush_traces, get_callback_handler, verify_connection
 from agent.config import settings
 from agent.tools import load_all_tools
@@ -133,11 +139,22 @@ async def main():
     # stops the run here, before any MCP server is started.
     model = create_chat_model()
 
-    # Verify Langfuse is reachable before we do any work.
-    # This fails loudly rather than running the agent and silently losing traces.
-    if not verify_connection():
-        print("Warning: Langfuse connection failed. Traces will not be recorded.")
-        # We continue anyway — observability failing shouldn't block the agent.
+    # Verify Langfuse is reachable before we do any work. If it isn't, say which address
+    # was tried and run untraced: observability failing shouldn't block the agent.
+    langfuse_connected = verify_connection()
+    if not langfuse_connected:
+        print(f"Warning: Langfuse connection failed at {settings.langfuse_base_url}. "
+              "Traces will not be recorded.")
+
+    if not fixtures:
+        try:
+            check_google_login()
+        except GoogleLoginRequired as exc:
+            print(f"Cannot start: {exc}")
+            sys.exit(1)
+        except FileNotFoundError as exc:
+            print(f"Cannot start: {exc}")
+            sys.exit(1)
 
     # Each CLI run gets a fresh thread_id so runs are independent.
     # The checkpointer uses this to namespace the checkpoint.
@@ -147,64 +164,84 @@ async def main():
     # We derive it from thread_id so the two IDs stay linked.
     langfuse_trace_id = thread_id.replace("-", "")
 
-    # One handler per run = one trace in Langfuse.
-    langfuse_handler = get_callback_handler(trace_id=langfuse_trace_id)
+    # One handler per run = one trace in Langfuse. With Langfuse down there is no handler: the run is untraced.
+    callbacks = [get_callback_handler(trace_id=langfuse_trace_id)] if langfuse_connected else []
 
     config = {
-        "callbacks": [langfuse_handler],
+        "callbacks": callbacks,
         "configurable": {"thread_id": thread_id},
-        # One tool round is 4 super-steps (budget → agent → human_review → tools),
-        # so 40 caps a run at ~10 tool rounds instead of LangGraph's default 10,007.
-        "recursion_limit": 40,
+        # Backstop only: settings.max_iterations bounds model calls; keep headroom above that.
+        "recursion_limit": max(settings.max_iterations * 5 + 10, 40),
     }
 
     # Against the Fixture world, "today" is its pinned date, for the model and the stand-ins alike.
     today = clock.pin_today() if fixtures else None
+    memory_ctx = fixtures_semantic_memory() if fixtures else nullcontext()
+    result: dict = {"messages": []}
+    run_error: str | None = None
 
-    async with get_checkpointer() as checkpointer:
-        tools, notices = await load_all_tools(fixtures=fixtures)
-        if fixtures:
-            print(f"Running against the Fixture world (seeded MS365 stand-in and fake Informer API), today {today}.")
-        # An unavailable integration doesn't stop the run; say which one and why.
-        for notice in notices:
-            print(f"Notice: {notice}")
-        agent_graph = build_graph(checkpointer, tools, model, today=today)
+    try:
+        with memory_ctx:
+            async with get_checkpointer() as checkpointer:
+                tools, notices = await load_all_tools(fixtures=fixtures)
+                if fixtures:
+                    print(
+                        f"Running against the Fixture world (seeded MS365 stand-in and fake Informer API), "
+                        f"today {today}."
+                    )
+                # An unavailable integration doesn't stop the run; say which one and why.
+                for notice in notices:
+                    print(f"Notice: {notice}")
+                agent_graph = build_graph(checkpointer, tools, model, today=today)
 
-        with propagate_attributes(
-            user_id="waffi",
-            trace_name="cli-run",
-            metadata={"prompt-version": settings.prompt_version},
-        ):
-            result = await agent_graph.ainvoke(
-                {"messages": [HumanMessage(content=user_input)]},
-                config=config
+                with propagate_attributes(
+                    user_id="waffi",
+                    trace_name="cli-run",
+                    metadata={"prompt-version": settings.prompt_version},
+                ):
+                    result = await run_conversation(
+                        agent_graph,
+                        config,
+                        tools=tools,
+                        user_message=user_input,
+                        today=today,
+                    )
+                    # HITL loop — handle zero or more interrupts per run.
+                    while "__interrupt__" in result:
+                        for interrupt_obj in result["__interrupt__"]:
+                            _display_interrupt(interrupt_obj.value)
+
+                        decision = _prompt_decision()
+                        print(f"\nResuming with: {decision}\n")
+
+                        result = await run_conversation(
+                            agent_graph,
+                            config,
+                            tools=tools,
+                            resume_decision=decision,
+                        )
+
+        last = result["messages"][-1]
+        print(_stringify_content(last.content))
+
+        if debug:
+            _display_debug_trace(result)
+
+        # A Fixture-world run is about seeded stand-in data, not the owner's: keep it out of real memory.
+        if not fixtures:
+            log_run_to_memory(result, user_input, model_name=settings.model_name)
+    except Exception as exc:
+        run_error = f"{type(exc).__name__}: {exc}"
+        if not fixtures:
+            log_run_to_memory(
+                result,
+                user_input,
+                model_name=settings.model_name,
+                error=run_error,
             )
-            # HITL loop — handle zero or more interrupts per run.
-            # The graph pauses at human_review_node whenever a write tool
-            # is about to execute. We display the payload, collect the
-            # decision, and resume with the same thread_id.
-            while "__interrupt__" in result:
-                for interrupt_obj in result["__interrupt__"]:
-                    _display_interrupt(interrupt_obj.value)
-
-                decision = _prompt_decision()
-                print(f"\nResuming with: {decision}\n")
-
-                result = await agent_graph.ainvoke(
-                    Command(resume=decision),
-                    config=config,
-                )
-
-    last = result["messages"][-1]
-    print(_stringify_content(last.content))
-
-    if debug:
-        _display_debug_trace(result)
-
-    # A Fixture-world run is about seeded stand-in data, not the owner's: keep it out of real memory.
-    if not fixtures:
-        log_run_to_memory(result, user_input)
-    flush_traces()
+        raise
+    finally:
+        flush_traces()
 
 
 if __name__ == "__main__":

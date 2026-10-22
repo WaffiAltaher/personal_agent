@@ -65,7 +65,9 @@ def score_trajectory(scenario: Scenario, tool_calls: list[ToolCallRecord], *, co
 def score_facts(scenario: Scenario, final_answer: str) -> FactsScore:
     answer = final_answer.lower()
     found = [f for f in scenario.expected_facts if f.lower() in answer]
-    return FactsScore(found=found, missing=[f for f in scenario.expected_facts if f not in found])
+    found_lower = {f.lower() for f in found}
+    missing = [f for f in scenario.expected_facts if f.lower() not in found_lower]
+    return FactsScore(found=found, missing=missing)
 
 
 def summarise(runs: list[RunResult]) -> Summary:
@@ -75,7 +77,8 @@ def summarise(runs: list[RunResult]) -> Summary:
                        ordering_met_rate=0.0, forbidden_violations=0, recovery_rate=None, facts_rate=0.0)
     injected = [r.trajectory.recovered for r in runs if r.trajectory.recovered is not None]
     facts_expected = sum(len(r.answer_facts.found) + len(r.answer_facts.missing) for r in runs)
-    passed = sum(r.trajectory.passed for r in runs)
+    passed = sum(r.passed for r in runs)
+    outcome_runs = [r for r in runs if r.outcome.applicable]
     return Summary(
         runs=len(runs),
         passed=passed,
@@ -86,4 +89,7 @@ def summarise(runs: list[RunResult]) -> Summary:
         forbidden_violations=sum(bool(r.trajectory.forbidden_violations) for r in runs),
         recovery_rate=sum(injected) / len(injected) if injected else None,
         facts_rate=sum(len(r.answer_facts.found) for r in runs) / facts_expected if facts_expected else 1.0,
+        mean_outcome_rate=(
+            sum(r.outcome.passed for r in outcome_runs) / len(outcome_runs) if outcome_runs else None
+        ),
     )

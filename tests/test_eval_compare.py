@@ -47,7 +47,7 @@ async def results_files(scripted_model, tmp_path):
             judge_model="anthropic:claude-sonnet-5-5",
         )
         b_scripts = {"reply-flaky-mailbox": iter([SCRIPTS["reply-flaky-mailbox"], GIVE_UP]),
-                     "overdue-reminders-rejected": iter([GIVE_UP, GIVE_UP])}
+                     "reply-sanne-rejected": iter([GIVE_UP, GIVE_UP])}
         _RUNS["b"] = await run_eval(
             load_dataset(DATASET), model_name="anthropic:claude-sonnet-5-5", repeats=2,
             model_factory=lambda scenario: scripted_model(next(b_scripts[scenario.id])),
@@ -88,8 +88,12 @@ async def test_summary_compares_trajectory_quality_cost_tokens_and_latency(repor
     assert _row(report, "| Tool-selection recall (mean) |") == "| Tool-selection recall (mean) | 0.75 | 0.25 |"
     assert _row(report, "| Tool-selection precision (mean) |") == "| Tool-selection precision (mean) | 0.75 | 1.00 |"
     assert _row(report, "| Recovery after injected failure |") == "| Recovery after injected failure | 100% | 100% |"
-    assert _row(report, "| Faithfulness (mean) |") == "| Faithfulness (mean) | 0.50 | n/a |"
-    assert _row(report, "| Answer relevancy (mean) |") == "| Answer relevancy (mean) | 0.60 | n/a |"
+    assert _row(report, "| Faithfulness (mean) |") == (
+        "| Faithfulness (mean) | 0.50 (2/4 runs scored, unvalidated LLM judge) | n/a |"
+    )
+    assert _row(report, "| Answer relevancy (mean) |") == (
+        "| Answer relevancy (mean) | 0.60 (4/4 runs scored, unvalidated LLM judge) | n/a |"
+    )
     # A: 3 + 3 model calls per repeat; B: 3 + 1 + 1 + 1. 1100 tokens, $0.003 per call.
     assert _row(report, "| Total tokens |") == "| Total tokens | 13200 | 6600 |"
     assert _row(report, "| Tokens per run (mean) |") == "| Tokens per run (mean) | 3300 | 1650 |"
@@ -109,8 +113,8 @@ async def test_per_scenario_rows_show_the_variation_across_repeats(report):
     assert b_reply.startswith("| reply-flaky-mailbox | `anthropic:claude-sonnet-5-5` | 1/2 | 0.50 (0.00–1.00) "
                               "| 1.00 | 50% (0%–100%) | n/a | n/a | 2200 (1100–3300) "
                               "| $0.0060 ($0.0030–$0.0090) |")
-    b_rejected = _row(report, "| overdue-reminders-rejected | `anthropic:claude-sonnet-5-5` |")
-    assert b_rejected.startswith("| overdue-reminders-rejected | `anthropic:claude-sonnet-5-5` | 0/2 | 0.00 | 1.00 "
+    b_rejected = _row(report, "| reply-sanne-rejected | `anthropic:claude-sonnet-5-5` |")
+    assert b_rejected.startswith("| reply-sanne-rejected | `anthropic:claude-sonnet-5-5` | 0/2 | 0.00 | 1.00 "
                                  "| 0% | n/a | n/a | 1100 | $0.0030 |")
 
 

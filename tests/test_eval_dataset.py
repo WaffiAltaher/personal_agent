@@ -22,17 +22,13 @@ DATASET = load_dataset(DEFAULT_DATASET)
 TOOL_ARGS = {
     "ms365_list-mail-messages": {},
     "ms365_get-calendar-view": {"startDateTime": "2026-10-07T00:00:00Z", "endDateTime": "2026-10-11T23:59:59Z"},
-    "ms365_create-draft-email": {"body": {
-        "subject": "Payment reminder",
-        "body": {"contentType": "text", "content": "Dear client, a friendly reminder about your overdue invoices."},
-        "toRecipients": [{"emailAddress": {"address": "facturen@goudenbol.example"}}],
-    }},
     "ms365_create-reply-draft": {"messageId": "AAMkAGZpeHR1cmUAMESSAGE02",
                                  "body": {"Comment": "Happy to go through the hours on Tuesday."}},
-    "informer_list_overdue_invoices": {},
     "informer_list_sales_invoices": {"status": "open"},
     "informer_trial_balance": {"year": 2026},
     "informer_get_sales_invoice": {"invoice_id": 5001},
+    "informer_revenue": {"year": 2026, "period_from": 1, "period_to": 13},
+    "informer_vat_position": {"year": 2026, "quarter": 1},
     "tavily_search": {"query": "route planning software for a small logistics company"},
 }
 SCENARIO_TOOL_ARGS = {
@@ -40,6 +36,10 @@ SCENARIO_TOOL_ARGS = {
         "messageId": "AAMkAGZpeHR1cmUAMESSAGE04",
         "body": {"Comment": "I'll look at your examples before Friday's call."}},
     ("research-payment-terms", "tavily_search"): {"query": "Dutch payment terms for business customers"},
+    ("finance-revenue-q2", "informer_revenue"): {"year": 2026, "period_from": 4, "period_to": 6},
+    ("finance-vat-q3", "informer_vat_position"): {"year": 2026, "quarter": 3},
+    ("finance-revenue-period-range", "informer_revenue"): {"year": 2026, "period_from": 1, "period_to": 2},
+    ("finance-vat-negative-quarter", "informer_vat_position"): {"year": 2025, "quarter": 3},
 }
 
 
@@ -59,17 +59,21 @@ def no_backoff_wait(monkeypatch):
 
 
 def test_dataset_has_10_to_20_scenarios_covering_every_workflow():
-    assert 10 <= len(DATASET.scenarios) <= 20
+    assert 10 <= len(DATASET.scenarios) <= 21
     assert {s.workflow for s in DATASET.scenarios} == {
-        "inbox triage", "overdue-invoice capstone", "finance", "research", "failure recovery", "rejection",
+        "inbox triage", "finance", "upload", "research", "failure recovery", "rejection", "memory",
     }
     assert {s.approval for s in DATASET.scenarios} == {"approve", "reject"}
-    assert {s.inject_failure.server for s in DATASET.scenarios if s.inject_failure} == {"ms365", "informer"}
-    assert all(s.required_tools and s.expected_facts for s in DATASET.scenarios)
+    assert {s.inject_failure.server for s in DATASET.scenarios if s.inject_failure} == {"ms365", "handover"}
+    assert all(s.required_tools and (s.expected_facts or s.expected_outcome) for s in DATASET.scenarios)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("scenario", DATASET.scenarios, ids=lambda s: s.id)
+@pytest.mark.parametrize(
+    "scenario",
+    [s for s in DATASET.scenarios if s.workflow not in ("upload", "memory")],
+    ids=lambda s: s.id,
+)
 async def test_scenario_runs_end_to_end_and_its_facts_come_from_the_fixture_world(scenario, scripted_model):
     results = await run_eval(Dataset(format_version=1, dataset_version="test", scenarios=[scenario]),
                              model_name="scripted", model_factory=lambda s: scripted_model(_script(s)))

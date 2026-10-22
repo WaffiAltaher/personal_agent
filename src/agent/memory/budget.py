@@ -1,24 +1,17 @@
 # src/agent/memory/budget.py
 """
-ContextBudgetManager — token-budget accounting for the agent's context window.
+ContextBudgetManager — token-budget accounting for memory injection and reports.
 
-All limits are for Gemini 2.0 Flash (1M token window) with generous headroom.
-Token estimation uses the fast len(text)//4 approximation (~4 chars per token).
-This class is pure logic — it does not touch the graph or any external service.
-Integration into the graph is deferred to a dedicated context-pressure session.
+Token estimation uses len(text)//4 (~4 characters per token).
+The model's view of the conversation is reduced in context_view.py when it grows large
+(old tool results are stubbed there); graph state and checkpoints are never trimmed.
 """
 
+from agent.config import settings
 from agent.memory.semantic import MemoryChunk
 
 
 class ContextBudgetManager:
-    # Configurable constants (override per-instance if needed)
-    MAX_CONTEXT_TOKENS: int = 900_000
-    SYSTEM_PROMPT_BUDGET: int = 2_000
-    MEMORY_BUDGET: int = 10_000
-    CONVERSATION_BUDGET: int = 50_000
-    TOOL_RESULTS_BUDGET: int = 20_000
-
     @staticmethod
     def estimate_tokens(text: str) -> int:
         """Fast approximation: ~4 characters per token."""
@@ -42,55 +35,12 @@ class ContextBudgetManager:
             used += tokens
         return result
 
-    def trim_messages(self, messages: list, budget: int) -> list:
-        """
-        Keep the system message(s) plus the most recent non-system messages
-        that fit within `budget` tokens. The system message is never dropped.
-        """
-        from langchain_core.messages import SystemMessage
-
-        if not messages:
-            return messages
-
-        system_msgs = [m for m in messages if isinstance(m, SystemMessage)]
-        non_system = [m for m in messages if not isinstance(m, SystemMessage)]
-
-        system_tokens = sum(
-            self.estimate_tokens(str(m.content)) for m in system_msgs
-        )
-        remaining = budget - system_tokens
-
-        # Walk backwards through non-system messages (most recent first)
-        kept: list = []
-        for msg in reversed(non_system):
-            tokens = self.estimate_tokens(str(msg.content))
-            if remaining - tokens < 0:
-                break
-            kept.append(msg)
-            remaining -= tokens
-
-        return system_msgs + list(reversed(kept))
-
 
 class TokenCounter:
-    """Estimates token usage by message type and memory chunks.
-
-    Uses len(str(content)) // 4 as a fast token approximation (~4 chars/token).
-    Classifies messages into three buckets: system, conversation, tool_results.
-    """
+    """Estimates token usage by message type and memory chunks."""
 
     def count_messages(self, messages: list) -> dict:
-        """Break down token estimates by message type.
-
-        Returns:
-            {
-                "system": int,
-                "conversation": int,
-                "tool_results": int,
-                "total": int,
-                "message_count": int,
-            }
-        """
+        """Break down token estimates by message type."""
         from langchain_core.messages import SystemMessage, ToolMessage
 
         system = conversation = tool_results = 0
@@ -116,30 +66,23 @@ class TokenCounter:
         return sum(len(c.content) // 4 for c in chunks)
 
     def build_budget_report(self, messages: list, memory_chunks: list) -> str:
-        """Format a human-readable context budget report.
-
-        Args:
-            messages: message list (same format as AgentState["messages"])
-            memory_chunks: list of MemoryChunk objects retrieved for this turn
-
-        Returns:
-            Multi-line string report showing each bucket vs. its limit.
-        """
+        """Format a human-readable context budget report."""
         cbm = ContextBudgetManager()
         counts = self.count_messages(messages)
         memory_tokens = self.count_memory_chunks(memory_chunks)
         total = counts["total"] + memory_tokens
-        headroom = cbm.MAX_CONTEXT_TOKENS - total
-        pct = headroom / cbm.MAX_CONTEXT_TOKENS * 100
+        limit = settings.context_clear_threshold
+        headroom = limit - total
+        pct = (headroom / limit * 100) if limit else 0.0
 
         sep = "─" * 29
         return "\n".join([
             "=== Context Budget Report ===",
-            f"System prompt:    {counts['system']:>8,} tokens  (budget: {cbm.SYSTEM_PROMPT_BUDGET:,})",
-            f"Conversation:     {counts['conversation']:>8,} tokens  (budget: {cbm.CONVERSATION_BUDGET:,})",
-            f"Tool results:     {counts['tool_results']:>8,} tokens  (budget: {cbm.TOOL_RESULTS_BUDGET:,})",
-            f"Memory injection: {memory_tokens:>8,} tokens  (budget: {cbm.MEMORY_BUDGET:,})",
+            f"System prompt:    {counts['system']:>8,} tokens",
+            f"Conversation:     {counts['conversation']:>8,} tokens",
+            f"Tool results:     {counts['tool_results']:>8,} tokens",
+            f"Memory injection: {memory_tokens:>8,} tokens  (budget: {settings.memory_budget:,})",
             sep,
-            f"Total:            {total:>8,} tokens  (limit: {cbm.MAX_CONTEXT_TOKENS:,})",
+            f"Total (estimate): {total:>8,} tokens  (clear threshold: {limit:,})",
             f"Headroom:         {headroom:>8,} tokens  ({pct:.1f}%)",
         ])

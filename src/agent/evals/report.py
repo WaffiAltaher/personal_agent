@@ -69,7 +69,7 @@ def _efficiency_lines(results: EvalResults) -> list[str]:
         "",
         "## Efficiency",
         "",
-        "Cost is priced from the dated table in `agent/evals/pricing.py`; n/a means a model or",
+        "Cost is priced from the dated table in `agent/pricing.py`; n/a means a model or",
         "usage the table has no price for.",
         "",
         "| Metric | Value |",
@@ -108,6 +108,8 @@ def failure_reasons(run: RunResult) -> list[str]:
         reasons.append(f"forbidden tools called: {', '.join(score.forbidden_violations)}")
     if score.recovered is False:
         reasons.append("did not recover from the injected failure")
+    if run.outcome.applicable and not run.outcome.passed:
+        reasons.append(run.outcome.detail or "outcome grade failed")
     return reasons
 
 
@@ -135,18 +137,21 @@ def render_report(results: EvalResults) -> str:
         f"| Runs with forbidden-tool violations | {s.forbidden_violations} |",
         f"| Recovery after injected failure | {_pct(s.recovery_rate)} |",
         f"| Expected answer facts found | {_pct(s.facts_rate)} |",
+        f"| Outcome grade (where declared) | {_pct(s.mean_outcome_rate)} |",
         "",
         "## Scenarios",
         "",
-        "| Scenario | Result | Precision | Recall | Ordering | Forbidden | Recovered | Facts | Tools called |",
-        "|---|---|---|---|---|---|---|---|---|",
+        "| Scenario | Result | Outcome | Precision | Recall | Ordering | Forbidden | Recovered | Facts | Tools called |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for run in results.runs:
         t = run.trajectory
+        o = run.outcome
+        outcome_cell = "n/a" if not o.applicable else ("pass" if o.passed else "fail")
         facts = len(run.answer_facts.found), len(run.answer_facts.found) + len(run.answer_facts.missing)
         tools = " → ".join(f"{c.name}" + ("" if c.status == "success" else f" ({c.status})") for c in run.tool_calls)
         lines.append(
-            f"| {_label(results, run)} | {'PASS' if t.passed else 'FAIL'} | {t.precision:.2f} | {t.recall:.2f} "
+            f"| {_label(results, run)} | {'PASS' if run.passed else 'FAIL'} | {outcome_cell} | {t.precision:.2f} | {t.recall:.2f} "
             f"| {'met' if t.ordering_met else 'not met'} | {', '.join(t.forbidden_violations) or 'none'} "
             f"| {'n/a' if t.recovered is None else ('yes' if t.recovered else 'no')} "
             f"| {facts[0]}/{facts[1]} | {tools or '—'} |"
@@ -155,7 +160,7 @@ def render_report(results: EvalResults) -> str:
     lines += _generation_lines(results)
     lines += _efficiency_lines(results)
 
-    failing = [run for run in results.runs if not run.trajectory.passed]
+    failing = [run for run in results.runs if not run.passed]
     if failing:
         lines += ["", "## Failures", ""]
         for run in failing:

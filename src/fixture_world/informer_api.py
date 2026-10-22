@@ -37,6 +37,7 @@ class Failure(Enum):
 
     UNAUTHORIZED = "unauthorized"
     QUOTA_EXHAUSTED = "quota_exhausted"  # the daily request limit is used up: 429
+    THROTTLED = "throttled"  # the per-minute limit is hit, the day's quota is not: 429, transient
     SERVER_ERROR = "server_error"  # a transient upstream failure: 503
 
 
@@ -143,6 +144,8 @@ class FakeInformerApi:
         refused = self._spend_quota()
         if refused:
             return refused
+        if failure is Failure.THROTTLED:
+            return 429, {"error": ["Too many requests."], "response_code": 429}
         if failure is Failure.SERVER_ERROR:
             return 503, {"error": ["Service temporarily unavailable"], "response_code": 503}
         for pattern, route in self._routes():
@@ -253,10 +256,18 @@ class FakeInformerApi:
                 continue
             if m["year"] < year and ledgers[number]["type"] == "balance":
                 opening[number] = opening.get(number, 0.0) + float(m["debit"]) - float(m["credit"])
-            elif m["year"] == year and period_from <= m["period"] <= period_to:
-                debit_credit = movements.setdefault(number, [0.0, 0.0])
-                debit_credit[0] += float(m["debit"])
-                debit_credit[1] += float(m["credit"])
+            elif m["year"] == year:
+                period = m["period"]
+                ledger_type = ledgers[number]["type"]
+                in_range = (
+                    1 <= period <= period_to
+                    if ledger_type == "balance"
+                    else period_from <= period <= period_to
+                )
+                if in_range:
+                    debit_credit = movements.setdefault(number, [0.0, 0.0])
+                    debit_credit[0] += float(m["debit"])
+                    debit_credit[1] += float(m["credit"])
 
         report = {}
         for number in sorted(set(opening) | set(movements)):

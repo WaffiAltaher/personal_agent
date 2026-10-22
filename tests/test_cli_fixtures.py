@@ -38,11 +38,16 @@ def run_cli(monkeypatch, scripted_model):
         yield InMemorySaver()
 
     monkeypatch.setattr(cli, "create_chat_model", lambda: scripted_model([reply]))
+    monkeypatch.setattr(cli, "check_google_login", lambda: None)
     monkeypatch.setattr(cli, "verify_connection", lambda: True)
     monkeypatch.setattr(cli, "get_callback_handler", lambda **kwargs: BaseCallbackHandler())
     monkeypatch.setattr(cli, "load_all_tools", load_all_tools)
     monkeypatch.setattr(cli, "get_checkpointer", get_checkpointer)
-    monkeypatch.setattr(cli, "log_run_to_memory", lambda result, user_input: seen["logged_to_memory"].append(user_input))
+    monkeypatch.setattr(
+        cli,
+        "log_run_to_memory",
+        lambda result, user_input, **kwargs: seen["logged_to_memory"].append(user_input),
+    )
     monkeypatch.setattr(cli, "flush_traces", lambda: None)
     # Start without a pinned date, and restore the environment afterwards.
     monkeypatch.setenv("FIXTURE_WORLD_TODAY", "")
