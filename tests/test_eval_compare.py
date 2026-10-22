@@ -47,7 +47,7 @@ async def results_files(scripted_model, tmp_path):
             judge_model="anthropic:claude-sonnet-5-5",
         )
         b_scripts = {"reply-flaky-mailbox": iter([SCRIPTS["reply-flaky-mailbox"], GIVE_UP]),
-                     "overdue-reminders-rejected": iter([GIVE_UP, GIVE_UP])}
+                     "reply-sanne-rejected": iter([GIVE_UP, GIVE_UP])}
         _RUNS["b"] = await run_eval(
             load_dataset(DATASET), model_name="anthropic:claude-sonnet-5-5", repeats=2,
             model_factory=lambda scenario: scripted_model(next(b_scripts[scenario.id])),
@@ -109,8 +109,8 @@ async def test_per_scenario_rows_show_the_variation_across_repeats(report):
     assert b_reply.startswith("| reply-flaky-mailbox | `anthropic:claude-sonnet-5-5` | 1/2 | 0.50 (0.00–1.00) "
                               "| 1.00 | 50% (0%–100%) | n/a | n/a | 2200 (1100–3300) "
                               "| $0.0060 ($0.0030–$0.0090) |")
-    b_rejected = _row(report, "| overdue-reminders-rejected | `anthropic:claude-sonnet-5-5` |")
-    assert b_rejected.startswith("| overdue-reminders-rejected | `anthropic:claude-sonnet-5-5` | 0/2 | 0.00 | 1.00 "
+    b_rejected = _row(report, "| reply-sanne-rejected | `anthropic:claude-sonnet-5-5` |")
+    assert b_rejected.startswith("| reply-sanne-rejected | `anthropic:claude-sonnet-5-5` | 0/2 | 0.00 | 1.00 "
                                  "| 0% | n/a | n/a | 1100 | $0.0030 |")
 
 

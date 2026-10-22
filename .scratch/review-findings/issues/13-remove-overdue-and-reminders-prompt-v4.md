@@ -6,7 +6,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** claimed
+**Status:** resolved
 
 **Closes:** ADR-012 (drops k54, k55, M56, M57, F7)
 
