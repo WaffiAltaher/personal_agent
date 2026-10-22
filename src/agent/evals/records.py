@@ -63,7 +63,7 @@ class ModelUsage(BaseModel):
     input_tokens: int = 0  # includes cached input
     output_tokens: int = 0  # includes thinking tokens
     total_tokens: int = 0
-    cost_usd: float | None = None  # None: model or usage not in the price table (agent/evals/pricing.py)
+    cost_usd: float | None = None  # None: model or usage not in the price table (agent/pricing.py)
 
 
 class Efficiency(BaseModel):

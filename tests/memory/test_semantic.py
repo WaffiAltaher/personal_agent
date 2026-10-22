@@ -52,20 +52,14 @@ def test_ingest_and_search_documents(mem):
     assert "LangGraph" in results[0].content
 
 
-def test_ingest_and_search_interactions(mem):
-    mem.ingest_interaction(
-        user_input="What is LangChain?",
-        output="LangChain is a framework for building LLM applications.",
-        run_id="run-abc-123",
-    )
+def test_remember_and_search_memories(mem):
+    memory_id = mem.remember("LangChain is a framework for building LLM applications.")
 
-    results = mem.search_interactions(
-        "LangChain framework", k=3, score_threshold=0.0
-    )
+    results = mem.search_memories("LangChain framework", k=3, score_threshold=0.0)
     assert len(results) >= 1
-    assert results[0].source == "interactions"
+    assert results[0].source == "memories"
     assert "LangChain" in results[0].content
-    assert results[0].metadata["run_id"] == "run-abc-123"
+    assert results[0].metadata["memory_id"] == memory_id
 
 
 def test_score_threshold_filtering(mem):

@@ -69,7 +69,7 @@ def _efficiency_lines(results: EvalResults) -> list[str]:
         "",
         "## Efficiency",
         "",
-        "Cost is priced from the dated table in `agent/evals/pricing.py`; n/a means a model or",
+        "Cost is priced from the dated table in `agent/pricing.py`; n/a means a model or",
         "usage the table has no price for.",
         "",
         "| Metric | Value |",

@@ -5,12 +5,26 @@ from langchain_core.tools import tool
 
 from agent.memory import get_episodic_memory, get_semantic_memory
 from agent.memory.recall import recall_chunks, recall_runs
+from agent.tools.classification import write_action
+
+
+@write_action
+@tool
+def remember(fact: str) -> str:
+    """
+    Store an explicit fact in long-term semantic memory after owner approval.
+
+    Use when the owner asks you to remember something for future sessions.
+    Do not call this unless they want the fact persisted.
+    """
+    memory_id = get_semantic_memory().remember(fact)
+    return f"Stored memory {memory_id}."
 
 
 @tool
 def retrieve_memory(query: str) -> str:
     """
-    Search past agent interactions and ingested documents for context relevant
+    Search approved memories and ingested documents for context relevant
     to the query. Returns the top matches with source and relevance score.
     Pass the user's request as phrased; it is rewritten into a search query.
     Use this when the user references something they may have asked before,
@@ -59,7 +73,7 @@ def retrieve_episodic_memory(query: str = "", recent: int = 5) -> str:
     parts = [header]
     for i, run in enumerate(runs, 1):
         tools = ", ".join(run.tools_called) if run.tools_called else "none"
-        status = "✓" if run.success else "✗"
+        status = run.outcome
         tokens = (
             f"{run.token_usage['total']} tokens" if run.token_usage else "n/a"
         )

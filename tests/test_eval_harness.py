@@ -267,7 +267,7 @@ async def test_eval_runs_write_nothing_to_the_owners_memory(evaluate, monkeypatc
 
     written = []
     monkeypatch.setattr(EpisodicMemory, "log_run", lambda self, run: written.append(run))
-    monkeypatch.setattr(SemanticMemory, "ingest_interaction", lambda self, *a, **k: written.append(a))
+    monkeypatch.setattr(SemanticMemory, "remember", lambda self, *a, **k: written.append(a))
 
     await evaluate("reply-flaky-mailbox")
 

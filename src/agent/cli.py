@@ -219,7 +219,7 @@ async def main():
 
     # A Fixture-world run is about seeded stand-in data, not the owner's: keep it out of real memory.
     if not fixtures:
-        log_run_to_memory(result, user_input)
+        log_run_to_memory(result, user_input, model_name=settings.model_name)
     flush_traces()
 
 

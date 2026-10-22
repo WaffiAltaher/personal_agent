@@ -122,15 +122,15 @@ def test_runs_matching_more_variants_rank_first_without_duplicates(episodic, scr
 
 
 def test_semantic_query_finds_an_interaction_the_literal_request_misses(semantic, scripted_model):
-    semantic.ingest_interaction("Which Informer invoices are overdue?", "Three invoices are overdue.", "run-1")
-    semantic.ingest_interaction("What is the weather today?", "Sunny.", "run-2")
+    memory_overdue = semantic.remember("Which Informer invoices are overdue? Three invoices are overdue.")
+    semantic.remember("What is the weather today? Sunny.")
     request = "what did I ask about clients who still owe me money"
     rewriter = scripted_model([rewriter_reply("overdue Informer invoices", ["Informer", "overdue"])])
 
     assert semantic.search_all(request) == []  # the literal request finds nothing
     chunks = recall_chunks(request, semantic, k=5, model=rewriter)
 
-    assert [c.metadata["run_id"] for c in chunks] == ["run-1"]
+    assert [c.metadata["memory_id"] for c in chunks] == [memory_overdue]
 
 
 def test_rewrite_model_defaults_to_the_agent_model():
@@ -239,7 +239,7 @@ def test_retrieve_memory_tool_rewrites_the_request(tool_memory):
     from agent.tools.memory import retrieve_memory
 
     _, semantic = tool_memory
-    semantic.ingest_interaction("Which Informer invoices are overdue?", "Three invoices are overdue.", "run-1")
+    semantic.remember("Which Informer invoices are overdue? Three invoices are overdue.")
 
     result = retrieve_memory.invoke({"query": "what did I ask about clients who still owe me money"})
 
