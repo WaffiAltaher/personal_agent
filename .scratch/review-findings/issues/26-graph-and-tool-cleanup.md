@@ -6,7 +6,7 @@
 
 **Blocked by:** 22 (serialise: graph state)
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 **Closes:** B4, E3, X1, X2
 
