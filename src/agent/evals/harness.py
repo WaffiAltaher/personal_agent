@@ -208,7 +208,11 @@ async def run_scenario(
                 started = time.perf_counter()
                 try:
                     result = await run_conversation(
-                        graph, config, tools=tools, user_message=scenario.input,
+                        graph,
+                        config,
+                        tools=tools,
+                        user_message=scenario.input,
+                        today=clock.today(),
                     )
                     while "__interrupt__" in result:
                         for pending in result["__interrupt__"]:

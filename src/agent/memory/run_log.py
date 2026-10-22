@@ -36,7 +36,7 @@ def _tools_called(messages: list[BaseMessage]) -> list[str]:
 
 def _sum_usage_metadata(messages: list[BaseMessage]) -> tuple[dict | None, dict | None]:
     """Return (episodic token_usage dict, LangChain usage dict for pricing)."""
-    prompt = completion = total = 0
+    prompt = completion = total = cached_input = 0
     priced: dict = {
         "input_tokens": 0,
         "output_tokens": 0,
@@ -62,13 +62,20 @@ def _sum_usage_metadata(messages: list[BaseMessage]) -> tuple[dict | None, dict 
             meta.get("input_tokens", 0) + meta.get("output_tokens", 0)
         )
         details = meta.get("input_token_details") or {}
+        cached_input += details.get("cache_read") or 0
         merged = priced["input_token_details"]
         for key, value in details.items():
             merged[key] = merged.get(key, 0) + (value or 0)
 
     if not found:
         return None, None
-    episodic_usage = {"prompt": prompt, "completion": completion, "total": total}
+    episodic_usage = {
+        "prompt": prompt,
+        "completion": completion,
+        "total": total,
+    }
+    if cached_input:
+        episodic_usage["cached_input"] = cached_input
     if not priced["input_token_details"]:
         priced.pop("input_token_details")
     return episodic_usage, priced

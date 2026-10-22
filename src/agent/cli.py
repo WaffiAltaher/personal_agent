@@ -194,6 +194,7 @@ async def main():
                 config,
                 tools=tools,
                 user_message=user_input,
+                today=today,
             )
             # HITL loop — handle zero or more interrupts per run.
             while "__interrupt__" in result:
