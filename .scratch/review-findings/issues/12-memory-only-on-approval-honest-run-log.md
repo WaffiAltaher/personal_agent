@@ -6,7 +6,7 @@
 
 **Blocked by:** 09
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 **Closes:** M5, M6, B7 (decision (h), ADR-014)
 

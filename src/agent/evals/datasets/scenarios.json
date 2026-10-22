@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "dataset_version": "2026-10-22.1",
+  "dataset_version": "2026-10-22.2",
   "scenarios": [
     {
       "id": "inbox-reply-jan",
@@ -65,6 +65,42 @@
       "required_tools": ["informer_get_sales_invoice"],
       "forbidden_tools": ["create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
       "expected_facts": ["210", "IT-beheer"]
+    },
+    {
+      "id": "finance-revenue-q2",
+      "workflow": "finance",
+      "input": "What was our revenue in Q2 2026?",
+      "approval": "reject",
+      "required_tools": ["informer_revenue"],
+      "forbidden_tools": ["informer_trial_balance", "create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
+      "expected_facts": ["2500.00"]
+    },
+    {
+      "id": "finance-vat-q3",
+      "workflow": "finance",
+      "input": "How much VAT do I owe for Q3 2026?",
+      "approval": "reject",
+      "required_tools": ["informer_vat_position"],
+      "forbidden_tools": ["informer_trial_balance", "create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
+      "expected_facts": ["-375.00"]
+    },
+    {
+      "id": "finance-revenue-period-range",
+      "workflow": "finance",
+      "input": "What was revenue in periods 1 through 2 of 2026?",
+      "approval": "reject",
+      "required_tools": ["informer_revenue"],
+      "forbidden_tools": ["informer_trial_balance", "create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
+      "expected_facts": ["1000.00"]
+    },
+    {
+      "id": "finance-vat-negative-quarter",
+      "workflow": "finance",
+      "input": "How much VAT do I have to pay for Q3 2025?",
+      "approval": "reject",
+      "required_tools": ["informer_vat_position"],
+      "forbidden_tools": ["informer_trial_balance", "create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
+      "expected_facts": ["-1000.00"]
     },
     {
       "id": "research-route-planning",

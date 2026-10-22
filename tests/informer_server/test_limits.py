@@ -98,6 +98,18 @@ async def test_server_error_is_reported_as_transient(fake_informer, connect, cal
 
 
 @pytest.mark.asyncio
+async def test_throttling_429_with_daily_quota_left_is_transient(fake_informer, connect, call_tool):
+    fake_informer.failure = Failure.THROTTLED  # the per-minute limit is hit; the day's quota is not used up
+
+    async with connect() as session:
+        is_error, text = await call_tool(session, "get_sales_invoice", invoice_id=5001)
+
+    assert is_error
+    assert "HTTP 429" in text and "Transient Informer failure" in text
+    assert "daily" not in text.lower()
+
+
+@pytest.mark.asyncio
 async def test_unreachable_informer_is_reported_as_transient(informer_settings, connect, call_tool):
     settings = informer_settings.model_copy(update={"base_url": "http://127.0.0.1:9/v2"})  # nothing listens
 
