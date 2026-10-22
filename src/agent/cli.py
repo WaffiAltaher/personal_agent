@@ -1,5 +1,9 @@
 """
 cli.py — Entry point with Langfuse tracing wired in.
+
+Real-mode runs check the Google login before the agent starts. If Gmail or Calendar
+would need a new browser login, startup stops and names ``python -m agent.auth.google``.
+Use ``--fixtures`` for the seeded Fixture world (no Google login check).
 """
 
 import asyncio
@@ -11,6 +15,7 @@ from langfuse import propagate_attributes
 from langgraph.errors import GraphRecursionError
 from langgraph.types import Command
 
+from agent.auth.google import GoogleLoginRequired, check_google_login
 from agent.chat_model import ModelConfigError, create_chat_model
 from agent.graph import build_graph, get_checkpointer, log_run_to_memory
 from agent.tracing import flush_traces, get_callback_handler, verify_connection
@@ -138,6 +143,16 @@ async def main():
     if not verify_connection():
         print("Warning: Langfuse connection failed. Traces will not be recorded.")
         # We continue anyway — observability failing shouldn't block the agent.
+
+    if not fixtures:
+        try:
+            check_google_login()
+        except GoogleLoginRequired as exc:
+            print(f"Cannot start: {exc}")
+            sys.exit(1)
+        except FileNotFoundError as exc:
+            print(f"Cannot start: {exc}")
+            sys.exit(1)
 
     # Each CLI run gets a fresh thread_id so runs are independent.
     # The checkpointer uses this to namespace the checkpoint.
