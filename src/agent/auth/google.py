@@ -7,7 +7,7 @@ persisting Google OAuth2 credentials. Both Calendar and Gmail tools import
 from here — credentials are not duplicated across tool modules.
 
 Flow (first run):
-  1. No token.json exists → open browser → user logs in and grants scopes
+  1. No token.json exists → run `python -m agent.auth.google` to log in via the browser
   2. Google returns access token + refresh token → saved to token.json
 
 Flow (subsequent runs):
@@ -16,9 +16,10 @@ Flow (subsequent runs):
   3. Save updated token back to token.json
   4. Return valid credentials
 
-The refresh happens transparently. The agent never needs to re-authenticate
-unless the refresh token itself is revoked (user revokes access, or the OAuth
-app is in Testing mode and 7 days have passed without use).
+The refresh happens transparently on valid tokens. If the refresh token itself is
+revoked (user revokes access, or the OAuth app is in Testing mode and seven days
+have passed since issue, regardless of use), the dead token is removed and callers
+see an error naming the re-login command — a browser never opens outside that command.
 
 Scopes are declared here as the single source of truth. If you add a new
 scope (e.g. Gmail), add it to SCOPES and delete token.json so the user is
@@ -27,9 +28,12 @@ re-prompted to grant the new permission.
 
 from pathlib import Path
 
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
+
+GOOGLE_LOGIN_COMMAND = "python -m agent.auth.google"
 
 # ---------------------------------------------------------------------------
 # Scopes
@@ -56,18 +60,51 @@ CREDENTIALS_FILE = _PROJECT_ROOT / "credentials" / "google_credentials.json"
 TOKEN_FILE = _PROJECT_ROOT / "credentials" / "token.json"
 
 
+class GoogleLoginRequired(Exception):
+    """Google OAuth token is missing or the refresh token is no longer valid."""
+
+
+def _login_required_message() -> str:
+    return (
+        f"Not logged in to Google. Log in with `{GOOGLE_LOGIN_COMMAND}`, "
+        "then restart the agent."
+    )
+
+
+def _delete_token_file() -> None:
+    if TOKEN_FILE.exists():
+        TOKEN_FILE.unlink()
+
+
+def login_via_browser() -> Credentials:
+    """Open the browser OAuth flow and persist a new token. The only browser entry point."""
+    if not CREDENTIALS_FILE.exists():
+        raise FileNotFoundError(
+            f"Google credentials file not found: {CREDENTIALS_FILE}\n"
+            "Download it from GCP Console → APIs & Services → Credentials → "
+            "your OAuth client → Download JSON, and save it to credentials/google_credentials.json"
+        )
+    flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
+    creds = flow.run_local_server(port=0)
+    TOKEN_FILE.write_text(creds.to_json())
+    return creds
+
+
+def check_google_login() -> None:
+    """Verify Google login before a real CLI run. Raises on missing or dead tokens."""
+    get_google_credentials()
+
+
 def get_google_credentials() -> Credentials:
     """
     Load and return valid Google OAuth2 credentials.
 
-    Handles the full lifecycle:
-    - First run: opens browser for user consent, saves token.json
-    - Subsequent runs: loads token.json, refreshes if expired
-    - Returns credentials ready to pass to googleapiclient.discovery.build()
+    Refreshes an expired access token when the refresh token is still valid.
+    Never opens a browser — use ``login_via_browser()`` (``python -m agent.auth.google``).
 
     Raises:
         FileNotFoundError: if google_credentials.json is missing
-        google.auth.exceptions.RefreshError: if the refresh token is revoked
+        GoogleLoginRequired: if token.json is missing or the refresh token is dead
     """
     if not CREDENTIALS_FILE.exists():
         raise FileNotFoundError(
@@ -78,24 +115,27 @@ def get_google_credentials() -> Credentials:
 
     creds = None
 
-    # Load existing token if present
     if TOKEN_FILE.exists():
         creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
 
-    # If no valid credentials, refresh or re-authenticate
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            # Token expired but we have a refresh token — refresh silently
-            creds.refresh(Request())
+            try:
+                creds.refresh(Request())
+            except RefreshError:
+                _delete_token_file()
+                raise GoogleLoginRequired(_login_required_message()) from None
+            TOKEN_FILE.write_text(creds.to_json())
         else:
-            # No token at all, or refresh token missing — full OAuth flow
-            # This opens a browser window for the user to log in
-            flow = InstalledAppFlow.from_client_secrets_file(
-                str(CREDENTIALS_FILE), SCOPES
-            )
-            creds = flow.run_local_server(port=0)
-
-        # Persist the token for the next run
-        TOKEN_FILE.write_text(creds.to_json())
+            raise GoogleLoginRequired(_login_required_message())
 
     return creds
+
+
+def main() -> None:
+    login_via_browser()
+    print("Google login saved. You can restart the agent.")
+
+
+if __name__ == "__main__":
+    main()
