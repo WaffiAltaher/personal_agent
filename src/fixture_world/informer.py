@@ -53,6 +53,9 @@ def main() -> None:
     with FakeInformerApi(shift=clock.seed_shift()) as fake, tempfile.TemporaryDirectory() as budget:
         if mode := os.environ.get(FAILURE_ENV):
             fake.failure = Failure(mode)
+        extra = {}
+        if downloads := os.environ.get(DOWNLOADS_ENV):  # pass only when set, or INFORMER_DOWNLOADS_DIR is ignored
+            extra["downloads_dir"] = Path(downloads)
         settings = InformerSettings(
             _env_file=None,
             api_key=fake.api_key,
@@ -61,7 +64,7 @@ def main() -> None:
             today=clock.today(),
             rate_limit_dir=budget,
             purchase_upload_log=upload_log_path(),
-            downloads_dir=Path(os.environ[DOWNLOADS_ENV]) if os.environ.get(DOWNLOADS_ENV) else None,
+            **extra,
         )
         create_server(settings, handover=handover_from_environment()).run("stdio")
 

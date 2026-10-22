@@ -242,6 +242,7 @@ def _load_tools_with_downloads(downloads: Path):
 
     async def loader():
         os.environ["INFORMER_DOWNLOADS_DIR"] = str(downloads)
+        os.environ["FIXTURE_WORLD_INFORMER_DOWNLOADS_DIR"] = str(downloads)
         return await load_fixture_world_tools()
 
     return loader

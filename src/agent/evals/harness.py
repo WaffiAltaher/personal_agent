@@ -179,6 +179,7 @@ async def run_scenario(
             # The Informer stand-in reads its failure mode at each tool call's process start.
             fixture_informer.FAILURE_ENV: failure.mode if failure and failure.server == "informer" else None,
             UPLOAD_LOG_ENV: str(upload_log_path),
+            fixture_informer.DOWNLOADS_ENV: str(downloads_path),  # the server process only sees FIXTURE_WORLD_* vars
             "INFORMER_DOWNLOADS_DIR": str(downloads_path),
             HANDOVER_FAIL_ENV: (
                 failure.mode
