@@ -6,16 +6,20 @@
 
 **Blocked by:** 21 (serialise: graph state), 12
 
-**Status:** claimed
+**Status:** resolved
 
 **Closes:** B10, F1
 
 **What to build:** Within a run, every model call starts with the identical tools-plus-system-prompt opening: the clock is read once when the run starts and kept in state, and the runtime context uses that value for every call; tools are bound sorted by name. For Anthropic models, the end of the tool definitions and the system prompt are marked cacheable. Cached input tokens are recorded separately in the run log and eval usage, and pricing applies the cached rate.
 
-- [ ] Test: across all model calls in a multi-step run, the system message is byte-identical
-- [ ] Test: tools are bound in name order whatever order the servers return them in
-- [ ] Test: with an Anthropic model spec, the request marks the tools and system prompt cacheable; with Gemini, nothing is added
-- [ ] Test: cached tokens from a scripted usage report are recorded and priced at the cached rate
-- [ ] A resumed run keeps the original clock value
+- [x] Test: across all model calls in a multi-step run, the system message is byte-identical
+- [x] Test: tools are bound in name order whatever order the servers return them in
+- [x] Test: with an Anthropic model spec, the request marks the tools and system prompt cacheable; with Gemini, nothing is added
+- [x] Test: cached tokens from a scripted usage report are recorded and priced at the cached rate
+- [x] A resumed run keeps the original clock value
 
 Spec: `../spec.md`. Decisions: `../findings.md` ("Decisions taken").
+
+## Comments
+
+`runtime_clock_iso` in graph state; `model_binding.py` for sorted tools and Anthropic cache marks; run log and eval `ModelUsage` expose `cached_input`. `tests/test_prompt_caching.py`; 365 tests passed after merge with `feat/review-findings`.
