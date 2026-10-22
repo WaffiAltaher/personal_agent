@@ -1,4 +1,3 @@
-# tests/memory/test_episodic.py
 import pytest
 
 from agent.memory.episodic import EpisodicMemory, RunRecord
@@ -44,30 +43,88 @@ def test_insert_run(mem):
 
 
 def test_get_recent_runs_ordering(mem):
-    # Insert 5 runs; get_recent_runs should return newest first
     for i in range(5):
         mem.log_run(_sample_run(user_input=f"question {i}"))
 
     recent = mem.get_recent_runs(n=3)
     assert len(recent) == 3
-    # Timestamps are ISO-formatted UTC; lexicographic order matches chronological
     assert recent[0].timestamp >= recent[1].timestamp >= recent[2].timestamp
 
 
-def test_search_runs(mem):
-    mem.log_run(_sample_run(user_input="Tell me about Python", final_output="Python is great."))
-    mem.log_run(_sample_run(user_input="What is Docker?", final_output="Docker containers."))
-    mem.log_run(_sample_run(user_input="Explain Kubernetes", final_output="K8s orchestration."))
+def test_vat_does_not_match_private(mem):
+    mem.log_run(_sample_run(user_input="Balance on my private savings account", final_output="Done."))
 
-    results = mem.search_runs("Python")
-    assert len(results) == 1
-    assert "Python" in results[0].user_input
+    assert mem.search_runs("VAT") == []
 
-    # Search in final_output
-    results = mem.search_runs("containers")
-    assert len(results) == 1
-    assert "Docker" in results[0].user_input
 
-    # No match
-    results = mem.search_runs("quantum computing")
-    assert len(results) == 0
+def test_search_ranks_more_relevant_runs_first(mem):
+    mem.log_run(
+        _sample_run(
+            user_input="VAT return summary",
+            final_output="Summary.",
+            timestamp="2026-10-01T12:00:00+00:00",
+        )
+    )
+    mem.log_run(
+        _sample_run(
+            user_input="VAT return filing VAT return for Q3",
+            final_output="Filed.",
+            timestamp="2026-10-02T12:00:00+00:00",
+        )
+    )
+
+    results = mem.search_runs("VAT return", n=5)
+
+    assert [r.user_input for r in results] == [
+        "VAT return filing VAT return for Q3",
+        "VAT return summary",
+    ]
+
+
+def test_search_filters_by_date_range(mem):
+    mem.log_run(
+        _sample_run(
+            user_input="VAT question in range",
+            timestamp="2026-10-02T10:00:00+00:00",
+        )
+    )
+    mem.log_run(
+        _sample_run(
+            user_input="VAT question too old",
+            timestamp="2026-09-01T10:00:00+00:00",
+        )
+    )
+    mem.log_run(
+        _sample_run(
+            user_input="VAT question too new",
+            timestamp="2026-10-10T10:00:00+00:00",
+        )
+    )
+
+    results = mem.search_runs(
+        "VAT",
+        n=5,
+        since="2026-09-15",
+        until="2026-10-05",
+    )
+
+    assert [r.user_input for r in results] == ["VAT question in range"]
+
+
+def test_search_treats_percent_and_underscore_as_literal(mem):
+    mem.log_run(
+        _sample_run(
+            user_input="Use promo SAVE_50% before checkout",
+            final_output="Noted.",
+        )
+    )
+
+    assert mem.search_runs("SAVE_50%") != []
+    assert mem.search_runs("50%") != []
+
+
+def test_empty_search_terms_returns_no_rows(mem):
+    mem.log_run(_sample_run(user_input="Anything"))
+
+    assert mem.search_runs("") == []
+    assert mem.search_runs("   ") == []

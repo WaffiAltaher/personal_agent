@@ -4,9 +4,11 @@ Episodic memory — persists every agent run to a local SQLite DB.
 
 Each row in `runs` captures: what the user asked, what the agent answered,
 which tools were called, token usage, cost, and the run outcome.
+Past runs are searched with FTS5 (BM25 ranking) over user_input and final_output.
 """
 
 import json
+import re
 import sqlite3
 import uuid
 from dataclasses import dataclass, field
@@ -14,6 +16,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from agent.config import settings
+
+_DATE_ONLY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 @dataclass
@@ -31,6 +35,34 @@ class RunRecord:
     )
 
 
+def _fts_match_query(terms: str) -> str | None:
+    """Turn agent-written search terms into an FTS5 MATCH expression (whole tokens, quoted)."""
+    terms = terms.strip()
+    if not terms:
+        return None
+    parts = []
+    for token in terms.split():
+        escaped = token.replace('"', '""')
+        parts.append(f'"{escaped}"')
+    return " ".join(parts)
+
+
+def _normalize_since(value: str | None) -> str | None:
+    if value is None or not (value := value.strip()):
+        return None
+    if _DATE_ONLY.match(value):
+        return f"{value}T00:00:00+00:00"
+    return value
+
+
+def _normalize_until(value: str | None) -> str | None:
+    if value is None or not (value := value.strip()):
+        return None
+    if _DATE_ONLY.match(value):
+        return f"{value}T23:59:59.999999+00:00"
+    return value
+
+
 class EpisodicMemory:
     def __init__(self, db_path: str | None = None):
         path = Path(db_path or settings.sqlite_path)
@@ -39,6 +71,7 @@ class EpisodicMemory:
         self._conn.row_factory = sqlite3.Row
         self._create_table()
         self._migrate_schema()
+        self._ensure_fts()
 
     def _create_table(self) -> None:
         self._conn.execute("""
@@ -67,6 +100,35 @@ class EpisodicMemory:
                     """UPDATE runs SET outcome = CASE WHEN success = 0 THEN 'error' ELSE 'completed' END"""
                 )
             self._conn.commit()
+
+    def _ensure_fts(self) -> None:
+        self._conn.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS runs_fts USING fts5(
+                user_input,
+                final_output
+            )
+        """)
+        self._conn.executescript("""
+            CREATE TRIGGER IF NOT EXISTS runs_ai AFTER INSERT ON runs BEGIN
+              INSERT INTO runs_fts(rowid, user_input, final_output)
+              VALUES (new.rowid, new.user_input, new.final_output);
+            END;
+            CREATE TRIGGER IF NOT EXISTS runs_ad AFTER DELETE ON runs BEGIN
+              INSERT INTO runs_fts(runs_fts, rowid, user_input, final_output)
+              VALUES ('delete', old.rowid, old.user_input, old.final_output);
+            END;
+        """)
+        run_count = self._conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
+        fts_count = self._conn.execute("SELECT COUNT(*) FROM runs_fts").fetchone()[0]
+        if run_count > fts_count:
+            for row in self._conn.execute(
+                "SELECT rowid, user_input, final_output FROM runs"
+            ):
+                self._conn.execute(
+                    "INSERT INTO runs_fts(rowid, user_input, final_output) VALUES (?, ?, ?)",
+                    tuple(row),
+                )
+        self._conn.commit()
 
     def log_run(self, run: RunRecord) -> str:
         """Insert a new run record. Returns the run_id."""
@@ -97,14 +159,37 @@ class EpisodicMemory:
         )
         return [self._row_to_record(row) for row in cursor.fetchall()]
 
-    def search_runs(self, query: str, n: int = 5) -> list[RunRecord]:
-        """LIKE search over user_input and final_output, newest first."""
-        like = f"%{query}%"
+    def search_runs(
+        self,
+        terms: str,
+        n: int = 5,
+        since: str | None = None,
+        until: str | None = None,
+    ) -> list[RunRecord]:
+        """FTS5 search over user_input and final_output, ranked by BM25, optional date bounds."""
+        match = _fts_match_query(terms)
+        if match is None:
+            return []
+
+        since_bound = _normalize_since(since)
+        until_bound = _normalize_until(until)
+        clauses = ["runs_fts MATCH ?"]
+        params: list[object] = [match]
+        if since_bound is not None:
+            clauses.append("r.timestamp >= ?")
+            params.append(since_bound)
+        if until_bound is not None:
+            clauses.append("r.timestamp <= ?")
+            params.append(until_bound)
+        params.append(n)
+
         cursor = self._conn.execute(
-            """SELECT * FROM runs
-               WHERE user_input LIKE ? OR final_output LIKE ?
-               ORDER BY timestamp DESC LIMIT ?""",
-            (like, like, n),
+            f"""SELECT r.* FROM runs r
+                INNER JOIN runs_fts ON runs_fts.rowid = r.rowid
+                WHERE {" AND ".join(clauses)}
+                ORDER BY bm25(runs_fts)
+                LIMIT ?""",
+            params,
         )
         return [self._row_to_record(row) for row in cursor.fetchall()]
 

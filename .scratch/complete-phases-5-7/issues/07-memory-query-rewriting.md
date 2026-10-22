@@ -4,16 +4,15 @@
 
 **Blocked by:** 02
 
-**Status:** resolved
+**Status:** superseded
 
-- [x] Both memory retrieval tools use the rewriting step
-- [x] The rewriting model is a separate setting, defaulting to the agent's model
-- [x] Tests with a scripted rewriter: a paraphrase finds a run the literal query misses; a rewriter error falls back to the literal query
-- [ ] The known-issues memory entry is removed
+Superseded by review-findings ticket 25 (decision (g)): the hidden rewrite model call and `MEMORY_REWRITE_MODEL` were removed; the main agent writes episodic search terms and optional date bounds, and semantic queries, as tool arguments. Episodic search uses SQLite FTS5 (BM25) instead of LIKE plus rewrite keywords.
+
+- [x] Both memory retrieval tools use the rewriting step *(removed in ticket 25)*
+- [x] The rewriting model is a separate setting, defaulting to the agent's model *(removed in ticket 25)*
+- [x] Tests with a scripted rewriter *(removed in ticket 25)*
+- [x] The known-issues memory entry is removed *(ticket 25)*
 
 ## Comments
 
-- `agent.memory.recall`: `rewrite_query` (JSON reply → semantic query + keywords; never raises, falls back to the literal request on model build/call/parse failure), `recall_runs` (literal + keyword variants, deduped, ranked by variants matched then recency), `recall_chunks` (literal + semantic query, deduped by content, best score). Both tools call these.
-- New setting `MEMORY_REWRITE_MODEL` (`provider:model`, default unset → `MODEL_NAME`), built via `create_chat_model`.
-- Tests: `tests/memory/test_recall.py` (scripted rewriter, temp stores, toy topic embeddings; no network).
-- Open: removing the memory entry from `docs/known_issues.md` was blocked by a tool permission check in the implementer session; the owner needs to delete its first paragraph.
+- Superseded 2026-10-22 by ticket 25 on branch `ticket/25-past-run-search`.

@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "dataset_version": "2026-10-22.3",
+  "dataset_version": "2026-10-22.4",
   "scenarios": [
     {
       "id": "inbox-reply-jan",
@@ -183,6 +183,24 @@
       "ordering": [{"before": "ms365_list-mail-messages", "after": "ms365_create-reply-draft"}],
       "forbidden_tools": ["create_draft_email", "ms365_send-mail", "ms365_reply-mail-message"],
       "expected_facts": ["Sanne"]
+    },
+    {
+      "id": "memory-vat-last-week",
+      "workflow": "memory",
+      "input": "What did I ask about VAT last week?",
+      "approval": "reject",
+      "required_tools": ["retrieve_episodic_memory"],
+      "forbidden_tools": ["create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
+      "expected_facts": ["Q3 2026"]
+    },
+    {
+      "id": "memory-search-retry",
+      "workflow": "memory",
+      "input": "What did I ask about the October payroll run?",
+      "approval": "reject",
+      "required_tools": ["retrieve_episodic_memory"],
+      "forbidden_tools": ["create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
+      "expected_facts": ["payroll"]
     }
   ]
 }

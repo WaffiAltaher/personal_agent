@@ -42,6 +42,7 @@ from agent.graph import build_graph, is_step_limit_answer
 from agent.tracing import TraceAttributes
 from agent.tools import LOCAL_TOOLS, load_all_tools
 from agent.tools.classification import is_read
+from agent.tools.memory import retrieve_episodic_memory
 from agent.tools.web import web_search
 from fixture_world import clock, informer as fixture_informer, ms365 as fixture_ms365
 
@@ -50,7 +51,7 @@ RECURSION_LIMIT = max(settings.max_iterations * 5 + 10, 40)
 
 # Local tools that touch nothing real in Fixture-world mode: safe to bind in an eval. (The web
 # search is the Fixture world's seeded one there, under the real tool's name.)
-EVAL_LOCAL_TOOLS = frozenset({web_search.name})
+EVAL_LOCAL_TOOLS = frozenset({web_search.name, retrieve_episodic_memory.name})
 
 ModelFactory = Callable[[Scenario], BaseChatModel]
 ToolLoader = Callable[[], Awaitable[tuple[list[BaseTool], list[str]]]]

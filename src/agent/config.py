@@ -24,7 +24,6 @@ class Settings(BaseSettings):
     chroma_embedding_model: str = "models/gemini-embedding-001"
     memory_score_threshold: float = 0.7
     memory_top_k: int = 5
-    memory_rewrite_model: str | None = None  # provider:model for memory query rewriting; None → model_name
 
     # Evals: provider:model that grades answers (RAGAS); None → the model under test, with a warning.
     # `--judge-model` overrides it. Answer relevancy embeds with chroma_embedding_model.
