@@ -27,6 +27,8 @@ TOOL_ARGS = {
     "informer_list_sales_invoices": {"status": "open"},
     "informer_trial_balance": {"year": 2026},
     "informer_get_sales_invoice": {"invoice_id": 5001},
+    "informer_revenue": {"year": 2026, "period_from": 1, "period_to": 13},
+    "informer_vat_position": {"year": 2026, "quarter": 1},
     "tavily_search": {"query": "route planning software for a small logistics company"},
 }
 SCENARIO_TOOL_ARGS = {
@@ -34,6 +36,10 @@ SCENARIO_TOOL_ARGS = {
         "messageId": "AAMkAGZpeHR1cmUAMESSAGE04",
         "body": {"Comment": "I'll look at your examples before Friday's call."}},
     ("research-payment-terms", "tavily_search"): {"query": "Dutch payment terms for business customers"},
+    ("finance-revenue-q2", "informer_revenue"): {"year": 2026, "period_from": 4, "period_to": 6},
+    ("finance-vat-q3", "informer_vat_position"): {"year": 2026, "quarter": 3},
+    ("finance-revenue-period-range", "informer_revenue"): {"year": 2026, "period_from": 1, "period_to": 2},
+    ("finance-vat-negative-quarter", "informer_vat_position"): {"year": 2025, "quarter": 3},
 }
 
 
