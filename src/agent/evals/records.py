@@ -13,7 +13,7 @@ older results files still load) rather than a second record:
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 RESULTS_FORMAT_VERSION = 1
 
@@ -56,6 +56,15 @@ class FactsScore(BaseModel):
     """Expected answer facts found in the final answer (case-insensitive substring match)."""
     found: list[str]
     missing: list[str]
+
+
+class OutcomeScore(BaseModel):
+    """Whether the run's outcome matched the scenario (uploads, failure reported)."""
+    applicable: bool
+    passed: bool
+    upload_count: int = 0
+    uploads: list[str] = []
+    detail: str = ""
 
 
 class ModelUsage(BaseModel):
@@ -101,10 +110,24 @@ class RunResult(BaseModel):
     notices: list[str]  # integrations that were unavailable for the run
     drafts: list[dict]  # Drafts the MS365 stand-in recorded during the run
     trajectory: TrajectoryScore
+    outcome: OutcomeScore
     answer_facts: FactsScore
+    passed: bool  # trajectory and, when declared, outcome
+    upload_log_path: str | None = None  # Fixture-world hand-over log for this run; None outside eval workdirs
     efficiency: Efficiency | None = None
     generation: GenerationScores | None = None  # None: the eval ran without a judge
     trace_id: str | None = None  # the run's Langfuse trace; None: not traced
+
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_run_fields(cls, data):
+        if not isinstance(data, dict):
+            return data
+        if "outcome" not in data:
+            data["outcome"] = {"applicable": False, "passed": True}
+        if "passed" not in data and isinstance(data.get("trajectory"), dict):
+            data["passed"] = data["trajectory"].get("passed", False)
+        return data
 
 
 class Summary(BaseModel):
@@ -117,6 +140,7 @@ class Summary(BaseModel):
     forbidden_violations: int  # runs with at least one violation
     recovery_rate: float | None  # over runs with an injected failure; None if there were none
     facts_rate: float  # share of all expected facts found
+    mean_outcome_rate: float | None = None  # mean outcome.passed over runs that declare an expected outcome
     total_tokens: int = 0
     total_cost_usd: float | None = None  # None if any run's cost is unknown
     mean_latency_s: float | None = None

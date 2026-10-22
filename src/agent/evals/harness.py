@@ -34,7 +34,9 @@ from agent.evals.generation import GenerationScorer, generation_means, generatio
 from agent.evals.records import EvalResults, InterruptRecord, RunResult, ToolCallRecord
 from agent.evals.report import render_report
 from agent.evals.scenarios import Dataset, Scenario
+from agent.evals.outcome import read_upload_log, run_passed, score_outcome
 from agent.evals.trajectory import score_facts, score_trajectory, summarise
+from fixture_world.purchase_handover import HANDOVER_FAIL_ENV, UPLOAD_LOG_ENV
 from agent.conversation import run_conversation
 from agent.graph import build_graph, is_step_limit_answer
 from agent.tracing import TraceAttributes
@@ -156,17 +158,34 @@ async def run_scenario(
     a crash or the step limit is recorded in the result's status. With a `scorer`, the final
     answer also gets generation metrics (RAGAS); with a `tracer`, the run is one tagged trace."""
     failure = scenario.inject_failure
+    recorded_uploads: list[tuple[str, bytes]] = []
+    upload_log_path_str: str | None = None
+    downloads_path = Path()
     with tempfile.TemporaryDirectory(prefix="eval-") as workdir:
         drafts_path = Path(workdir) / "drafts.jsonl"
+        upload_log_path = Path(workdir) / "purchase-uploads.jsonl"
+        downloads_path = Path(os.environ["INFORMER_DOWNLOADS_DIR"]) if os.environ.get(
+            "INFORMER_DOWNLOADS_DIR"
+        ) else Path(workdir) / "Downloads"
+        downloads_path.mkdir(parents=True, exist_ok=True)
         switch = fixture_ms365.FailureSwitch(Path(workdir) / "ms365-failure")
         env = {
             clock.TODAY_ENV: clock.SEED_TODAY.isoformat(),
             fixture_ms365.DRAFTS_ENV: str(drafts_path),
+            fixture_informer.UPLOAD_LOG_ENV: str(Path(workdir) / "informer-uploads.jsonl"),  # no uploads carry over between runs
             fixture_ms365.DRAFT_FAILURE_ENV: None,
             fixture_ms365.FAILURE_ENV: None,
             **switch.env,
             # The Informer stand-in reads its failure mode at each tool call's process start.
             fixture_informer.FAILURE_ENV: failure.mode if failure and failure.server == "informer" else None,
+            UPLOAD_LOG_ENV: str(upload_log_path),
+            fixture_informer.DOWNLOADS_ENV: str(downloads_path),  # the server process only sees FIXTURE_WORLD_* vars
+            "INFORMER_DOWNLOADS_DIR": str(downloads_path),
+            HANDOVER_FAIL_ENV: (
+                failure.mode
+                if failure and failure.server == "handover"
+                else os.environ.get(HANDOVER_FAIL_ENV)
+            ),
         }
         with _environment(env):
             tools, notices = await load_tools()
@@ -214,12 +233,26 @@ async def run_scenario(
             # The checkpointed state holds the messages so far, also after a crash.
             messages = (await graph.aget_state(config)).values.get("messages", [])
             drafts = fixture_ms365.recorded_drafts(drafts_path)
+            recorded_uploads = read_upload_log(upload_log_path)
+            upload_log_path_str = str(upload_log_path)
 
     if is_step_limit_answer(messages[-1] if messages else None):
         status = "step_limit"
 
     tool_calls = _tool_call_records(messages, rejected)
     final_answer = _final_answer(messages) if status == "completed" else ""
+    trajectory = score_trajectory(scenario, tool_calls, completed=status == "completed" and bool(final_answer))
+    expected_bytes = None
+    if scenario.expected_outcome and scenario.expected_outcome.upload_file:
+        candidate = downloads_path / scenario.expected_outcome.upload_file
+        if candidate.is_file():
+            expected_bytes = {scenario.expected_outcome.upload_file: candidate.read_bytes()}
+    outcome = score_outcome(
+        scenario,
+        recorded_uploads,
+        final_answer=final_answer,
+        expected_bytes=expected_bytes,
+    )
     run = RunResult(
         scenario_id=scenario.id,
         workflow=scenario.workflow,
@@ -233,8 +266,11 @@ async def run_scenario(
         interrupts=interrupts,
         notices=notices,
         drafts=drafts,
-        trajectory=score_trajectory(scenario, tool_calls, completed=status == "completed" and bool(final_answer)),
+        trajectory=trajectory,
+        outcome=outcome,
         answer_facts=score_facts(scenario, final_answer),
+        passed=run_passed(scenario, trajectory, outcome),
+        upload_log_path=upload_log_path_str,
         efficiency=efficiency(usage.usage_metadata, latency_s=latency_s, on=datetime.now(timezone.utc).date()),
         trace_id=trace.trace_id if tracer else None,
     )

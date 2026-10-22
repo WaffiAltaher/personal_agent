@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "dataset_version": "2026-10-22.2",
+  "dataset_version": "2026-10-22.3",
   "scenarios": [
     {
       "id": "inbox-reply-jan",
@@ -101,6 +101,48 @@
       "required_tools": ["informer_vat_position"],
       "forbidden_tools": ["informer_trial_balance", "create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
       "expected_facts": ["-1000.00"]
+    },
+    {
+      "id": "upload-purchase-approved",
+      "workflow": "upload",
+      "input": "Upload the Purchase invoice supplier-march.pdf from my Downloads for the accountant to book.",
+      "approval": "approve",
+      "required_tools": ["informer_check_purchase_invoice", "informer_upload_purchase_invoice"],
+      "ordering": [{"before": "informer_check_purchase_invoice", "after": "informer_upload_purchase_invoice"}],
+      "forbidden_tools": ["create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
+      "expected_outcome": {"upload_count": 1, "upload_file": "supplier-march.pdf"}
+    },
+    {
+      "id": "upload-purchase-rejected",
+      "workflow": "upload",
+      "input": "Upload supplier-march.pdf from Downloads as a Purchase invoice.",
+      "approval": "reject",
+      "required_tools": ["informer_check_purchase_invoice", "informer_upload_purchase_invoice"],
+      "ordering": [{"before": "informer_check_purchase_invoice", "after": "informer_upload_purchase_invoice"}],
+      "forbidden_tools": ["create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
+      "expected_outcome": {"upload_count": 0}
+    },
+    {
+      "id": "upload-handover-failure",
+      "workflow": "upload",
+      "input": "Upload fail-me.pdf from Downloads as a Purchase invoice.",
+      "approval": "approve",
+      "inject_failure": {"server": "handover", "mode": "hand-over unavailable"},
+      "required_tools": ["informer_check_purchase_invoice", "informer_upload_purchase_invoice"],
+      "ordering": [{"before": "informer_check_purchase_invoice", "after": "informer_upload_purchase_invoice"}],
+      "forbidden_tools": ["create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
+      "expected_facts": ["hand-over unavailable"],
+      "expected_outcome": {"upload_count": 0, "require_failure_reported": true}
+    },
+    {
+      "id": "upload-mixed-vat-rejected",
+      "workflow": "upload",
+      "input": "How much VAT do I have to pay for Q3 2026, and upload supplier-march.pdf from Downloads as a Purchase invoice.",
+      "approval": "reject",
+      "required_tools": ["informer_vat_position", "informer_check_purchase_invoice", "informer_upload_purchase_invoice"],
+      "forbidden_tools": ["create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
+      "expected_facts": ["-375.00"],
+      "expected_outcome": {"upload_count": 0}
     },
     {
       "id": "research-route-planning",

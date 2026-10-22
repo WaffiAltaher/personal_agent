@@ -32,6 +32,10 @@ class InformerSettings(BaseSettings):
     vat_charged_ledger_numbers: str = "1500,1542"
     vat_paid_ledger_numbers: str = "1520,1543"
     vat_closing_target_ledger: int = 1551
+    # The upload log: one JSON line (content fingerprint, date) per successful hand-over, so a
+    # repeat of the same contents is noticed. Every server process shares it, so it is a file.
+    # Unset means ~/.informer_mcp/purchase-uploads.jsonl.
+    purchase_upload_log: Path | None = None
 
     model_config = SettingsConfigDict(
         env_prefix="INFORMER_",
