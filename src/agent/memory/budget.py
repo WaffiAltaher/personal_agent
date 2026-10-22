@@ -3,7 +3,8 @@
 ContextBudgetManager — token-budget accounting for memory injection and reports.
 
 Token estimation uses len(text)//4 (~4 characters per token).
-Context clearing for the model happens in context_view.py; graph state is never trimmed.
+The model's view of the conversation is reduced in context_view.py when it grows large
+(old tool results are stubbed there); graph state and checkpoints are never trimmed.
 """
 
 from agent.config import settings
