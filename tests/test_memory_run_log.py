@@ -10,6 +10,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 from agent.conversation import run_conversation
 from agent.graph import build_graph, log_run_to_memory
+from agent.config import settings
 from agent.memory.episodic import EpisodicMemory, RunRecord
 from agent.memory.semantic import SemanticMemory
 from agent.tools.classification import read_tool, write_action
@@ -57,8 +58,9 @@ def _usage(prompt: int, completion: int) -> dict:
 
 @pytest.mark.asyncio
 async def test_remember_pauses_for_approval_and_stores_only_when_approved(
-    scripted_model, episodic, semantic
+    scripted_model, episodic, semantic, monkeypatch
 ):
+    monkeypatch.setattr(settings, "memory_score_threshold", 0.0)
     stored: list[str] = []
 
     @write_action
@@ -94,21 +96,22 @@ async def test_remember_pauses_for_approval_and_stores_only_when_approved(
 
     await run_conversation(graph, config, tools=tools, resume_decision="reject")
     assert stored == []
-    assert semantic.search_memories("VAT", k=5, score_threshold=0.0) == []
+    assert semantic.search_memories("VAT", k=5) == []
 
     config2 = {"configurable": {"thread_id": "remember-approve-2"}}
     graph2 = graph_for_run()
     await run_conversation(graph2, config2, tools=tools, user_message="remember VAT")
     await run_conversation(graph2, config2, tools=tools, resume_decision="approve")
     assert stored == ["VAT is 21% in NL"]
-    hits = semantic.search_memories("VAT rate Netherlands", k=5, score_threshold=0.0)
+    hits = semantic.search_memories("VAT rate Netherlands", k=5)
     assert hits and "21%" in hits[0].content
 
 
 @pytest.mark.asyncio
 async def test_completed_run_without_remember_writes_nothing_to_semantic_memory(
-    scripted_model, episodic, semantic
+    scripted_model, episodic, semantic, monkeypatch
 ):
+    monkeypatch.setattr(settings, "memory_score_threshold", 0.0)
     @read_tool
     @tool("read_notes")
     async def read_notes() -> str:
@@ -135,7 +138,7 @@ async def test_completed_run_without_remember_writes_nothing_to_semantic_memory(
         run_date=date(2026, 10, 7),
     )
 
-    assert semantic.search_memories("notes", k=5, score_threshold=0.0) == []
+    assert semantic.search_memories("notes", k=5) == []
     assert episodic.get_recent_runs(1)[0].user_input == "show notes"
 
 
