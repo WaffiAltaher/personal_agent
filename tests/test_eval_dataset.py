@@ -22,14 +22,8 @@ DATASET = load_dataset(DEFAULT_DATASET)
 TOOL_ARGS = {
     "ms365_list-mail-messages": {},
     "ms365_get-calendar-view": {"startDateTime": "2026-10-07T00:00:00Z", "endDateTime": "2026-10-11T23:59:59Z"},
-    "ms365_create-draft-email": {"body": {
-        "subject": "Payment reminder",
-        "body": {"contentType": "text", "content": "Dear client, a friendly reminder about your overdue invoices."},
-        "toRecipients": [{"emailAddress": {"address": "facturen@goudenbol.example"}}],
-    }},
     "ms365_create-reply-draft": {"messageId": "AAMkAGZpeHR1cmUAMESSAGE02",
                                  "body": {"Comment": "Happy to go through the hours on Tuesday."}},
-    "informer_list_overdue_invoices": {},
     "informer_list_sales_invoices": {"status": "open"},
     "informer_trial_balance": {"year": 2026},
     "informer_get_sales_invoice": {"invoice_id": 5001},
@@ -61,10 +55,10 @@ def no_backoff_wait(monkeypatch):
 def test_dataset_has_10_to_20_scenarios_covering_every_workflow():
     assert 10 <= len(DATASET.scenarios) <= 20
     assert {s.workflow for s in DATASET.scenarios} == {
-        "inbox triage", "overdue-invoice capstone", "finance", "research", "failure recovery", "rejection",
+        "inbox triage", "finance", "research", "failure recovery", "rejection",
     }
     assert {s.approval for s in DATASET.scenarios} == {"approve", "reject"}
-    assert {s.inject_failure.server for s in DATASET.scenarios if s.inject_failure} == {"ms365", "informer"}
+    assert {s.inject_failure.server for s in DATASET.scenarios if s.inject_failure} == {"ms365"}
     assert all(s.required_tools and s.expected_facts for s in DATASET.scenarios)
 
 

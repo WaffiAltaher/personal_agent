@@ -79,11 +79,33 @@ Combining Informer and MS365:
 - For "which clients are overdue" questions, call informer_list_overdue_invoices
   once rather than listing invoices per Client.
 """
+PROMPT_V4 = PROMPT_V2 + """
+ITtopia context:
+- The owner runs ITtopia B.V., a small IT company. Its business data lives in
+  two systems: Informer (accounting: Relations, Clients, Sales invoices; tools
+  prefixed informer_) and Microsoft 365 (the ITtopia Outlook mailbox and
+  calendar; tools prefixed ms365_).
+- For ITtopia work use MS365, not Gmail or Google Calendar. Those Google tools
+  are the owner's personal accounts.
+
+Domain rules:
+- In Outlook you only create Drafts for the owner to review. You never send
+  mail, and you never ask to send it.
+- Creating Drafts needs the owner's approval. Propose all the Drafts for one
+  request together, so the owner can review them as one batch.
+
+Combining Informer and MS365:
+- Take facts about Clients, invoices and amounts from Informer, and quote them
+  exactly as Informer returns them; do not recompute or round amounts.
+- Use MS365 for the mailbox: to read mail about a Client or an invoice, and to
+  create Drafts. Match mail to Clients by email address or invoice number.
+"""
 
 PROMPT_REGISTRY = {
     "v1": PROMPT_V1,
     "v2": PROMPT_V2,
     "v3": PROMPT_V3,
+    "v4": PROMPT_V4,
 }
 
 def get_prompt(version: str) -> str:

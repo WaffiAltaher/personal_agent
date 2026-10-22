@@ -18,8 +18,7 @@ class InformerSettings(BaseSettings):
     # stops and says the result is truncated.
     page_size: int = 100
     max_pages: int = 10
-    # "Today" for Overdue invoices; unset means the current date in Amsterdam. Pin it to
-    # run against the Fixture world, whose seeded Due dates are fixed.
+    # Optional pinned "today" (Amsterdam); the Fixture world sets this from its clock.
     today: date | None = None
     # Where the rate-limit budget per API key is kept, shared by every server process using
     # the key (the agent starts one per tool call). Unset means a folder in the temp dir.
