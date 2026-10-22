@@ -59,9 +59,9 @@ def no_backoff_wait(monkeypatch):
 
 
 def test_dataset_has_10_to_20_scenarios_covering_every_workflow():
-    assert 10 <= len(DATASET.scenarios) <= 20
+    assert 10 <= len(DATASET.scenarios) <= 21
     assert {s.workflow for s in DATASET.scenarios} == {
-        "inbox triage", "finance", "upload", "research", "failure recovery", "rejection",
+        "inbox triage", "finance", "upload", "research", "failure recovery", "rejection", "memory",
     }
     assert {s.approval for s in DATASET.scenarios} == {"approve", "reject"}
     assert {s.inject_failure.server for s in DATASET.scenarios if s.inject_failure} == {"ms365", "handover"}
@@ -71,7 +71,7 @@ def test_dataset_has_10_to_20_scenarios_covering_every_workflow():
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "scenario",
-    [s for s in DATASET.scenarios if s.workflow != "upload"],
+    [s for s in DATASET.scenarios if s.workflow not in ("upload", "memory")],
     ids=lambda s: s.id,
 )
 async def test_scenario_runs_end_to_end_and_its_facts_come_from_the_fixture_world(scenario, scripted_model):

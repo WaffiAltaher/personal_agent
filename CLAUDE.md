@@ -54,7 +54,7 @@ CLI → graph.py (LangGraph) → agent_node (LLM) → human_review_node → tool
 
 **`src/agent/evals/`** — eval harness: scenarios over the Fixture world, trajectory metrics, RAGAS generation metrics, cost/latency, model-comparison reports.
 
-**`src/agent/config.py`** — Pydantic Settings loading from `.env`. Required: `GOOGLE_API_KEY`, `TAVILY_API_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`. Optional: `ANTHROPIC_API_KEY` (required for `anthropic:` models), `MS365_MCP_*`, `INFORMER_*`, `MEMORY_REWRITE_MODEL`, `EVAL_JUDGE_MODEL`.
+**`src/agent/config.py`** — Pydantic Settings loading from `.env`. Required: `GOOGLE_API_KEY`, `TAVILY_API_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`. Optional: `ANTHROPIC_API_KEY` (required for `anthropic:` models), `MS365_MCP_*`, `INFORMER_*`, `EVAL_JUDGE_MODEL`.
 
 **`src/agent/auth/google.py`** — OAuth2 for Gmail/Calendar. Real-mode CLI startup checks the token before the run; a missing or dead refresh token stops startup and names `python -m agent.auth.google` (the only command that opens a browser). Token saved to `credentials/token.json` and auto-refreshes while valid. Testing-mode refresh tokens expire seven days after issue, regardless of use.
 
