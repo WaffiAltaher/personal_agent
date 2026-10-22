@@ -97,7 +97,7 @@ class AgentState(TypedDict, total=False):
     errors: Annotated[list[dict], operator.add]
     model_call_count: int  # model calls this user turn; reset on a new user message, not on resume
     last_model_input_tokens: int | None  # reported input tokens from the previous model call
-    message_count_at_last_model_call: int  # len(state messages) after the previous model call
+    message_count_at_last_model_call: int  # len(state messages) before the previous model call
 
 
 STEP_LIMIT_ANSWER = (
@@ -513,6 +513,7 @@ def build_graph(
         if count >= max_iterations:
             return {"messages": [AIMessage(content=STEP_LIMIT_ANSWER)]}
 
+        messages_before_call = len(state["messages"])
         system_text = f"{SYSTEM_PROMPT}\n\n{build_runtime_context(today)}"
         view = build_model_view(
             state["messages"],
@@ -527,7 +528,7 @@ def build_graph(
             "messages": [response],
             "model_call_count": count + 1,
             "last_model_input_tokens": usage.get("input_tokens"),
-            "message_count_at_last_model_call": len(state["messages"]) + 1,
+            "message_count_at_last_model_call": messages_before_call,
         }
 
     async def tools_with_fallback(state: AgentState) -> dict:

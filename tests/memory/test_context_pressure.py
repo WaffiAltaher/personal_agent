@@ -181,6 +181,24 @@ def test_after_reduction_next_estimate_stays_below_clear_threshold(small_context
     assert "result cleared" not in tool_in_view.content
 
 
+def test_estimate_counts_assistant_reply_since_reported_input():
+    """Delta must include the AIMessage added after the reported input token count."""
+    reported_input = 10_000
+    reply_token_estimate = 37
+    reply = AIMessage(content="z" * (reply_token_estimate * 4))
+    messages = [HumanMessage(content="question"), reply]
+    pre_call_message_count = 1
+
+    total = estimate_context_tokens(
+        state_messages=messages,
+        system_text="",
+        tools=[],
+        last_model_input_tokens=reported_input,
+        message_count_at_last_model_call=pre_call_message_count,
+    )
+    assert total == reported_input + reply_token_estimate
+
+
 def test_token_count_includes_system_tools_and_tool_call_arguments(small_context_limits):
     @tool
     def sample(x: str) -> str:
