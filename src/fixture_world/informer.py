@@ -13,12 +13,19 @@ and the MS365 stand-in see it. Seeded Sales invoice dates are written for `clock
 so the fake moves them by whole weeks onto the current week, as the MS365 stand-in moves its
 seeded week (`clock.seed_shift()`).
 
+The Purchase invoice upload log is a file, since the recording hand-over dies with the process:
+FIXTURE_WORLD_INFORMER_UPLOAD_LOG names it (default: one stable file in the temp dir).
+FIXTURE_WORLD_INFORMER_DOWNLOADS_DIR names the folder PDFs may be uploaded from (default: ~/Downloads).
+Only FIXTURE_WORLD_* variables reach this process (see agent.tools.mcp_environment), so these
+are the names to use, not INFORMER_*.
+
 FIXTURE_WORLD_INFORMER_FAILURE=<mode> switches the fake into a failure mode for every request
 (`informer_api.Failure` values: unauthorized, quota_exhausted, server_error).
 """
 
 import os
 import tempfile
+from pathlib import Path
 
 from fixture_world import clock
 from fixture_world.informer_api import FakeInformerApi, Failure
@@ -28,6 +35,16 @@ from informer_mcp.server import create_server
 
 
 FAILURE_ENV = "FIXTURE_WORLD_INFORMER_FAILURE"
+UPLOAD_LOG_ENV = "FIXTURE_WORLD_INFORMER_UPLOAD_LOG"  # JSON Lines file: the Purchase invoice upload log
+DOWNLOADS_ENV = "FIXTURE_WORLD_INFORMER_DOWNLOADS_DIR"  # the folder Purchase invoice PDFs may come from
+DEFAULT_UPLOAD_LOG = Path(tempfile.gettempdir()) / "fixture_world_informer_purchase_uploads.jsonl"
+
+
+def upload_log_path() -> Path:
+    """The upload log, a file that outlives this process (each tool call starts a new one, so the
+    recording hand-over's own list is gone by the next call). The same stable file unless
+    FIXTURE_WORLD_INFORMER_UPLOAD_LOG names another; evals name one per run."""
+    return Path(os.environ.get(UPLOAD_LOG_ENV) or DEFAULT_UPLOAD_LOG)
 
 
 def main() -> None:
@@ -43,6 +60,8 @@ def main() -> None:
             base_url=fake.base_url,
             today=clock.today(),
             rate_limit_dir=budget,
+            purchase_upload_log=upload_log_path(),
+            downloads_dir=Path(os.environ[DOWNLOADS_ENV]) if os.environ.get(DOWNLOADS_ENV) else None,
         )
         create_server(settings, handover=RecordingHandover()).run("stdio")
 

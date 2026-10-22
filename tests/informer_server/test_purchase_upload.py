@@ -1,6 +1,7 @@
 # tests/informer_server/test_purchase_upload.py
 """Purchase invoice check and upload tools (ADR-012): path safety, PDF validation, hand-over."""
 
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -20,8 +21,12 @@ def downloads(tmp_path) -> Path:
 
 
 @pytest.fixture
-def settings_with_downloads(informer_settings, downloads):
-    return informer_settings.model_copy(update={"downloads_dir": downloads})
+def settings_with_downloads(informer_settings, downloads, tmp_path):
+    return informer_settings.model_copy(update={
+        "downloads_dir": downloads,
+        "purchase_upload_log": tmp_path / "state" / "purchase-uploads.jsonl",
+        "today": date(2026, 10, 7),
+    })
 
 
 @pytest.fixture
@@ -147,6 +152,178 @@ async def test_handover_failure_is_reported_and_attempted_once(
 def test_upload_is_not_on_read_allowlist_check_is():
     assert "check_purchase_invoice" in READ_TOOLS
     assert "upload_purchase_invoice" not in READ_TOOLS
+
+
+# --- Upload log and allow_duplicate (ticket 17) -----------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_check_reports_the_date_of_an_earlier_upload_under_any_name(
+    connect, settings_with_downloads, handover, downloads, call_tool,
+):
+    first = write_pdf(downloads, "march.pdf")
+    renamed = write_pdf(downloads / "copies", "scan-0042.pdf")  # same contents, other name and folder
+
+    async with connect(settings_with_downloads, handover=handover) as session:
+        await call_tool(session, "upload_purchase_invoice", path=str(first))
+        is_error, payload = await call_tool(session, "check_purchase_invoice", path=str(renamed))
+
+    assert not is_error
+    assert payload["already_uploaded_on"] == "2026-10-07"
+    assert "already uploaded on 2026-10-07" in payload["warning"]
+
+
+@pytest.mark.asyncio
+async def test_repeat_upload_is_refused_with_the_earlier_date_and_hands_nothing_over(
+    connect, settings_with_downloads, handover, downloads, call_tool,
+):
+    first = write_pdf(downloads, "march.pdf")
+    again = write_pdf(downloads, "march (1).pdf")
+
+    async with connect(settings_with_downloads, handover=handover) as session:
+        await call_tool(session, "upload_purchase_invoice", path=str(first))
+        is_error, text = await call_tool(session, "upload_purchase_invoice", path=str(again))
+
+    assert is_error
+    assert "already uploaded on 2026-10-07" in text
+    assert "allow_duplicate" in text
+    assert handover.uploads == [("march.pdf", MINIMAL_PDF)]
+
+
+@pytest.mark.asyncio
+async def test_allow_duplicate_hands_the_repeat_over(
+    connect, settings_with_downloads, handover, downloads, call_tool,
+):
+    first = write_pdf(downloads, "march.pdf")
+    again = write_pdf(downloads, "march (1).pdf")
+
+    async with connect(settings_with_downloads, handover=handover) as session:
+        await call_tool(session, "upload_purchase_invoice", path=str(first))
+        is_error, _ = await call_tool(
+            session, "upload_purchase_invoice", path=str(again), allow_duplicate=True,
+        )
+
+    assert not is_error
+    assert handover.uploads == [("march.pdf", MINIMAL_PDF), ("march (1).pdf", MINIMAL_PDF)]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_upload_is_not_logged_as_uploaded(
+    connect, settings_with_downloads, downloads, call_tool,
+):
+    failing = RecordingHandover(fail_with="hand-over unavailable")
+    working = RecordingHandover()
+    pdf_path = write_pdf(downloads, "retry-me.pdf")
+
+    async with connect(settings_with_downloads, handover=failing) as session:
+        failed, _ = await call_tool(session, "upload_purchase_invoice", path=str(pdf_path))
+        _, checked = await call_tool(session, "check_purchase_invoice", path=str(pdf_path))
+    async with connect(settings_with_downloads, handover=working) as session:
+        retried, _ = await call_tool(session, "upload_purchase_invoice", path=str(pdf_path))
+
+    assert failed
+    assert "already_uploaded_on" not in checked
+    assert not retried  # not refused as a duplicate
+    assert working.uploads == [("retry-me.pdf", MINIMAL_PDF)]
+
+
+@pytest.mark.asyncio
+async def test_a_refused_upload_is_not_logged_as_uploaded(
+    connect, settings_with_downloads, handover, downloads, call_tool,
+):
+    first = write_pdf(downloads, "march.pdf")
+    again = write_pdf(downloads, "march (1).pdf")
+    log = settings_with_downloads.purchase_upload_log
+
+    async with connect(settings_with_downloads, handover=handover) as session:
+        await call_tool(session, "upload_purchase_invoice", path=str(first))
+        await call_tool(session, "upload_purchase_invoice", path=str(again))  # refused
+        await call_tool(session, "upload_purchase_invoice", path=str(_invalid_path("not_pdf_content", downloads, downloads.parent)))
+
+    assert len(log.read_text().splitlines()) == 1  # only the one real hand-over
+
+
+@pytest.mark.asyncio
+async def test_different_contents_are_neither_reported_nor_refused(
+    connect, settings_with_downloads, handover, downloads, call_tool,
+):
+    first = write_pdf(downloads, "march.pdf")
+    other = write_pdf(downloads, "april.pdf", MINIMAL_PDF + b"%different\n")
+
+    async with connect(settings_with_downloads, handover=handover) as session:
+        await call_tool(session, "upload_purchase_invoice", path=str(first))
+        _, checked = await call_tool(session, "check_purchase_invoice", path=str(other))
+        is_error, _ = await call_tool(session, "upload_purchase_invoice", path=str(other))
+
+    assert "already_uploaded_on" not in checked and "warning" not in checked
+    assert not is_error
+    assert [name for name, _ in handover.uploads] == ["march.pdf", "april.pdf"]
+
+
+@pytest.mark.asyncio
+async def test_the_upload_log_outlives_the_server_process(
+    connect, settings_with_downloads, downloads, call_tool,
+):
+    """The agent starts a new server per tool call, each with a new hand-over object."""
+    pdf_path = write_pdf(downloads, "march.pdf")
+    first, second = RecordingHandover(), RecordingHandover()
+
+    async with connect(settings_with_downloads, handover=first) as session:
+        await call_tool(session, "upload_purchase_invoice", path=str(pdf_path))
+    async with connect(settings_with_downloads, handover=second) as session:
+        is_error, text = await call_tool(session, "upload_purchase_invoice", path=str(pdf_path))
+
+    assert is_error and "already uploaded on" in text
+    assert second.uploads == []
+
+
+@pytest.mark.asyncio
+async def test_tool_descriptions_tell_the_model_to_ask_the_owner_before_reuploading(
+    connect, settings_with_downloads, handover,
+):
+    async with connect(settings_with_downloads, handover=handover) as session:
+        tools = {t.name: t for t in (await session.list_tools()).tools}
+
+    for name in ("check_purchase_invoice", "upload_purchase_invoice"):
+        assert "ask the owner" in " ".join(tools[name].description.lower().split())
+    assert "allow_duplicate" in tools["upload_purchase_invoice"].description
+    assert tools["upload_purchase_invoice"].inputSchema["properties"]["allow_duplicate"]["default"] is False
+
+
+@pytest.mark.parametrize("tool", ["check_purchase_invoice", "upload_purchase_invoice"])
+@pytest.mark.asyncio
+async def test_over_cap_file_is_refused_without_being_read(
+    connect, settings_with_downloads, handover, downloads, call_tool, monkeypatch, tool,
+):
+    cap = 100  # not the 2 MB default
+    settings = settings_with_downloads.model_copy(update={"purchase_upload_max_bytes": cap})
+    big = write_pdf(downloads, "big.pdf", MINIMAL_PDF + b"0" * (cap + 1 - len(MINIMAL_PDF)))
+
+    def must_not_read(self):
+        raise AssertionError("an over-cap file must be refused before it is read")
+
+    monkeypatch.setattr(Path, "read_bytes", must_not_read)
+    async with connect(settings, handover=handover) as session:
+        is_error, text = await call_tool(session, tool, path=str(big))
+
+    assert is_error
+    assert "size cap" in text
+    assert handover.uploads == []
+
+
+@pytest.mark.asyncio
+async def test_file_exactly_at_a_custom_cap_is_accepted(
+    connect, settings_with_downloads, handover, downloads, call_tool,
+):
+    cap = 100
+    settings = settings_with_downloads.model_copy(update={"purchase_upload_max_bytes": cap})
+    at_cap = write_pdf(downloads, "at-cap.pdf", MINIMAL_PDF + b"0" * (cap - len(MINIMAL_PDF)))
+
+    async with connect(settings, handover=handover) as session:
+        is_error, payload = await call_tool(session, "check_purchase_invoice", path=str(at_cap))
+
+    assert not is_error
+    assert payload["size"] == cap
 
 
 def _invalid_path(kind: str, downloads: Path, tmp_path: Path) -> Path:

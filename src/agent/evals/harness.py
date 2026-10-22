@@ -162,6 +162,7 @@ async def run_scenario(
         env = {
             clock.TODAY_ENV: clock.SEED_TODAY.isoformat(),
             fixture_ms365.DRAFTS_ENV: str(drafts_path),
+            fixture_informer.UPLOAD_LOG_ENV: str(Path(workdir) / "informer-uploads.jsonl"),  # no uploads carry over between runs
             fixture_ms365.DRAFT_FAILURE_ENV: None,
             fixture_ms365.FAILURE_ENV: None,
             **switch.env,
