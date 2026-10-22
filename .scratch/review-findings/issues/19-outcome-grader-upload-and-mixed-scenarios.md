@@ -6,7 +6,7 @@
 
 **Blocked by:** 09, 16, 18
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 **Closes:** F8, F9, M12 (k58, k59)
 

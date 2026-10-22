@@ -4,8 +4,8 @@
 Each scenario run gets a fresh Fixture world: the clock pinned to the seeded date (which the
 model is told as "today" too), its own Drafts file, and the scenario's injected failure. The
 tools are loaded as `--fixtures` loads them, the chat model is injected into the graph, and
-every approval prompt is answered with the scenario's approval policy by resuming with
-`Command(resume=...)`, as the CLI does with the owner's answer.
+every approval prompt is answered with the scenario's approval policy through
+`run_conversation`, as the CLI does with the owner's answer.
 
 Only tools that stay inside the Fixture world are bound: the Fixture world's MCP tools plus
 the local tools in EVAL_LOCAL_TOOLS (the seeded web search). The other local tools reach the
@@ -28,8 +28,6 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.errors import GraphRecursionError
-from langgraph.types import Command
-
 from agent.config import settings
 from agent.evals.efficiency import efficiency, efficiency_totals
 from agent.evals.generation import GenerationScorer, generation_means, generation_sample
@@ -37,9 +35,11 @@ from agent.evals.records import EvalResults, InterruptRecord, RunResult, ToolCal
 from agent.evals.report import render_report
 from agent.evals.scenarios import Dataset, Scenario
 from agent.evals.trajectory import score_facts, score_trajectory, summarise
+from agent.conversation import run_conversation
 from agent.graph import build_graph
 from agent.tracing import TraceAttributes
 from agent.tools import LOCAL_TOOLS, load_all_tools
+from agent.tools.classification import is_read
 from agent.tools.web import web_search
 from fixture_world import clock, informer as fixture_informer, ms365 as fixture_ms365
 
@@ -188,14 +188,24 @@ async def run_scenario(
                 }
                 started = time.perf_counter()
                 try:
-                    result = await graph.ainvoke({"messages": [HumanMessage(content=scenario.input)]}, config=config)
+                    result = await run_conversation(
+                        graph, config, tools=tools, user_message=scenario.input,
+                    )
                     while "__interrupt__" in result:
                         for pending in result["__interrupt__"]:
                             interrupts.append(InterruptRecord(actions=pending.value.get("actions", ""),
                                                               decision=scenario.approval))
                         if scenario.approval == "reject":
-                            rejected |= {call["id"] for call in result["messages"][-1].tool_calls}
-                        result = await graph.ainvoke(Command(resume=scenario.approval), config=config)
+                            tool_by_name = {t.name: t for t in tools}
+                            rejected |= {
+                                call["id"]
+                                for call in result["messages"][-1].tool_calls
+                                if tool_by_name.get(call["name"]) is None
+                                or not is_read(tool_by_name[call["name"]])
+                            }
+                        result = await run_conversation(
+                            graph, config, tools=tools, resume_decision=scenario.approval,
+                        )
                 except GraphRecursionError:
                     status = "step_limit"
                 except Exception as exc:  # an eval records a crashing run instead of stopping

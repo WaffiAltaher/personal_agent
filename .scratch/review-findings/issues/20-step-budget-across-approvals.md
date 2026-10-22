@@ -6,7 +6,7 @@
 
 **Blocked by:** 09 (serialise: graph state)
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 **Closes:** B3 (k18, k65 rewritten)
 

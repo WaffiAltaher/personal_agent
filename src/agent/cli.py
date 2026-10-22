@@ -13,10 +13,9 @@ import uuid
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langfuse import propagate_attributes
 from langgraph.errors import GraphRecursionError
-from langgraph.types import Command
-
 from agent.auth.google import GoogleLoginRequired, check_google_login
 from agent.chat_model import ModelConfigError, create_chat_model
+from agent.conversation import run_conversation
 from agent.graph import build_graph, get_checkpointer, log_run_to_memory
 from agent.tracing import flush_traces, get_callback_handler, verify_connection
 from agent.config import settings
@@ -191,14 +190,13 @@ async def main():
             trace_name="cli-run",
             metadata={"prompt-version": settings.prompt_version},
         ):
-            result = await agent_graph.ainvoke(
-                {"messages": [HumanMessage(content=user_input)]},
-                config=config
+            result = await run_conversation(
+                agent_graph,
+                config,
+                tools=tools,
+                user_message=user_input,
             )
             # HITL loop — handle zero or more interrupts per run.
-            # The graph pauses at human_review_node whenever a write tool
-            # is about to execute. We display the payload, collect the
-            # decision, and resume with the same thread_id.
             while "__interrupt__" in result:
                 for interrupt_obj in result["__interrupt__"]:
                     _display_interrupt(interrupt_obj.value)
@@ -206,9 +204,11 @@ async def main():
                 decision = _prompt_decision()
                 print(f"\nResuming with: {decision}\n")
 
-                result = await agent_graph.ainvoke(
-                    Command(resume=decision),
-                    config=config,
+                result = await run_conversation(
+                    agent_graph,
+                    config,
+                    tools=tools,
+                    resume_decision=decision,
                 )
 
     last = result["messages"][-1]
