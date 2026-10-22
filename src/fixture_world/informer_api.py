@@ -37,6 +37,7 @@ class Failure(Enum):
 
     UNAUTHORIZED = "unauthorized"
     QUOTA_EXHAUSTED = "quota_exhausted"  # the daily request limit is used up: 429
+    THROTTLED = "throttled"  # the per-minute limit is hit, the day's quota is not: 429, transient
     SERVER_ERROR = "server_error"  # a transient upstream failure: 503
 
 
@@ -143,6 +144,8 @@ class FakeInformerApi:
         refused = self._spend_quota()
         if refused:
             return refused
+        if failure is Failure.THROTTLED:
+            return 429, {"error": ["Too many requests."], "response_code": 429}
         if failure is Failure.SERVER_ERROR:
             return 503, {"error": ["Service temporarily unavailable"], "response_code": 503}
         for pattern, route in self._routes():
