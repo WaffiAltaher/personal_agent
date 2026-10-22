@@ -89,6 +89,22 @@ class AgentState(TypedDict, total=False):
     messages: Annotated[list[BaseMessage], add_messages]
     token_usage_estimate: dict | None  # set by check_context_budget each iteration
     errors: Annotated[list[dict], operator.add]
+    model_call_count: int  # model calls this user turn; reset on a new user message, not on resume
+
+
+STEP_LIMIT_ANSWER = (
+    "Stopped: the agent hit its step limit without a final answer. "
+    "Try a narrower question."
+)
+
+
+def is_step_limit_answer(message: BaseMessage | None) -> bool:
+    return (
+        isinstance(message, AIMessage)
+        and not getattr(message, "tool_calls", None)
+        and isinstance(message.content, str)
+        and "step limit" in message.content.lower()
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -472,17 +488,23 @@ def build_graph(
     # awrap_tool_call wraps each individual call with retry + error handling.
     tool_node = ToolNode(tools, awrap_tool_call=retry_tool_call)
 
+    max_iterations = settings.max_iterations
+
     async def agent_node(state: AgentState) -> dict:
         """
         The reasoning node. Calls the LLM with the current message history.
         Returns a dict with a `messages` key. The add_messages reducer appends
         it to state rather than overwriting.
         """
+        count = state.get("model_call_count", 0)
+        if count >= max_iterations:
+            return {"messages": [AIMessage(content=STEP_LIMIT_ANSWER)]}
+
         messages = [
             SystemMessage(content=f"{SYSTEM_PROMPT}\n\n{build_runtime_context(today)}")
         ] + state["messages"]
         response = await llm.ainvoke(messages)
-        return {"messages": [response]}
+        return {"messages": [response], "model_call_count": count + 1}
 
     async def tools_with_fallback(state: AgentState) -> dict:
         """
@@ -666,12 +688,14 @@ def log_run_to_memory(result: dict, user_input: str) -> None:
                     }
                     break
 
+        step_limit = is_step_limit_answer(messages[-1] if messages else None)
         run = RunRecord(
             user_input=user_input,
             final_output=final_output,
             tools_called=tools_called,
             token_usage=token_usage,
-            success=True,
+            success=not step_limit,
+            outcome="step limit" if step_limit else "completed",
         )
 
         run_id = get_episodic_memory().log_run(run)

@@ -6,7 +6,7 @@
 
 **Blocked by:** 20 (serialise: graph state)
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 **Closes:** C1–C10, C11 (drops k23, k25, k90; ADR-013)
 

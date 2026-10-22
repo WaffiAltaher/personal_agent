@@ -55,4 +55,7 @@ async def run_conversation(
     assert user_message is not None
     if pending:
         await _abandon_pending_approval(graph, config)
-    return await graph.ainvoke({"messages": [HumanMessage(content=user_message)]}, config=config)
+    return await graph.ainvoke(
+        {"messages": [HumanMessage(content=user_message)], "model_call_count": 0},
+        config=config,
+    )
