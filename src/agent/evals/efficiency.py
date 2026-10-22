@@ -19,6 +19,7 @@ def efficiency(usage_by_model: dict[str, dict], *, latency_s: float, on: date) -
     by_model = {
         name: ModelUsage(
             input_tokens=usage.get("input_tokens", 0),
+            cached_input_tokens=(usage.get("input_token_details") or {}).get("cache_read") or 0,
             output_tokens=usage.get("output_tokens", 0),
             total_tokens=usage.get("total_tokens", 0),
             cost_usd=cost_usd(name, usage, on=on),

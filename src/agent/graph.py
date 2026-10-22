@@ -66,6 +66,7 @@ from typing_extensions import TypedDict
 
 from agent.chat_model import create_chat_model
 from agent.config import settings
+from agent.model_binding import bind_agent_tools, system_message_for_model
 from agent.memory import get_episodic_memory
 from agent.memory.context_view import (
     build_model_view,
@@ -96,6 +97,7 @@ class AgentState(TypedDict, total=False):
     token_usage_estimate: dict | None  # set by check_context_budget each iteration
     errors: Annotated[list[dict], operator.add]
     model_call_count: int  # model calls this user turn; reset on a new user message, not on resume
+    runtime_clock_iso: str | None  # Europe/Amsterdam instant for the system prompt; fixed for the run
     last_model_input_tokens: int | None  # reported input tokens from the previous model call
     message_count_at_last_model_call: int  # len(state messages) before the previous model call
 
@@ -243,13 +245,19 @@ LOCAL_TIMEZONE = ZoneInfo("Europe/Amsterdam")
 PINNED_TIME_OF_DAY = time(9, 0)
 
 
-def build_runtime_context(today: date | None = None) -> str:
+def build_runtime_context(
+    at: datetime | None = None,
+    *,
+    today: date | None = None,
+) -> str:
     """Return runtime facts the model needs but cannot infer reliably.
 
-    With `today` (a run against the Fixture world), the date is that day at 09:00 local
-    time, so the model's "today" is the Fixture world's and a run is repeatable.
+    Pass `at` for the run's fixed clock. With `today` only (Fixture world before the
+    clock is stored), the date is that day at 09:00 local time.
     """
-    if today is None:
+    if at is not None:
+        now = at
+    elif today is None:
         now = datetime.now(LOCAL_TIMEZONE)
     else:
         now = datetime.combine(today, PINNED_TIME_OF_DAY, tzinfo=LOCAL_TIMEZONE)
@@ -262,16 +270,37 @@ def build_runtime_context(today: date | None = None) -> str:
         "unless the user explicitly asks for another timezone."
     )
 
-def make_check_context_budget(bound_tools: list):
+
+def new_runtime_clock_iso(today: date | None = None) -> str:
+    """Read the clock once when a user turn starts."""
+    if today is None:
+        now = datetime.now(LOCAL_TIMEZONE)
+    else:
+        now = datetime.combine(today, PINNED_TIME_OF_DAY, tzinfo=LOCAL_TIMEZONE)
+    return now.isoformat()
+
+
+def _runtime_instant(state: AgentState, today: date | None) -> datetime:
+    iso = state.get("runtime_clock_iso")
+    if iso:
+        return datetime.fromisoformat(iso)
+    return datetime.fromisoformat(new_runtime_clock_iso(today))
+
+
+def _system_text_for_state(state: AgentState, today: date | None) -> str:
+    return f"{SYSTEM_PROMPT}\n\n{build_runtime_context(_runtime_instant(state, today))}"
+
+
+def make_check_context_budget(bound_tools: list, today: date | None):
     def check_context_budget(state: AgentState) -> dict:
-        return _check_context_budget(state, bound_tools)
+        return _check_context_budget(state, bound_tools, today)
 
     return check_context_budget
 
 
-def _check_context_budget(state: AgentState, bound_tools: list) -> dict:
+def _check_context_budget(state: AgentState, bound_tools: list, today: date | None) -> dict:
     """Estimate context size before each LLM call; never mutates message state."""
-    system_text = f"{SYSTEM_PROMPT}\n\n{build_runtime_context()}"
+    system_text = _system_text_for_state(state, today)
     messages = state.get("messages", [])
     total = estimate_context_tokens(
         state_messages=messages,
@@ -290,12 +319,15 @@ def _check_context_budget(state: AgentState, bound_tools: list) -> dict:
     else:
         logger.debug("Context estimate before model call: %d tokens", total)
 
-    return {"token_usage_estimate": counts}
+    update: dict = {"token_usage_estimate": counts}
+    if not state.get("runtime_clock_iso"):
+        update["runtime_clock_iso"] = new_runtime_clock_iso(today)
+    return update
 
 
 def check_context_budget(state: AgentState) -> dict:
     """Default hook for tests; production graphs use make_check_context_budget(tools)."""
-    return _check_context_budget(state, [])
+    return _check_context_budget(state, [], None)
 
 
 def _answered_tool_call_ids(messages: list[BaseMessage]) -> set[str]:
@@ -491,7 +523,7 @@ def build_graph(
     # the model API expects, so the model knows what tools it can call and how.
     if model is None:
         model = create_chat_model()  # provider:model from settings.model_name
-    llm = model.bind_tools(tools)
+    llm = bind_agent_tools(model, tools)
 
     # ToolNode handles the mechanical work of tool execution:
     # - reads the AIMessage's tool_calls field
@@ -514,22 +546,27 @@ def build_graph(
             return {"messages": [AIMessage(content=STEP_LIMIT_ANSWER)]}
 
         messages_before_call = len(state["messages"])
-        system_text = f"{SYSTEM_PROMPT}\n\n{build_runtime_context(today)}"
+        system_text = _system_text_for_state(state, today)
+        system_msg = system_message_for_model(system_text, llm)
         view = build_model_view(
             state["messages"],
             system_text=system_text,
             tools=tools,
             last_model_input_tokens=state.get("last_model_input_tokens"),
             message_count_at_last_model_call=state.get("message_count_at_last_model_call", 0),
+            system_message=system_msg,
         )
         response = await llm.ainvoke(view)
         usage = getattr(response, "usage_metadata", None) or {}
-        return {
+        update: dict = {
             "messages": [response],
             "model_call_count": count + 1,
             "last_model_input_tokens": usage.get("input_tokens"),
             "message_count_at_last_model_call": messages_before_call,
         }
+        if not state.get("runtime_clock_iso"):
+            update["runtime_clock_iso"] = new_runtime_clock_iso(today)
+        return update
 
     async def tools_with_fallback(state: AgentState) -> dict:
         """
@@ -626,7 +663,7 @@ def build_graph(
 
     graph = StateGraph(AgentState)
 
-    graph.add_node("check_context_budget", make_check_context_budget(tools))
+    graph.add_node("check_context_budget", make_check_context_budget(tools, today))
     graph.add_node("agent", agent_node)
     def human_review(state: AgentState) -> Command[Literal["tools", "agent"]]:
         return human_review_node(state, read_tool_names)

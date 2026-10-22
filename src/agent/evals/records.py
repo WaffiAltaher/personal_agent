@@ -70,6 +70,7 @@ class OutcomeScore(BaseModel):
 class ModelUsage(BaseModel):
     """Tokens one model used in a run, as its responses reported them, and their cost."""
     input_tokens: int = 0  # includes cached input
+    cached_input_tokens: int = 0
     output_tokens: int = 0  # includes thinking tokens
     total_tokens: int = 0
     cost_usd: float | None = None  # None: model or usage not in the price table (agent/pricing.py)

@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
 from langgraph.types import Command
+
+from agent.graph import new_runtime_clock_iso
 
 MOVED_ON_REJECTION = (
     "The owner moved on without approving. Do not retry this action. Acknowledge and continue."
@@ -36,6 +40,7 @@ async def run_conversation(
     tools: list[BaseTool],
     user_message: str | None = None,
     resume_decision: str | None = None,
+    today: date | None = None,
 ) -> dict:
     """Start or continue a conversation. Exactly one of user_message or resume_decision."""
     if (user_message is None) == (resume_decision is None):
@@ -59,6 +64,7 @@ async def run_conversation(
         {
             "messages": [HumanMessage(content=user_message)],
             "model_call_count": 0,
+            "runtime_clock_iso": new_runtime_clock_iso(today),
             "last_model_input_tokens": None,
             "message_count_at_last_model_call": 0,
         },

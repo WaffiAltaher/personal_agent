@@ -89,6 +89,7 @@ def build_model_view(
     last_model_input_tokens: int | None,
     message_count_at_last_model_call: int,
     *,
+    system_message: SystemMessage | None = None,
     clear_threshold: int | None = None,
     clear_target: int | None = None,
 ) -> list[BaseMessage]:
@@ -103,7 +104,7 @@ def build_model_view(
         message_count_at_last_model_call=message_count_at_last_model_call,
     )
     working = copy.deepcopy(state_messages)
-    system_msg = SystemMessage(content=system_text)
+    system_msg = system_message if system_message is not None else SystemMessage(content=system_text)
 
     def view_total() -> int:
         return _view_token_total(system_text, tools, working)
