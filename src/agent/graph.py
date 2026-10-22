@@ -269,6 +269,46 @@ def check_context_budget(state: AgentState) -> dict:
     return {"token_usage_estimate": counts}
 
 
+def _answered_tool_call_ids(messages: list[BaseMessage]) -> set[str]:
+    return {m.tool_call_id for m in messages if isinstance(m, ToolMessage)}
+
+
+def _latest_ai_tool_batch(messages: list[BaseMessage]) -> AIMessage | None:
+    for message in reversed(messages):
+        if isinstance(message, AIMessage) and getattr(message, "tool_calls", None):
+            return message
+    return None
+
+
+def pending_write_tool_calls(messages: list[BaseMessage], read_tool_names: frozenset[str]) -> list[dict]:
+    """Write tool calls on the latest AIMessage that do not yet have a ToolMessage."""
+    last_ai = next(
+        (m for m in reversed(messages) if isinstance(m, AIMessage) and getattr(m, "tool_calls", None)),
+        None,
+    )
+    if last_ai is None:
+        return []
+    answered = _answered_tool_call_ids(messages)
+    return [
+        tc for tc in last_ai.tool_calls
+        if tc["name"] not in read_tool_names and tc["id"] not in answered
+    ]
+
+
+OWNER_REJECTED = (
+    "The owner rejected this action. Do not retry this action. Acknowledge the cancellation."
+)
+
+
+def build_write_rejection_message(tool_call: dict, *, reason: str) -> ToolMessage:
+    return ToolMessage(
+        content=f"Action '{tool_call['name']}' was rejected by the user. {reason}",
+        tool_call_id=tool_call["id"],
+        name=tool_call["name"],
+        status="error",
+    )
+
+
 def human_review_node(state: AgentState, read_tool_names: frozenset[str]) -> Command[Literal["tools", "agent"]]:
     """
     Human-in-the-loop gate between agent and tools.
@@ -283,9 +323,9 @@ def human_review_node(state: AgentState, read_tool_names: frozenset[str]) -> Com
     When the user responds, the graph resumes with their decision.
 
     On 'approve': routes to tools, execution continues normally.
-    On 'reject':  injects a ToolMessage for each pending tool call so the
-                  message history stays well-formed, then routes back to
-                  agent so the LLM can acknowledge the cancellation.
+    On reject:    injects an error ToolMessage for each pending Write action,
+                  runs reads in the tools stage, then routes to agent so the
+                  LLM can acknowledge the cancellation.
 
     Why Command instead of a plain dict return?
     Command lets a node specify both a state update AND the next node to
@@ -325,19 +365,16 @@ def human_review_node(state: AgentState, read_tool_names: frozenset[str]) -> Com
     if decision == "approve":
         return Command(goto="tools")
 
-    # Rejected — inject a ToolMessage for every pending tool call so the
-    # message history stays well-formed, then route back to agent.
+    if isinstance(decision, dict) and decision.get("kind") == "reject_writes":
+        reason = decision.get("reason") or OWNER_REJECTED
+    else:
+        reason = OWNER_REJECTED
+
     rejection_messages = [
-        ToolMessage(
-            content=(
-                f"Action '{tc['name']}' was rejected by the user. "
-                "Do not retry this action. Acknowledge the cancellation."
-            ),
-            tool_call_id=tc["id"],
-        )
-        for tc in tool_calls  # ALL tool calls, not just those needing approval
+        build_write_rejection_message(tc, reason=reason)
+        for tc in pending_write_tool_calls(state["messages"], read_tool_names)
     ]
-    return Command(goto="agent", update={"messages": rejection_messages})
+    return Command(goto="tools", update={"messages": rejection_messages})
 
 
 # ---------------------------------------------------------------------------
@@ -465,7 +502,28 @@ def build_graph(
         the next LLM invocation.
         """
         try:
-            return await tool_node.ainvoke(state)
+            last_batch = _latest_ai_tool_batch(state["messages"])
+            if last_batch is None:
+                return {}
+
+            tool_calls = last_batch.tool_calls or []
+            answered = _answered_tool_call_ids(state["messages"])
+            pending = [tc for tc in tool_calls if tc["id"] not in answered]
+            if not pending:
+                return {}
+            if len(pending) == len(tool_calls):
+                return await tool_node.ainvoke(state)
+
+            filtered_ai = AIMessage(
+                content=last_batch.content,
+                tool_calls=pending,
+                id=getattr(last_batch, "id", None),
+            )
+            without_batch = [
+                m for m in state["messages"] if m is not last_batch and getattr(m, "id", None) != getattr(last_batch, "id", None)
+            ]
+            filtered_state = {**state, "messages": without_batch + [filtered_ai]}
+            return await tool_node.ainvoke(filtered_state)
         except GraphBubbleUp:
             raise  # interrupt() from a tool must pause the graph, not become an error
         except Exception as exc:
