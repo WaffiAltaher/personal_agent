@@ -23,10 +23,11 @@ import datetime
 
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from langchain_core.tools import tool
+from langchain_core.tools import StructuredTool, tool
 from pydantic import BaseModel, Field
 
 from agent.auth.google import get_google_credentials
+from fixture_world import google as fixture_google
 
 
 def _get_calendar_service():
@@ -217,3 +218,17 @@ def get_calendar_event(event_id: str, calendar_id: str = "primary") -> str:
         return f"Error: Google Calendar API error {e.status_code}: {e.reason}"
     except Exception as e:
         return f"Error: {type(e).__name__}: {e}"
+
+
+fixture_list_calendar_events = StructuredTool.from_function(
+    func=fixture_google.list_calendar_events,
+    name=list_calendar_events.name,
+    description=list_calendar_events.description,
+    args_schema=ListCalendarEventsInput,
+)
+fixture_get_calendar_event = StructuredTool.from_function(
+    func=fixture_google.get_calendar_event,
+    name=get_calendar_event.name,
+    description=get_calendar_event.description,
+    args_schema=GetCalendarEventInput,
+)

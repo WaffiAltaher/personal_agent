@@ -1,0 +1,42 @@
+[
+  {
+    "id": "gevt001",
+    "summary": "Yoga with Sam",
+    "description": "Vinyasa flow — Bring a mat.",
+    "location": "Amsterdam Yoga Studio, Prinsengracht 100",
+    "start": {"dateTime": "2026-10-08T18:00:00+02:00"},
+    "end": {"dateTime": "2026-10-08T19:00:00+02:00"},
+    "status": "confirmed",
+    "organizer": {"email": "jen.personal@gmail.example"},
+    "attendees": [
+      {"email": "sam@yogastudio.example", "responseStatus": "accepted"}
+    ],
+    "conferenceData": {}
+  },
+  {
+    "id": "gevt002",
+    "summary": "Dinner with Maria",
+    "description": "Catch up at De Kas.",
+    "location": "De Kas, Amsterdam",
+    "start": {"dateTime": "2026-10-09T19:30:00+02:00"},
+    "end": {"dateTime": "2026-10-09T21:30:00+02:00"},
+    "status": "confirmed",
+    "organizer": {"email": "jen.personal@gmail.example"},
+    "attendees": [
+      {"email": "maria@friends.example", "responseStatus": "accepted"}
+    ],
+    "conferenceData": {}
+  },
+  {
+    "id": "gevt003",
+    "summary": "Veluwe hike",
+    "description": "Day trip with Maria — pack lunch.",
+    "location": "Veluwe",
+    "start": {"date": "2026-10-11"},
+    "end": {"date": "2026-10-11"},
+    "status": "confirmed",
+    "organizer": {"email": "jen.personal@gmail.example"},
+    "attendees": [],
+    "conferenceData": {}
+  }
+]
