@@ -24,6 +24,7 @@ from agent.chat_model import create_chat_model
 from agent.config import Settings
 from agent.config import settings as default_settings
 from agent.memory.episodic import EpisodicMemory, RunRecord
+from agent.memory.budget import ContextBudgetManager
 from agent.memory.semantic import MemoryChunk, SemanticMemory
 
 logger = logging.getLogger(__name__)
@@ -161,4 +162,6 @@ def recall_chunks(
             if chunk.content not in best or chunk.score > best[chunk.content].score:
                 best[chunk.content] = chunk
 
-    return sorted(best.values(), key=lambda c: c.score, reverse=True)[:k]
+    ranked = sorted(best.values(), key=lambda c: c.score, reverse=True)[:k]
+    budget = default_settings.memory_budget
+    return ContextBudgetManager().trim_memory_results(ranked, budget=budget)

@@ -24,15 +24,17 @@ class Settings(BaseSettings):
     chroma_embedding_model: str = "models/gemini-embedding-001"
     memory_score_threshold: float = 0.7
     memory_top_k: int = 5
+    memory_budget: int = 10_000
     memory_rewrite_model: str | None = None  # provider:model for memory query rewriting; None → model_name
 
     # Evals: provider:model that grades answers (RAGAS); None → the model under test, with a warning.
     # `--judge-model` overrides it. Answer relevancy embeds with chroma_embedding_model.
     eval_judge_model: str | None = None
 
-    # Context window pressure limits
-    context_warning_threshold: int = 100_000
-    context_hard_limit: int = 800_000
+    # Context view limits (ADR-013): reduce tool results in the model view only
+    context_clear_threshold: int = 100_000
+    context_clear_target: int = 50_000
+    tool_result_max_tokens: int = 20_000
 
     model_config = SettingsConfigDict(
         env_file=".env",
