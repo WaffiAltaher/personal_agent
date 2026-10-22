@@ -43,10 +43,14 @@ def _get_langfuse() -> Langfuse:
 
 def verify_connection() -> bool:
     """
-    Check that Langfuse credentials are valid at startup.
-    Fails loudly rather than silently dropping traces.
+    Check at startup that Langfuse is reachable with valid credentials.
+    Never raises: any failure (refused connection, bad keys, HTTP error, no project)
+    means "not connected", and the caller warns and runs untraced.
     """
-    return _get_langfuse().auth_check()
+    try:
+        return _get_langfuse().auth_check()
+    except Exception:
+        return False
 
 
 def get_callback_handler(trace_id: str) -> CallbackHandler:
