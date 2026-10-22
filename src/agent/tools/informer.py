@@ -5,13 +5,14 @@ Both are loaded under the same name ("informer"), with the same classification, 
 agent sees the same tools against either.
 """
 
-import os
 import re
 import sys
 
 from agent.config import Settings, settings as default_settings
+from agent.tools.mcp_environment import fixture_environment, inherited, system_environment
 from agent.tools.mcp_loader import McpServer
 from informer_mcp.client import TRANSIENT_ERROR_PREFIX
+from informer_mcp.config import InformerSettings
 
 NAME = "informer"
 
@@ -24,11 +25,23 @@ READ_TOOLS = frozenset({
     "list_sales_invoices",
     "get_sales_invoice",
     "trial_balance",
+    "check_purchase_invoice",
+    "revenue",
+    "vat_position",
 })
 
 # Over MCP a transient Informer failure (unreachable, 429, 5xx) arrives only as tool-error
 # text starting with this prefix; the loader turns it into a retryable error.
 TRANSIENT_ERRORS = (re.escape(TRANSIENT_ERROR_PREFIX),)
+
+
+def _informer_setting_names() -> list[str]:
+    """Environment names of the Informer server's own settings, read from its settings model.
+
+    Derived rather than listed, so a setting added to the server is passed on without a change here.
+    """
+    prefix = InformerSettings.model_config["env_prefix"]
+    return [prefix + name.upper() for name in InformerSettings.model_fields]
 
 
 def informer_server(settings: Settings = default_settings) -> McpServer:
@@ -46,7 +59,8 @@ def informer_server(settings: Settings = default_settings) -> McpServer:
             "args": ["-m", "informer_mcp"],
             "transport": "stdio",
             "env": {
-                **os.environ,
+                **system_environment(),
+                **inherited(_informer_setting_names()),
                 "INFORMER_API_KEY": settings.informer_api_key,
                 "INFORMER_SECURITY_CODE": settings.informer_security_code,
             },
@@ -64,8 +78,8 @@ def informer_fixture_server() -> McpServer:
             "command": sys.executable,
             "args": ["-m", "fixture_world.informer"],
             "transport": "stdio",
-            # Passes FIXTURE_WORLD_TODAY through when set (the stdio client's default env drops it).
-            "env": {**os.environ},
+            # The Fixture world's own settings and the system basics: never the real Informer settings.
+            "env": fixture_environment(),
         },
         read_allowlist=READ_TOOLS,
         transient_errors=TRANSIENT_ERRORS,

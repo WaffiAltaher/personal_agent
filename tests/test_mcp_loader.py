@@ -6,15 +6,92 @@ that isn't configured or fails to start is reported in a notice, and the rest st
 """
 
 import json
+import os
 import re
+from pathlib import Path
 
 import pytest
 
 from agent.config import Settings
+from agent.tools.mcp_environment import SYSTEM_VARIABLES
 from agent.tools.mcp_loader import McpServer, load_mcp_tools
-from agent.tools.informer import informer_server
+from agent.tools.informer import informer_fixture_server, informer_server
 from fixture_world.informer_api import FakeInformerApi
 from agent.tools.ms365_mcp import ms365_fixture_server, ms365_server
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# Variables a shell or the .env may hold, that no MCP server should ever receive.
+SECRETS = {
+    "ANTHROPIC_API_KEY": "sk-ant-decoy",
+    "GOOGLE_API_KEY": "google-decoy",
+    "TAVILY_API_KEY": "tavily-decoy",
+    "LANGFUSE_SECRET_KEY": "langfuse-decoy",
+    "AGENT_DECOY_SECRET": "made-up-decoy",
+    "MS365_MCP_USE_KEYTAR": "false",
+    "ENABLED_TOOLS": ".*",
+    "INFORMER_NOT_A_SETTING": "decoy",  # Informer's prefix, but not one of its settings
+}
+
+
+def _real_settings() -> Settings:
+    return Settings(_env_file=None, ms365_mcp_client_id="client", ms365_mcp_tenant_id="tenant",
+                    informer_api_key="informer-key", informer_security_code="informer-code")
+
+
+def _connections(settings: Settings) -> dict[str, dict]:
+    """The connection each server builder returns, by name."""
+    return {
+        "ms365": ms365_server(settings).connection,
+        "ms365 stand-in": ms365_fixture_server().connection,
+        "informer": informer_server(settings).connection,
+        "informer stand-in": informer_fixture_server().connection,
+    }
+
+
+@pytest.fixture
+def clean_environment(monkeypatch):
+    """No MS365, Informer or Fixture-world variable from the developer's shell; restored afterwards."""
+    for key in list(os.environ):
+        if key.startswith(("MS365_MCP_", "INFORMER_", "FIXTURE_WORLD_")):
+            monkeypatch.delenv(key)
+    return monkeypatch
+
+
+def test_no_server_receives_a_secret_from_the_environment(clean_environment):
+    for key, value in SECRETS.items():
+        clean_environment.setenv(key, value)
+
+    for name, connection in _connections(_real_settings()).items():
+        assert set(connection["env"]) & set(SECRETS) == set(), name
+
+
+def test_each_server_receives_its_own_settings_and_nothing_else(clean_environment):
+    clean_environment.setenv("FIXTURE_WORLD_TODAY", "2026-10-07")
+    clean_environment.setenv("INFORMER_PAGE_SIZE", "37")  # a setting the Informer server reads itself
+    for key, value in SECRETS.items():
+        clean_environment.setenv(key, value)
+
+    own = {
+        name: set(connection["env"]) - SYSTEM_VARIABLES
+        for name, connection in _connections(_real_settings()).items()
+    }
+
+    assert own == {
+        "ms365": {"MS365_MCP_CLIENT_ID", "MS365_MCP_TENANT_ID"},
+        "ms365 stand-in": {"FIXTURE_WORLD_TODAY"},
+        "informer": {"INFORMER_API_KEY", "INFORMER_SECURITY_CODE", "INFORMER_PAGE_SIZE"},
+        "informer stand-in": {"FIXTURE_WORLD_TODAY"},
+    }
+
+
+def test_ms365_servers_start_outside_the_repo(clean_environment):
+    connections = _connections(_real_settings())
+    for name in ("ms365", "ms365 stand-in"):
+        cwd = Path(connections[name]["cwd"]).resolve()
+
+        assert cwd.is_dir(), name
+        assert not cwd.is_relative_to(REPO_ROOT), name  # so the server can't read the repo's .env
 
 
 @pytest.mark.asyncio
@@ -46,7 +123,7 @@ def test_real_ms365_server_is_unavailable_without_credentials():
 
 
 def test_real_ms365_server_is_pinned_and_offers_drafts_but_no_other_writes(monkeypatch):
-    monkeypatch.delenv("MS365_MCP_USE_KEYTAR", raising=False)
+    monkeypatch.setenv("MS365_MCP_USE_KEYTAR", "false")  # set first, so the assertion below can fail
     monkeypatch.setenv("ENABLED_TOOLS", ".*")  # would override --enabled-tools on the server
     settings = Settings(_env_file=None, ms365_mcp_client_id="client", ms365_mcp_tenant_id="tenant",
                         ms365_mcp_expected_username="jendo@example.com")

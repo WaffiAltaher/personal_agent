@@ -6,7 +6,7 @@
 
 **Blocked by:** 11
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 **Closes:** E5, E4 second half
 

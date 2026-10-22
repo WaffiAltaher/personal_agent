@@ -70,10 +70,16 @@ async def test_informer_tools_are_bound_with_the_prefix_and_all_read(fixture_too
 
     informer_tools = [t for t in tools if t.name.startswith("informer_")]
     assert sorted(t.name for t in informer_tools) == [
+        "informer_check_purchase_invoice",
         "informer_get_relation",
         "informer_get_sales_invoice",
         "informer_list_relations",
         "informer_list_sales_invoices",
+        "informer_revenue",
         "informer_trial_balance",
+        "informer_upload_purchase_invoice",
+        "informer_vat_position",
     ]
-    assert all(is_read(t) for t in informer_tools)
+    upload = next(t for t in informer_tools if t.name == "informer_upload_purchase_invoice")
+    assert not is_read(upload)
+    assert all(is_read(t) for t in informer_tools if t is not upload)

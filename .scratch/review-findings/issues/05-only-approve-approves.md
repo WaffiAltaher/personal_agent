@@ -6,7 +6,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** claimed
+**Status:** resolved
 
 **Closes:** M11 (k11)
 
@@ -20,3 +20,7 @@
 Keep the change minimal: ticket 09 reworks what a rejection does.
 
 Spec: `../spec.md`. Decisions: `../findings.md` ("Decisions taken").
+
+## Comments
+
+- Resolved without a production change. `human_review_node` already approves only on `decision == "approve"` (in `src/agent/graph.py` since 754e4795, 2026-04-18), so the "fails open" premise did not hold on `feat/review-findings`. Added `tests/test_k11_anything_but_approve_rejects.py` (copy of `k11_anything_but_approve_rejects`, renamed with a `test_` prefix so pytest collects it). It passes on the branch. A temporary fail-open mutant (`!= "reject"`) makes all three cases fail; the mutant was reverted and not committed.

@@ -23,6 +23,15 @@ class InformerSettings(BaseSettings):
     # Where the rate-limit budget per API key is kept, shared by every server process using
     # the key (the agent starts one per tool call). Unset means a folder in the temp dir.
     rate_limit_dir: Path | None = None
+    # Purchase invoice upload: only paths under this folder (default ~/Downloads).
+    downloads_dir: Path | None = None
+    # Maximum Purchase invoice PDF size in bytes (default 2 MB).
+    purchase_upload_max_bytes: int = 2 * 1024 * 1024
+    # Ledger numbers for financial tools (ticket 03 defaults; comma-separated).
+    revenue_ledger_numbers: str = "8000"
+    vat_charged_ledger_numbers: str = "1500,1542"
+    vat_paid_ledger_numbers: str = "1520,1543"
+    vat_closing_target_ledger: int = 1551
 
     model_config = SettingsConfigDict(
         env_prefix="INFORMER_",
