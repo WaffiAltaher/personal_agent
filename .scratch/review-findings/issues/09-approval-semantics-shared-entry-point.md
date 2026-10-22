@@ -6,7 +6,7 @@
 
 **Blocked by:** 05
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 **Closes:** B1, B2, B5, B6 (k10, k15; ADR-010 amendment)
 

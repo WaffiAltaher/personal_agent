@@ -27,6 +27,11 @@ class InformerSettings(BaseSettings):
     downloads_dir: Path | None = None
     # Maximum Purchase invoice PDF size in bytes (default 2 MB).
     purchase_upload_max_bytes: int = 2 * 1024 * 1024
+    # Ledger numbers for financial tools (ticket 03 defaults; comma-separated).
+    revenue_ledger_numbers: str = "8000"
+    vat_charged_ledger_numbers: str = "1500,1542"
+    vat_paid_ledger_numbers: str = "1520,1543"
+    vat_closing_target_ledger: int = 1551
 
     model_config = SettingsConfigDict(
         env_prefix="INFORMER_",

@@ -7,9 +7,16 @@ Expected figures are worked by hand from the seeded journal in
 import pytest
 
 
-def ledger(number, description, opening=("0.00", "0.00"), movements=("0.00", "0.00"), balance=("0.00", "0.00")):
+def ledger(
+    number,
+    description,
+    opening=("0.00", "0.00"),
+    movements=("0.00", "0.00"),
+    balance=("0.00", "0.00"),
+    rgs_code=None,
+):
     return {
-        "number": number, "description": description, "rgs_code": None,
+        "number": number, "description": description, "rgs_code": rgs_code,
         "opening_debit": opening[0], "opening_credit": opening[1],
         "debit": movements[0], "credit": movements[1],
         "balance_debit": balance[0], "balance_credit": balance[1],
@@ -36,9 +43,18 @@ async def test_trial_balance_for_a_period_range(connect, call_tool):
         ledger("1100", "Bank", movements=("1210.00", "49.99"), balance=("1160.01", "0.00")),
         ledger("1300", "Debiteuren", opening=("500.00", "0.00"), movements=("1210.00", "1210.00"),
                balance=("500.00", "0.00")),
+        ledger("1500", "BTW af te dragen 21%", movements=("0.00", "500.00"), balance=("0.00", "500.00"),
+               rgs_code="BSchBepBtwOla"),
+        ledger("1520", "Voorbelasting", movements=("400.00", "0.00"), balance=("400.00", "0.00"),
+               rgs_code="BVorVbkTvo"),
+        ledger("1542", "BTW export buiten EU"),
+        ledger("1543", "BTW export buiten EU voorbelasting", rgs_code="BSchBepBtwOlb"),
+        ledger("1551", "BTW Voorgaande jaren", opening=("36.69", "0.00"), balance=("36.69", "0.00"),
+               rgs_code="BSchBepBtwAfo"),
         ledger("1800", "Af te dragen btw", movements=("0.00", "210.00"), balance=("0.00", "210.00")),
         ledger("4500", "Softwarekosten", movements=("49.99", "0.00"), balance=("49.99", "0.00")),
-        ledger("8000", "Omzet dienstverlening", movements=("0.00", "1000.00"), balance=("0.00", "1000.00")),
+        ledger("8000", "Omzet dienstverlening", movements=("0.00", "1000.00"), balance=("0.00", "1000.00"),
+               rgs_code="WOmzNohOlh"),
     ]
 
 
@@ -48,7 +64,7 @@ async def test_opening_balance_is_the_years_whatever_the_period_range(connect, c
         _, report = await call_tool(session, "trial_balance", year=2026, period_from=3, period_to=3)
 
     debtors = next(row for row in report["ledgers"] if row["number"] == "1300")
-    assert debtors == ledger("1300", "Debiteuren", opening=("500.00", "0.00"), movements=("12100.00", "0.00"),
+    assert debtors == ledger("1300", "Debiteuren", opening=("500.00", "0.00"), movements=("13310.00", "1210.00"),
                              balance=("12600.00", "0.00"))
 
 
