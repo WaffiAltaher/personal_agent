@@ -101,7 +101,7 @@ def _runs_for_scenario(results: EvalResults, scenario_id: str) -> list[RunResult
 def _scenario_pass_rate(runs: list[RunResult]) -> float:
     if not runs:
         return 0.0
-    return sum(r.trajectory.passed for r in runs) / len(runs)
+    return sum(r.passed for r in runs) / len(runs)
 
 
 @dataclass(frozen=True)
@@ -141,7 +141,7 @@ def pass_all_repeats(results: EvalResults) -> tuple[int, int]:
     passed_all = 0
     for scenario_id in _scenario_ids(results):
         runs = _runs_for_scenario(results, scenario_id)
-        if runs and all(r.trajectory.passed for r in runs):
+        if runs and all(r.passed for r in runs):
             passed_all += 1
     return passed_all, len(_scenario_ids(results))
 
@@ -257,7 +257,7 @@ def _summary(a: EvalResults, b: EvalResults) -> list[str]:
 def _scenario_row(scenario_id: str, model: str, runs: list[RunResult]) -> str:
     if not runs:
         return f"| {scenario_id} | `{model}` | not run | | | | | | | | |"
-    passed = sum(r.trajectory.passed for r in runs)
+    passed = sum(r.passed for r in runs)
     cells = [
         f"{passed}/{len(runs)}",
         _spread([r.trajectory.recall for r in runs], _num),

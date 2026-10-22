@@ -29,7 +29,7 @@ from pathlib import Path
 
 from fixture_world import clock
 from fixture_world.informer_api import FakeInformerApi, Failure
-from fixture_world.purchase_handover import RecordingHandover
+from fixture_world.purchase_handover import handover_from_environment
 from informer_mcp.config import InformerSettings
 from informer_mcp.server import create_server
 
@@ -63,7 +63,7 @@ def main() -> None:
             purchase_upload_log=upload_log_path(),
             downloads_dir=Path(os.environ[DOWNLOADS_ENV]) if os.environ.get(DOWNLOADS_ENV) else None,
         )
-        create_server(settings, handover=RecordingHandover()).run("stdio")
+        create_server(settings, handover=handover_from_environment()).run("stdio")
 
 
 if __name__ == "__main__":

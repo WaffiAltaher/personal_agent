@@ -79,7 +79,10 @@ def informer_fixture_server() -> McpServer:
             "args": ["-m", "fixture_world.informer"],
             "transport": "stdio",
             # The Fixture world's own settings and the system basics: never the real Informer settings.
-            "env": fixture_environment(),
+            "env": {
+                **fixture_environment(),
+                **inherited(["INFORMER_DOWNLOADS_DIR"]),
+            },
         },
         read_allowlist=READ_TOOLS,
         transient_errors=TRANSIENT_ERRORS,
