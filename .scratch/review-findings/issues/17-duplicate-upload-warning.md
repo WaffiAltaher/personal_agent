@@ -6,7 +6,7 @@
 
 **Blocked by:** 16
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 **Closes:** (decision on duplicate uploads, as amended by Q37)
 
