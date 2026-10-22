@@ -2,11 +2,9 @@
 """The Informer MCP server: read-only tools over Informer API v2 (no write endpoints, ADR-006)."""
 
 import json
-from typing import Annotated
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
-from pydantic import Field
 
 from informer_mcp.client import InformerClient, RateLimiter
 from informer_mcp.config import InformerSettings
@@ -125,7 +123,7 @@ def create_server(settings: InformerSettings, rate_limiter: RateLimiter | None =
         """Get one Relation by its Informer id (the `id` from list_relations)."""
         return _relation(await informer.get(f"/relations/{relation_id}"))
 
-    register_sales_tools(mcp, informer, settings, READ_ONLY, _relation)
+    register_sales_tools(mcp, informer, READ_ONLY, _relation)
 
     @mcp.tool(annotations=READ_ONLY)
     async def trial_balance(
@@ -172,30 +170,6 @@ def create_server(settings: InformerSettings, rate_limiter: RateLimiter | None =
         """The chart of accounts: every ledger account's number, description, type
         (balance, revenue, costs), category, VAT code and whether it is blocked."""
         return json.dumps({"ledgers": [_ledger(raw) for raw in await informer.get("/ledgers")]})
-
-    @mcp.prompt()
-    def payment_reminder(
-        client_name: Annotated[str, Field(description="The Client's name, as in Informer.")],
-        overdue_invoices: Annotated[str, Field(
-            description="The Client's Overdue invoices, as text or JSON: number, due date (ISO) "
-                        "and open amount (EUR decimal string) of each."
-        )],
-        contact_name: Annotated[str, Field(description="The person to address, if known.")] = "",
-    ) -> str:
-        """Draft a Payment reminder asking a Client to pay their Overdue invoices."""
-        addressee = contact_name or client_name
-        return (
-            f"Write a Payment reminder to {client_name} as an email Draft for the owner to "
-            "review. Never send it.\n\n"
-            f"Address it to {addressee}. Keep the tone polite, factual and friendly: assume an "
-            "oversight, not bad faith.\n"
-            "List each Overdue invoice with its invoice number, due date and open amount in EUR, "
-            "and state the total open amount. Ask them to pay it promptly, and to let us know if "
-            "they have already paid or disagree with an invoice. Give ITtopia's bank account "
-            "(IBAN) to pay into, from the informer://administration resource, and sign off as "
-            "ITtopia.\n\n"
-            f"Overdue invoices of {client_name}:\n{overdue_invoices.strip()}"
-        )
 
     return mcp
 

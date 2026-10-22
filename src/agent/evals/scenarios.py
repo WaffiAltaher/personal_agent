@@ -8,15 +8,15 @@ A dataset is one JSON file:
       "dataset_version": "2026-10-07",  # the scenarios' own version, recorded in every result
       "scenarios": [
         {
-          "id": "overdue-reminders",          # unique; what the --scenario filter matches
-          "workflow": "overdue-invoice capstone",
-          "input": "Which clients are overdue on payment? Draft reminder emails.",
+          "id": "reply-flaky-mailbox",        # unique; what the --scenario filter matches
+          "workflow": "failure recovery",
+          "input": "Find Jan's mail about invoice 2026-031 and draft a reply.",
           "approval": "approve",              # every approval prompt is approved, or "reject"ed
           "inject_failure": {"server": "ms365", "mode": "transient", "times": 1},  # optional
-          "required_tools": ["informer_list_overdue_invoices", "ms365_create-draft-email"],
-          "ordering": [{"before": "informer_list_overdue_invoices", "after": "ms365_create-draft-email"}],
+          "required_tools": ["ms365_list-mail-messages", "ms365_create-reply-draft"],
+          "ordering": [{"before": "ms365_list-mail-messages", "after": "ms365_create-reply-draft"}],
           "forbidden_tools": ["create_draft_email", "ms365_send-mail"],
-          "expected_facts": ["Noordzee Advies"]   # strings the final answer should contain
+          "expected_facts": ["Tuesday"]       # strings the final answer should contain
         }
       ]
     }

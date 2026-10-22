@@ -66,7 +66,7 @@ async def test_exhausted_daily_quota_is_a_clear_tool_error(fake_informer, connec
     fake_informer.failure = Failure.QUOTA_EXHAUSTED
 
     async with connect() as session:
-        is_error, text = await call_tool(session, "list_overdue_invoices", as_of="2026-10-07")
+        is_error, text = await call_tool(session, "list_sales_invoices", status="open")
 
     assert is_error
     assert "daily" in text and "5000" in text
@@ -74,11 +74,13 @@ async def test_exhausted_daily_quota_is_a_clear_tool_error(fake_informer, connec
 
 
 @pytest.mark.asyncio
-async def test_daily_quota_running_out_mid_call_is_the_same_error(fake_informer, connect, call_tool):
+async def test_daily_quota_running_out_mid_call_is_the_same_error(
+        fake_informer, connect, call_tool, informer_settings):
     fake_informer.daily_limit = 1  # the first page uses the last request of the day
+    settings = informer_settings.model_copy(update={"page_size": 1})
 
-    async with connect() as session:
-        is_error, text = await call_tool(session, "list_overdue_invoices", as_of="2026-10-07")
+    async with connect(settings) as session:
+        is_error, text = await call_tool(session, "list_sales_invoices", status="open")
 
     assert is_error
     assert "daily" in text
