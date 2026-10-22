@@ -22,6 +22,7 @@ import tempfile
 
 from fixture_world import clock
 from fixture_world.informer_api import FakeInformerApi, Failure
+from fixture_world.purchase_handover import RecordingHandover
 from informer_mcp.config import InformerSettings
 from informer_mcp.server import create_server
 
@@ -43,7 +44,7 @@ def main() -> None:
             today=clock.today(),
             rate_limit_dir=budget,
         )
-        create_server(settings).run("stdio")
+        create_server(settings, handover=RecordingHandover()).run("stdio")
 
 
 if __name__ == "__main__":

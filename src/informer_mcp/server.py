@@ -8,6 +8,7 @@ from mcp.types import ToolAnnotations
 
 from informer_mcp.client import InformerClient, RateLimiter
 from informer_mcp.config import InformerSettings
+from informer_mcp.purchase_upload import PurchaseInvoiceHandover, register_purchase_upload_tools
 from informer_mcp.sales import money, register_sales_tools
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=True)
@@ -97,14 +98,21 @@ def _trial_balance_ledger(raw: dict, year: int) -> dict:
     }
 
 
-def create_server(settings: InformerSettings, rate_limiter: RateLimiter | None = None) -> FastMCP:
+def create_server(
+    settings: InformerSettings,
+    rate_limiter: RateLimiter | None = None,
+    handover: PurchaseInvoiceHandover | None = None,
+) -> FastMCP:
     informer = InformerClient(settings, rate_limiter)
+    instructions = (
+        "Read-only access to ITtopia's Informer accounting. A Relation is any party "
+        "recorded in Informer, customer or supplier alike."
+    )
+    if handover is not None:
+        instructions += " Accepts Purchase invoice uploads."
     mcp = FastMCP(
         "informer",
-        instructions=(
-            "Read-only access to ITtopia's Informer accounting. A Relation is any party "
-            "recorded in Informer, customer or supplier alike."
-        ),
+        instructions=instructions,
     )
 
     @mcp.tool(annotations=READ_ONLY)
@@ -170,6 +178,9 @@ def create_server(settings: InformerSettings, rate_limiter: RateLimiter | None =
         """The chart of accounts: every ledger account's number, description, type
         (balance, revenue, costs), category, VAT code and whether it is blocked."""
         return json.dumps({"ledgers": [_ledger(raw) for raw in await informer.get("/ledgers")]})
+
+    if handover is not None:
+        register_purchase_upload_tools(mcp, settings, handover)
 
     return mcp
 
