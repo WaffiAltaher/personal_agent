@@ -23,7 +23,6 @@ READ_TOOLS = frozenset({
     "get_relation",
     "list_sales_invoices",
     "get_sales_invoice",
-    "list_overdue_invoices",
     "trial_balance",
 })
 
