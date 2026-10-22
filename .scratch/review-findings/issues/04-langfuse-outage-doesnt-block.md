@@ -6,7 +6,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** claimed
+**Status:** resolved
 
 **Closes:** E6
 
@@ -22,3 +22,7 @@
 Trap: don't only catch the connection error class from the live traceback; the library raises several kinds. Don't silence the warning or lower its level.
 
 Spec: `../spec.md`. Decisions: `../findings.md` ("Decisions taken").
+
+## Comments
+
+- 2026-10-22: `verify_connection` catches every exception and returns false; the CLI warning names `langfuse_base_url`, and a run with Langfuse down gets no callback handler (untraced). New tests in `tests/test_cli_langfuse_outage.py` drive `cli.main()` with refused connection, HTTP error and no-project auth failures, plus a Langfuse-up control. The refused-connection and HTTP-error tests fail if the catch is narrowed to `ConnectionError`.
