@@ -30,8 +30,11 @@ from langchain_core.tools import BaseTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_mcp_adapters.interceptors import MCPToolCallRequest
 from langchain_mcp_adapters.sessions import Connection
+from langchain_mcp_adapters.tools import convert_mcp_tool_to_langchain_tool
+from mcp import ClientSession
 from mcp.shared.exceptions import McpError
 from mcp.types import CONNECTION_CLOSED, CallToolResult, TextContent
+from mcp.types import Tool as MCPTool
 
 from agent.tools.classification import classify_mcp_tools
 
@@ -74,9 +77,9 @@ def _text(result: CallToolResult) -> str:
     return "\n".join(block.text for block in result.content if isinstance(block, TextContent))
 
 
-async def _check_login(client: MultiServerMCPClient, server: McpServer, login: LoginCheck) -> None:
-    async with client.session(server.name) as session:
-        result = await session.call_tool(login.check_tool, {})
+async def _login_problem(session: ClientSession, login: LoginCheck) -> str | None:
+    """The reason the login is missing or expired, or None when it is fine."""
+    result = await session.call_tool(login.check_tool, {})
     text = _text(result)
     try:
         status = json.loads(text)
@@ -84,8 +87,9 @@ async def _check_login(client: MultiServerMCPClient, server: McpServer, login: L
         status = None
     if result.isError or (isinstance(status, dict) and status.get("success") is False):
         detail = status.get("message") or status.get("error") if isinstance(status, dict) else text
-        raise LoginRequired(f"not logged in to {login.service} ({detail}). "
-                            f"Log in with `{login.command}`, then restart the agent.")
+        return (f"not logged in to {login.service} ({detail}). "
+                f"Log in with `{login.command}`, then restart the agent.")
+    return None
 
 
 def _matches(patterns: tuple[str, ...], text: str) -> bool:
@@ -127,19 +131,45 @@ def _boundary_interceptor(server: McpServer):
     return intercept
 
 
+async def _list_tools(session: ClientSession) -> list[MCPTool]:
+    """Every tool the server lists, across all pages."""
+    listed: list[MCPTool] = []
+    cursor = None
+    while True:
+        page = await session.list_tools(cursor)
+        listed.extend(page.tools)
+        cursor = page.nextCursor
+        if not cursor:
+            return listed
+
+
 async def _load_server(server: McpServer) -> list[BaseTool]:
-    client = MultiServerMCPClient(
-        {server.name: server.connection},
-        tool_name_prefix=True,
-        tool_interceptors=[_boundary_interceptor(server)],
-    )
-    tools = await client.get_tools(server_name=server.name)
-    if server.login:
-        if f"{server.name}_{server.login.check_tool}" in {tool.name for tool in tools}:
-            await _check_login(client, server, server.login)
-        else:  # can't check; tool errors will still name the login command (LoginCheck.error_patterns)
-            logger.warning("MCP server %s has no %s tool; login not checked at startup",
-                           server.name, server.login.check_tool)
+    client = MultiServerMCPClient({server.name: server.connection})
+    # One session serves both the tool listing and the login check, so the server starts once.
+    # Each tool opens its own session per call (as the adapter's tools do), so they outlive this one.
+    login_problem = None
+    async with client.session(server.name) as session:
+        listed = await _list_tools(session)
+        if server.login:
+            if any(tool.name == server.login.check_tool for tool in listed):
+                login_problem = await _login_problem(session, server.login)
+            else:  # can't check; tool errors will still name the login command (LoginCheck.error_patterns)
+                logger.warning("MCP server %s has no %s tool; login not checked at startup",
+                               server.name, server.login.check_tool)
+    if login_problem:  # raised after the session closes, so it isn't wrapped in the session's task group
+        raise LoginRequired(login_problem)
+    interceptors = [_boundary_interceptor(server)]
+    tools = [
+        convert_mcp_tool_to_langchain_tool(
+            None,
+            tool,
+            connection=server.connection,
+            tool_interceptors=interceptors,
+            server_name=server.name,
+            tool_name_prefix=True,
+        )
+        for tool in listed
+    ]
     exposed = None if server.exposed_tools is None else {f"{server.name}_{name}" for name in server.exposed_tools}
     return classify_mcp_tools(
         [tool for tool in tools if exposed is None or tool.name in exposed],
