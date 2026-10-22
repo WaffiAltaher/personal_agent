@@ -78,9 +78,9 @@ async def test_vat_last_week_scenario_passes_with_scripted_search(scripted_model
 async def test_retry_scenario_calls_search_twice_when_the_first_is_empty(scripted_model):
     scenario = next(s for s in _past_run_scenarios() if s.id == "memory-search-retry")
     script = [
-        _call("retrieve_episodic_memory", {"terms": "salary slip"}, "mem-1"),
-        _call("retrieve_episodic_memory", {"terms": "payroll"}, "mem-2"),
-        _answer("You asked when the October payroll run is due."),
+        _call("retrieve_episodic_memory", {"terms": "October payroll"}, "mem-1"),
+        _call("retrieve_episodic_memory", {"terms": "25th"}, "mem-2"),
+        _answer("You asked when the salary payment date is — your October payroll question."),
     ]
     results = await run_eval(
         Dataset(format_version=1, dataset_version="test", scenarios=[scenario]),
@@ -92,4 +92,4 @@ async def test_retry_scenario_calls_search_twice_when_the_first_is_empty(scripte
     assert run.trajectory.passed
     assert [c.name for c in run.tool_calls].count("retrieve_episodic_memory") == 2
     assert run.tool_calls[0].output == "No matching runs found in episodic memory."
-    assert "payroll" in run.tool_calls[1].output.lower()
+    assert "25th" in run.tool_calls[1].output.lower()

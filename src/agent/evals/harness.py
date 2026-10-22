@@ -60,6 +60,13 @@ EVAL_DOWNLOAD_PDFS: dict[str, bytes] = {
 }
 
 
+def _scenario_user_message(scenario: Scenario, downloads_path: Path) -> str:
+    """Include the eval Downloads path when the scenario expects an upload file."""
+    if scenario.expected_outcome and scenario.expected_outcome.upload_file:
+        return f"{scenario.input}\n\n(Downloads folder: {downloads_path})"
+    return scenario.input
+
+
 def _seed_eval_downloads(downloads_path: Path) -> None:
     downloads_path.mkdir(parents=True, exist_ok=True)
     for name, data in EVAL_DOWNLOAD_PDFS.items():
@@ -244,7 +251,7 @@ async def run_scenario(
                         graph,
                         config,
                         tools=tools,
-                        user_message=scenario.input,
+                        user_message=_scenario_user_message(scenario, downloads_path),
                         today=clock.today(),
                     )
                     while "__interrupt__" in result:

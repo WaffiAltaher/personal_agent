@@ -91,22 +91,27 @@ def _latest_ai_tool_batch(messages: list[BaseMessage]) -> AIMessage | None:
     return None
 
 
-def _protected_tool_call_ids(
-    messages: list[BaseMessage],
-    message_count_at_last_model_call: int,
-) -> set[str]:
-    """Tool results the model has not seen yet (and unanswered calls) must stay full."""
-    protected: set[str] = set()
-    for msg in messages[message_count_at_last_model_call:]:
-        if isinstance(msg, ToolMessage):
-            protected.add(msg.tool_call_id)
+def _protected_tool_call_ids(messages: list[BaseMessage]) -> set[str]:
+    """Keep the latest tool batch full only until the model has had a turn after its results."""
     last_ai = _latest_ai_tool_batch(messages)
-    if last_ai is not None:
-        answered = {m.tool_call_id for m in messages if isinstance(m, ToolMessage)}
-        for tc in last_ai.tool_calls or []:
-            if tc["id"] not in answered:
-                protected.add(tc["id"])
-    return protected
+    if last_ai is None:
+        return set()
+    batch_ids = {tc["id"] for tc in last_ai.tool_calls or []}
+    answered = {m.tool_call_id for m in messages if isinstance(m, ToolMessage)}
+    unanswered = batch_ids - answered
+    if unanswered:
+        return unanswered
+
+    last_batch_tool_idx = -1
+    for i, msg in enumerate(messages):
+        if isinstance(msg, ToolMessage) and msg.tool_call_id in batch_ids:
+            last_batch_tool_idx = i
+    if last_batch_tool_idx < 0:
+        return set()
+    for msg in messages[last_batch_tool_idx + 1 :]:
+        if isinstance(msg, AIMessage):
+            return set()
+    return batch_ids
 
 
 def _is_cleared_stub(message: ToolMessage) -> bool:
@@ -151,7 +156,7 @@ def build_model_view(
     )
     working = copy.deepcopy(state_messages)
     system_msg = system_message if system_message is not None else SystemMessage(content=system_text)
-    protected = _protected_tool_call_ids(working, message_count_at_last_model_call)
+    protected = _protected_tool_call_ids(working)
 
     def view_total() -> int:
         return _view_token_total(system_text, tools, working)

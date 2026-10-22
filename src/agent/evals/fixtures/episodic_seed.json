@@ -5,8 +5,8 @@
     "timestamp": "2026-10-02T09:15:00+02:00"
   },
   {
-    "user_input": "When is the October payroll run due?",
-    "final_output": "Payroll is due on the 25th.",
+    "user_input": "When is the salary payment date this month?",
+    "final_output": "The payment is due on the 25th.",
     "timestamp": "2026-10-05T14:30:00+02:00"
   }
 ]

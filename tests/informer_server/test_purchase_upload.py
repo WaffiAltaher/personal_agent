@@ -82,6 +82,25 @@ async def test_check_reports_name_folder_and_size(
     }
 
 
+@pytest.mark.asyncio
+async def test_bare_filename_resolves_inside_downloads_not_process_cwd(
+    connect, settings_with_downloads, handover, downloads, call_tool, tmp_path, monkeypatch,
+):
+    write_pdf(downloads, "only-in-downloads.pdf", b"%PDF-1.4\ndownloads-bytes\n%%EOF\n")
+    cwd_pdf = tmp_path / "only-in-downloads.pdf"
+    cwd_pdf.write_bytes(b"%PDF-1.4\ncwd-bytes\n%%EOF\n")
+    monkeypatch.chdir(tmp_path)
+
+    async with connect(settings_with_downloads, handover=handover) as session:
+        is_error, payload = await call_tool(
+            session, "check_purchase_invoice", path="only-in-downloads.pdf",
+        )
+
+    assert not is_error
+    assert payload["file_name"] == "only-in-downloads.pdf"
+    assert payload["size"] == len(b"%PDF-1.4\ndownloads-bytes\n%%EOF\n")
+
+
 @pytest.mark.parametrize("path_factory,reason_fragment", [
     ("outside_downloads", "downloads"),
     ("symlink_outside", "downloads"),
