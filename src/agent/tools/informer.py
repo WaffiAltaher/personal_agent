@@ -26,6 +26,8 @@ READ_TOOLS = frozenset({
     "get_sales_invoice",
     "trial_balance",
     "check_purchase_invoice",
+    "revenue",
+    "vat_position",
 })
 
 # Over MCP a transient Informer failure (unreachable, 429, 5xx) arrives only as tool-error

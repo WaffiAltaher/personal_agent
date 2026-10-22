@@ -6,7 +6,7 @@
 
 **Blocked by:** 03, 13
 
-**Status:** claimed
+**Status:** resolved
 
 **Closes:** H1 (trial balance misdescribes balance-sheet ledgers); ADR-012; decisions on financial questions and on `vat_position`
 
@@ -38,3 +38,7 @@ Also correct the existing `trial_balance` tool's description: for balance-sheet 
 Read ticket 03's ledger record and findings first: they come from the real administration and override any assumption from the API spec. Trap: computing a quarter by passing its periods to the report gives the year to date for every VAT ledger; the tests must use seeded data where that mistake changes the answer. Never query the real administration from tests.
 
 Spec: `../spec.md`. Decisions: `../findings.md` ("Decisions taken").
+
+## Comments
+
+Implemented `revenue` and `vat_position` on the Informer MCP server with configurable ledger numbers (defaults from ticket 03), YTD-delta arithmetic in `financial.py`, fake column-balance YTD for balance-sheet ledgers, seeded open 2026 and closed 2025 VAT data, corrected `trial_balance` description, and 20 seam-B tests in `tests/informer_server/test_revenue_and_vat.py` (66 informer tests pass).

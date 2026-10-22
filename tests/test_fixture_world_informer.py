@@ -75,8 +75,10 @@ async def test_informer_tools_are_bound_with_the_prefix_and_all_read(fixture_too
         "informer_get_sales_invoice",
         "informer_list_relations",
         "informer_list_sales_invoices",
+        "informer_revenue",
         "informer_trial_balance",
         "informer_upload_purchase_invoice",
+        "informer_vat_position",
     ]
     upload = next(t for t in informer_tools if t.name == "informer_upload_purchase_invoice")
     assert not is_read(upload)
