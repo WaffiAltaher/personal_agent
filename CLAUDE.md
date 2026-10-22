@@ -18,14 +18,10 @@ python -m agent.auth.google
 python -m agent.evals --model <provider:model> --judge-model <provider:model> [--repeats N]
 python -m agent.evals compare a.json b.json
 
-# Run all tests
-pytest tests/
-
-# Run a single test file
-pytest tests/test_tools.py -v
-
-# Run a single test
-pytest tests/test_tools.py::test_read_file -v
+# Tests. In a worktree, run `uv sync` first so the editable install points at that worktree.
+uv run pytest
+uv run pytest tests/test_tools.py -v
+uv run pytest tests/test_tools.py::test_read_file -v
 ```
 
 ## Architecture
@@ -39,7 +35,7 @@ CLI → graph.py (LangGraph) → agent_node (LLM) → human_review_node → tool
 ```
 
 **`src/agent/graph.py`** — the heart of the agent. Key pieces:
-- `AgentState`: a single `messages` list with `add_messages` reducer (appends, never overwrites)
+- `AgentState`: a single `messages` list with the `add_messages` reducer (messages merge by id; a new id is appended)
 - `agent_node`: calls the chat model with full message history; `build_graph(checkpointer, tools, model)` accepts an injected model (tests and evals use this)
 - `human_review_node`: gates Write actions (any tool not classified read) behind `interrupt()` — pauses the graph for user approval
 - `tools_with_fallback`: wraps `ToolNode` with a fallback that injects error `ToolMessage`s on exhausted retries so the graph continues
@@ -75,6 +71,8 @@ Approval **fails closed**: every bound tool is classified read or Write action (
 - Langfuse traces to `http://localhost:3000` by default — needs a local Langfuse instance running
 - Google credentials file must be manually downloaded from GCP console and placed at `credentials/google_credentials.json`
 - The `credentials/` and `checkpoints/` directories are gitignored
+- `docs/`, `notebooks/`, and `.claude/skills/` are gitignored. A worktree does not have them. Read them from the primary checkout (`git worktree list`).
+- An MCP child sees only its allowlisted environment. A new variable is `FIXTURE_WORLD_*` or one of that server's own settings.
 - Phase roadmap is in `docs/MASTER_PLAN.md`. Phases 5–7 are implemented on `feat/complete-phases-5-7` (spec and tickets in `.scratch/complete-phases-5-7/`); live credentials setup (ticket 01) is still pending
 
 ## Agent skills
