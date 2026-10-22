@@ -8,6 +8,11 @@ from mcp.types import ToolAnnotations
 
 from informer_mcp.client import InformerClient, RateLimiter
 from informer_mcp.config import InformerSettings
+from informer_mcp.financial import (
+    is_vat_year_closed,
+    revenue_amount,
+    vat_quarter_amount,
+)
 from informer_mcp.sales import money, register_sales_tools
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=True)
@@ -137,9 +142,12 @@ def create_server(settings: InformerSettings, rate_limiter: RateLimiter | None =
         Periods run 1-13 (13 is the year-end closing period); the default is the whole year.
         `ledger_from`/`ledger_to` limit it to a range of ledger account numbers (see the
         chart of accounts resource). One entry per ledger with an opening balance or movements,
-        by ledger number: the year's opening balance, the debit and credit movements in the
-        periods, and the resulting balance, as decimal strings. `rgs_code` is the ledger's
-        Dutch standard chart (RGS) code, e.g. revenue ledgers start with "WOmz"."""
+        by ledger number: the year's opening balance, debit and credit movement columns, and
+        the resulting balance, as decimal strings. For balance-sheet ledgers the movement
+        columns are year-to-date up to `period_to` (Informer ignores `period_from`); for
+        profit-and-loss ledgers they are movements within `period_from`..`period_to`. Use
+        `revenue` or `vat_position` for exact Revenue and VAT-to-pay amounts. `rgs_code` is
+        the ledger's Dutch standard chart (RGS) code, e.g. revenue ledgers start with "WOmz"."""
         if not 1 <= period_from <= period_to <= LAST_PERIOD:
             raise ValueError(
                 f"Periods must run from 1 to {LAST_PERIOD}, with period_from <= period_to "
@@ -157,6 +165,58 @@ def create_server(settings: InformerSettings, rate_limiter: RateLimiter | None =
         return {
             "year": year, "period_from": period_from, "period_to": period_to, "currency": "EUR",
             "ledgers": [_trial_balance_ledger(raw, year) for raw in ledgers],
+        }
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def revenue(year: int, period_from: int = 1, period_to: int = LAST_PERIOD) -> dict:
+        """Exact Revenue (net credit on the configured revenue ledgers) over a range of periods
+        in a year, in EUR. Periods run 1-13; the default is the whole year. Amounts are computed
+        from the column-balance report as year-to-date at `period_to` minus year-to-date at the
+        period before `period_from`, so the result matches Informer even when ledger types differ."""
+        if not 1 <= period_from <= period_to <= LAST_PERIOD:
+            raise ValueError(
+                f"Periods must run from 1 to {LAST_PERIOD}, with period_from <= period_to "
+                f"(got {period_from} to {period_to})."
+            )
+        amount, ledgers_used = await revenue_amount(
+            informer, settings, year=year, period_from=period_from, period_to=period_to
+        )
+        return {
+            "year": year,
+            "period_from": period_from,
+            "period_to": period_to,
+            "currency": "EUR",
+            "amount": str(amount),
+            "ledgers": ledgers_used,
+        }
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def vat_position(year: int, quarter: int) -> dict:
+        """Exact VAT to pay for one calendar quarter in a year, in EUR. Quarters are periods
+        1-3, 4-6, 7-9 and 10-12 (period 13 is not in any quarter). VAT charged on Sales invoices
+        minus VAT paid on Purchase invoices; a negative amount means VAT is owed back. Computed
+        from the column-balance report as year-to-date at the quarter's last period minus
+        year-to-date at the previous quarter's last period (Informer reports balance-sheet
+        ledgers year-to-date). Q4 of a year already closed in Informer is refused."""
+        if quarter not in (1, 2, 3, 4):
+            raise ValueError("Quarter must be 1, 2, 3 or 4.")
+        if quarter == 4 and await is_vat_year_closed(informer, settings, year=year):
+            raise ValueError(
+                f"{year} is closed in Informer, so Q4's VAT can't be read from the ledgers; "
+                "ask the accountant for the Q4 return."
+            )
+        amount, period_from, period_to, charged, paid = await vat_quarter_amount(
+            informer, settings, year=year, quarter=quarter
+        )
+        return {
+            "year": year,
+            "quarter": quarter,
+            "period_from": period_from,
+            "period_to": period_to,
+            "currency": "EUR",
+            "amount": str(amount),
+            "vat_charged_ledgers": charged,
+            "vat_paid_ledgers": paid,
         }
 
     @mcp.resource("informer://administration", name="administration", mime_type="application/json")

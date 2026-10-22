@@ -43,7 +43,10 @@ async def test_chart_of_accounts_resource_lists_every_ledger(connect):
         chart = await read_json(session, "informer://ledgers")
 
     ledgers = {ledger["number"]: ledger for ledger in chart["ledgers"]}
-    assert set(ledgers) == {"0100", "1100", "1300", "1600", "1800", "4000", "4500", "8000", "8100"}
+    assert set(ledgers) == {
+        "0100", "1100", "1300", "1500", "1520", "1542", "1543", "1551",
+        "1600", "1800", "4000", "4500", "8000", "8100",
+    }
     assert ledgers["1300"] == {
         "number": "1300",
         "description": "Debiteuren",

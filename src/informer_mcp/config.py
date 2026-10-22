@@ -23,6 +23,11 @@ class InformerSettings(BaseSettings):
     # Where the rate-limit budget per API key is kept, shared by every server process using
     # the key (the agent starts one per tool call). Unset means a folder in the temp dir.
     rate_limit_dir: Path | None = None
+    # Ledger numbers for financial tools (ticket 03 defaults; comma-separated).
+    revenue_ledger_numbers: str = "8000"
+    vat_charged_ledger_numbers: str = "1500,1542"
+    vat_paid_ledger_numbers: str = "1520,1543"
+    vat_closing_target_ledger: int = 1551
 
     model_config = SettingsConfigDict(
         env_prefix="INFORMER_",
