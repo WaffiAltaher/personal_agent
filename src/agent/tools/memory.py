@@ -3,6 +3,7 @@
 
 from langchain_core.tools import tool
 
+from agent.config import settings
 from agent.memory import get_episodic_memory, get_semantic_memory
 from agent.memory.recall import recall_chunks, recall_runs
 from agent.tools.classification import write_action
@@ -30,7 +31,7 @@ def retrieve_memory(query: str) -> str:
     Use this when the user references something they may have asked before,
     or when background context from prior sessions could improve the answer.
     """
-    chunks = recall_chunks(query, get_semantic_memory(), k=5)
+    chunks = recall_chunks(query, get_semantic_memory(), k=settings.memory_top_k)
 
     if not chunks:
         return "No relevant memory found."

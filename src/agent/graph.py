@@ -54,7 +54,7 @@ from zoneinfo import ZoneInfo
 
 from googleapiclient.errors import HttpError
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, RemoveMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.errors import GraphBubbleUp
@@ -66,7 +66,12 @@ from typing_extensions import TypedDict
 
 from agent.chat_model import create_chat_model
 from agent.config import settings
-from agent.memory import ContextBudgetManager, TokenCounter, get_episodic_memory
+from agent.memory import get_episodic_memory
+from agent.memory.context_view import (
+    build_model_view,
+    cap_tool_result_content,
+    estimate_context_tokens,
+)
 from agent.memory.run_log import build_run_record
 from agent.tools import LOCAL_TOOLS
 from agent.tools.classification import is_read
@@ -91,6 +96,8 @@ class AgentState(TypedDict, total=False):
     token_usage_estimate: dict | None  # set by check_context_budget each iteration
     errors: Annotated[list[dict], operator.add]
     model_call_count: int  # model calls this user turn; reset on a new user message, not on resume
+    last_model_input_tokens: int | None  # reported input tokens from the previous model call
+    message_count_at_last_model_call: int  # len(state messages) before the previous model call
 
 
 STEP_LIMIT_ANSWER = (
@@ -174,7 +181,17 @@ async def retry_tool_call(request, execute):
     interval = policy.initial_interval
     for attempt in range(1, policy.max_attempts + 1):
         try:
-            return await execute(request)
+            result = await execute(request)
+            if isinstance(result, ToolMessage) and isinstance(result.content, str):
+                capped = cap_tool_result_content(result.content)
+                if capped != result.content:
+                    result = ToolMessage(
+                        content=capped,
+                        tool_call_id=result.tool_call_id,
+                        name=result.name,
+                        status=getattr(result, "status", None),
+                    )
+            return result
         except GraphBubbleUp:
             # interrupt() and other LangGraph control flow are exceptions too;
             # they must reach the runtime, not become an error ToolMessage.
@@ -245,45 +262,40 @@ def build_runtime_context(today: date | None = None) -> str:
         "unless the user explicitly asks for another timezone."
     )
 
-def check_context_budget(state: AgentState) -> dict:
-    """Monitor context window usage before each LLM call.
+def make_check_context_budget(bound_tools: list):
+    def check_context_budget(state: AgentState) -> dict:
+        return _check_context_budget(state, bound_tools)
 
-    - Logs a DEBUG budget report every iteration (zero overhead in normal operation).
-    - Logs a WARNING if the warning threshold is exceeded.
-    - If the hard limit is exceeded, removes old messages from state via RemoveMessage
-      so the LLM never receives a context that would cause an API error.
-    - Always writes token_usage_estimate into state for downstream inspection.
-    The node itself is visible in Langfuse as a span — no separate event needed.
-    """
-    counter = TokenCounter()
-    counts = counter.count_messages(state.get("messages", []))
-    report = counter.build_budget_report(state.get("messages", []), [])
-    total = counts["total"]
+    return check_context_budget
 
-    if total > settings.context_hard_limit:
+
+def _check_context_budget(state: AgentState, bound_tools: list) -> dict:
+    """Estimate context size before each LLM call; never mutates message state."""
+    system_text = f"{SYSTEM_PROMPT}\n\n{build_runtime_context()}"
+    messages = state.get("messages", [])
+    total = estimate_context_tokens(
+        state_messages=messages,
+        system_text=system_text,
+        tools=bound_tools,
+        last_model_input_tokens=state.get("last_model_input_tokens"),
+        message_count_at_last_model_call=state.get("message_count_at_last_model_call", 0),
+    )
+    counts = {"total": total, "message_count": len(messages)}
+
+    if total > settings.context_clear_threshold:
         logger.warning(
-            "Context hard limit exceeded (%d tokens). Trimming messages.\n%s",
+            "Context above clear threshold (%d tokens); tool results will be stubbed in the model view.",
             total,
-            report,
         )
-        cbm = ContextBudgetManager()
-        trimmed = cbm.trim_messages(state.get("messages", []), settings.context_hard_limit)
-        kept_ids = {m.id for m in trimmed if getattr(m, "id", None)}
-        to_remove = [
-            RemoveMessage(id=m.id)
-            for m in state.get("messages", [])
-            if getattr(m, "id", None) and m.id not in kept_ids
-        ]
-        update: dict = {"token_usage_estimate": counts}
-        if to_remove:
-            update["messages"] = to_remove
-        return update
-    elif total > settings.context_warning_threshold:
-        logger.warning("Context warning threshold exceeded (%d tokens).\n%s", total, report)
     else:
-        logger.debug("Context budget check:\n%s", report)
+        logger.debug("Context estimate before model call: %d tokens", total)
 
     return {"token_usage_estimate": counts}
+
+
+def check_context_budget(state: AgentState) -> dict:
+    """Default hook for tests; production graphs use make_check_context_budget(tools)."""
+    return _check_context_budget(state, [])
 
 
 def _answered_tool_call_ids(messages: list[BaseMessage]) -> set[str]:
@@ -501,11 +513,23 @@ def build_graph(
         if count >= max_iterations:
             return {"messages": [AIMessage(content=STEP_LIMIT_ANSWER)]}
 
-        messages = [
-            SystemMessage(content=f"{SYSTEM_PROMPT}\n\n{build_runtime_context(today)}")
-        ] + state["messages"]
-        response = await llm.ainvoke(messages)
-        return {"messages": [response], "model_call_count": count + 1}
+        messages_before_call = len(state["messages"])
+        system_text = f"{SYSTEM_PROMPT}\n\n{build_runtime_context(today)}"
+        view = build_model_view(
+            state["messages"],
+            system_text=system_text,
+            tools=tools,
+            last_model_input_tokens=state.get("last_model_input_tokens"),
+            message_count_at_last_model_call=state.get("message_count_at_last_model_call", 0),
+        )
+        response = await llm.ainvoke(view)
+        usage = getattr(response, "usage_metadata", None) or {}
+        return {
+            "messages": [response],
+            "model_call_count": count + 1,
+            "last_model_input_tokens": usage.get("input_tokens"),
+            "message_count_at_last_model_call": messages_before_call,
+        }
 
     async def tools_with_fallback(state: AgentState) -> dict:
         """
@@ -602,7 +626,7 @@ def build_graph(
 
     graph = StateGraph(AgentState)
 
-    graph.add_node("check_context_budget", check_context_budget)
+    graph.add_node("check_context_budget", make_check_context_budget(tools))
     graph.add_node("agent", agent_node)
     def human_review(state: AgentState) -> Command[Literal["tools", "agent"]]:
         return human_review_node(state, read_tool_names)
