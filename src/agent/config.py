@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     sqlite_path: str = "data/episodic.db"
     chroma_path: str = "data/chroma"
     chroma_embedding_model: str = "models/gemini-embedding-001"
+    # Calibrated on tests/memory/calibration_data.py (Fixture-world labels); margin
+    # above unrelated queries (~0.29) and below paraphrase hits (~0.999).
     memory_score_threshold: float = 0.7
     memory_top_k: int = 5
     memory_budget: int = 10_000
