@@ -20,8 +20,35 @@ credentials and elides the file. Exit 0 means a response was printed,
 including an error response.
 
 This script is not part of the test suite. Do not import it from a test,
-and do not run it except by hand.
+and do not run it except by hand. If the project virtualenv is not already
+active, the script restarts itself with it.
 """
+
+
+def _ensure_project_interpreter() -> None:
+    """Re-run under the project virtualenv when started with another Python.
+
+    `.venv/bin/python` is a symlink to the same interpreter `python` runs, so
+    the environment is `sys.prefix`, not the resolved binary. Without this,
+    `python scripts/informer_upload_probe.py` fails to import httpx.
+    """
+    import os
+    import sys
+    from pathlib import Path
+
+    if os.environ.get("INFORMER_PROBE_PYTHON") == "1":
+        return
+    root = Path(__file__).resolve().parent.parent
+    venv_python = root / ".venv" / "bin" / "python"
+    if not venv_python.is_file():
+        return
+    if Path(sys.prefix).resolve() == (root / ".venv").resolve():
+        return
+    os.environ["INFORMER_PROBE_PYTHON"] = "1"
+    os.execv(str(venv_python), [str(venv_python), *sys.argv])
+
+
+_ensure_project_interpreter()
 
 import argparse
 import base64
