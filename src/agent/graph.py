@@ -90,6 +90,22 @@ class AgentState(TypedDict, total=False):
     messages: Annotated[list[BaseMessage], add_messages]
     token_usage_estimate: dict | None  # set by check_context_budget each iteration
     errors: Annotated[list[dict], operator.add]
+    model_call_count: int  # model calls this user turn; reset on a new user message, not on resume
+
+
+STEP_LIMIT_ANSWER = (
+    "Stopped: the agent hit its step limit without a final answer. "
+    "Try a narrower question."
+)
+
+
+def is_step_limit_answer(message: BaseMessage | None) -> bool:
+    return (
+        isinstance(message, AIMessage)
+        and not getattr(message, "tool_calls", None)
+        and isinstance(message.content, str)
+        and "step limit" in message.content.lower()
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -473,17 +489,23 @@ def build_graph(
     # awrap_tool_call wraps each individual call with retry + error handling.
     tool_node = ToolNode(tools, awrap_tool_call=retry_tool_call)
 
+    max_iterations = settings.max_iterations
+
     async def agent_node(state: AgentState) -> dict:
         """
         The reasoning node. Calls the LLM with the current message history.
         Returns a dict with a `messages` key. The add_messages reducer appends
         it to state rather than overwriting.
         """
+        count = state.get("model_call_count", 0)
+        if count >= max_iterations:
+            return {"messages": [AIMessage(content=STEP_LIMIT_ANSWER)]}
+
         messages = [
             SystemMessage(content=f"{SYSTEM_PROMPT}\n\n{build_runtime_context(today)}")
         ] + state["messages"]
         response = await llm.ainvoke(messages)
-        return {"messages": [response]}
+        return {"messages": [response], "model_call_count": count + 1}
 
     async def tools_with_fallback(state: AgentState) -> dict:
         """
@@ -625,7 +647,7 @@ def log_run_to_memory(
     result: dict,
     user_input: str,
     *,
-    model_name: str,
+    model_name: str | None = None,
     run_date: date | None = None,
     error: str | None = None,
 ) -> None:
@@ -636,10 +658,12 @@ def log_run_to_memory(
     Write failures are logged and do not crash the caller.
     """
     try:
+        from agent.config import settings as _settings
+
         run = build_run_record(
             result,
             user_input,
-            model_name=model_name,
+            model_name=model_name or _settings.model_name,
             run_date=run_date or date.today(),
             error=error,
         )

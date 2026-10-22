@@ -168,9 +168,8 @@ async def main():
     config = {
         "callbacks": callbacks,
         "configurable": {"thread_id": thread_id},
-        # One tool round is 4 super-steps (budget → agent → human_review → tools),
-        # so 40 caps a run at ~10 tool rounds instead of LangGraph's default 10,007.
-        "recursion_limit": 40,
+        # Backstop only: settings.max_iterations bounds model calls; keep headroom above that.
+        "recursion_limit": max(settings.max_iterations * 5 + 10, 40),
     }
 
     # Against the Fixture world, "today" is its pinned date, for the model and the stand-ins alike.

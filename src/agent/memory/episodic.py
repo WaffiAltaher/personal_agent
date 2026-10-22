@@ -23,7 +23,7 @@ class RunRecord:
     tools_called: list[str] = field(default_factory=list)
     token_usage: dict | None = None  # keys: prompt, completion, total
     cost_usd: float | None = None
-    outcome: str = "completed"  # completed | error | rejected (step_limit in ticket 20)
+    outcome: str = "completed"  # completed | error | rejected | step limit (ticket 20)
     error_message: str | None = None
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     timestamp: str = field(
@@ -109,8 +109,9 @@ class EpisodicMemory:
         return [self._row_to_record(row) for row in cursor.fetchall()]
 
     def _row_to_record(self, row: sqlite3.Row) -> RunRecord:
-        outcome = row["outcome"] if "outcome" in row.keys() else "completed"
-        if outcome is None and "success" in row.keys():
+        keys = row.keys()
+        outcome = row["outcome"] if "outcome" in keys else "completed"
+        if outcome is None and "success" in keys:
             outcome = "completed" if row["success"] else "error"
         return RunRecord(
             id=row["id"],

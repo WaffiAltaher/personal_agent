@@ -74,9 +74,20 @@ def _sum_usage_metadata(messages: list[BaseMessage]) -> tuple[dict | None, dict 
     return episodic_usage, priced
 
 
+def _is_step_limit_answer(message: BaseMessage | None) -> bool:
+    return (
+        isinstance(message, AIMessage)
+        and not getattr(message, "tool_calls", None)
+        and isinstance(message.content, str)
+        and "step limit" in message.content.lower()
+    )
+
+
 def _detect_outcome(messages: list[BaseMessage], *, error: str | None) -> str:
     if error:
         return "error"
+    if messages and _is_step_limit_answer(messages[-1]):
+        return "step limit"
     for msg in messages:
         if isinstance(msg, ToolMessage) and msg.status == "error":
             content = msg.content if isinstance(msg.content, str) else str(msg.content)
