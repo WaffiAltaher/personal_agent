@@ -23,3 +23,7 @@
 The glossary and ADR-012 already reflect this. Don't edit v1–v3 text in any way: k38 will fail if you do.
 
 Spec: `../spec.md`. Decisions: `../findings.md` ("Decisions taken").
+
+## Comments
+
+- Removed `list_overdue_invoices`, `payment_reminder`, capstone eval scenarios (7), and `tests/test_capstone.py`. Prompt v4 (`7c733da0…`) is default; k38 landed in `tests/test_released_prompt_versions.py`. Dataset `2026-10-22.1` has 11 scenarios; full suite 210 passed.
