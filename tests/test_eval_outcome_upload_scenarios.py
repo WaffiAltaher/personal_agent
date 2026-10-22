@@ -50,6 +50,16 @@ def _answer(text: str) -> AIMessage:
     return AIMessage(content=text)
 
 
+def test_every_upload_scenario_is_told_the_seeded_downloads_folder():
+    from agent.evals.harness import _scenario_user_message
+
+    folder = Path("/tmp/eval-downloads")
+    for scenario in _upload_scenarios():
+        assert str(folder) in _scenario_user_message(scenario, folder)
+    other = next(s for s in DATASET.scenarios if s.workflow != "upload")
+    assert str(folder) not in _scenario_user_message(other, folder)
+
+
 def test_upload_scenarios_declare_expected_outcomes_and_trajectories():
     approved = next(s for s in _upload_scenarios() if s.id == "upload-purchase-approved")
     assert approved.approval == "approve"

@@ -61,8 +61,8 @@ EVAL_DOWNLOAD_PDFS: dict[str, bytes] = {
 
 
 def _scenario_user_message(scenario: Scenario, downloads_path: Path) -> str:
-    """Include the eval Downloads path when the scenario expects an upload file."""
-    if scenario.expected_outcome and scenario.expected_outcome.upload_file:
+    """Include the eval Downloads path for every upload scenario, including reject and failure."""
+    if scenario.workflow == "upload":
         return f"{scenario.input}\n\n(Downloads folder: {downloads_path})"
     return scenario.input
 
