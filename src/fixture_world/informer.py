@@ -20,7 +20,7 @@ Only FIXTURE_WORLD_* variables reach this process (see agent.tools.mcp_environme
 are the names to use, not INFORMER_*.
 
 FIXTURE_WORLD_INFORMER_FAILURE=<mode> switches the fake into a failure mode for every request
-(`informer_api.Failure` values: unauthorized, quota_exhausted, server_error).
+(`informer_api.Failure` values: unauthorized, quota_exhausted, throttled, server_error).
 """
 
 import os

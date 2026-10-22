@@ -126,6 +126,31 @@ async def test_persistent_transient_error_reaches_the_model_after_the_retries(ms
 
 
 @pytest.mark.asyncio
+async def test_throttled_read_tool_is_retried(ms365_failure, scripted_model):
+    tools, _ = await load_all_tools(fixtures=True)
+    ms365_failure.set("throttled", times=1)  # Graph answers 429 once
+
+    result = await _run(tools, scripted_model, _call(*LIST_CONTACTS, "c1"))
+
+    message = _tool_results(result)["c1"]
+    assert message.status != "error"
+    assert "Jan de Bakker" in str(message.content)
+
+
+@pytest.mark.asyncio
+async def test_persistent_throttling_reaches_the_model_after_the_retries(ms365_failure, scripted_model):
+    tools, _ = await load_all_tools(fixtures=True)
+    ms365_failure.set("throttled")
+
+    result = await _run(tools, scripted_model, _call(*LIST_CONTACTS, "c1"))
+
+    message = _tool_results(result)["c1"]
+    assert message.status == "error"
+    assert f"failed (transient) after {graph_module.TOOL_RETRY_POLICY.max_attempts} attempt(s)" in message.content
+    assert "429 Too Many Requests" in message.content
+
+
+@pytest.mark.asyncio
 async def test_server_crash_in_the_middle_of_a_run_reaches_the_model(ms365_failure, scripted_model):
     tools, _ = await load_all_tools(fixtures=True)
     ms365_failure.set("crash")
@@ -203,3 +228,18 @@ async def test_transient_informer_failure_is_retried_on_a_read_tool(monkeypatch,
     assert message.status == "error"
     assert f"failed (transient) after {graph_module.TOOL_RETRY_POLICY.max_attempts} attempt(s)" in message.content
     assert "Transient Informer failure" in message.content
+
+
+@pytest.mark.asyncio
+async def test_throttled_informer_call_is_retried_on_a_read_tool(monkeypatch, scripted_model):
+    """Informer's per-minute 429 is transient, and so is retried, unlike its daily quota."""
+    monkeypatch.setenv("FIXTURE_WORLD_TODAY", "2026-10-07")
+    monkeypatch.setenv("FIXTURE_WORLD_INFORMER_FAILURE", "throttled")  # the fake Informer API answers 429
+    tools, _ = await load_all_tools(fixtures=True)
+
+    result = await _run(tools, scripted_model, _call("informer_list_relations", {}, "c1"))
+
+    message = _tool_results(result)["c1"]
+    assert message.status == "error"
+    assert f"failed (transient) after {graph_module.TOOL_RETRY_POLICY.max_attempts} attempt(s)" in message.content
+    assert "HTTP 429" in message.content
