@@ -6,7 +6,7 @@
 
 **Blocked by:** 14
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 **Closes:** (evals decision, group 1)
 
