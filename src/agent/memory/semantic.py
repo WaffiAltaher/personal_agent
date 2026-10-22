@@ -1,11 +1,11 @@
 # src/agent/memory/semantic.py
 """
 Semantic memory — embeds and stores text in Chroma so the agent can
-retrieve relevant context from past interactions and ingested documents.
+retrieve relevant context from approved memories and ingested documents.
 
 Two collections:
-  - `documents`    : files/pages the user explicitly ingests
-  - `interactions` : user_input + agent_output pairs from episodic runs
+  - `documents` : files/pages the user explicitly ingests
+  - `memories`  : facts stored via the approved `remember` tool
 """
 
 import uuid
@@ -22,7 +22,7 @@ from agent.config import settings
 @dataclass
 class MemoryChunk:
     content: str
-    source: str       # "documents" or "interactions"
+    source: str       # "documents" or "memories"
     score: float
     metadata: dict = field(default_factory=dict)
 
@@ -42,8 +42,8 @@ class SemanticMemory:
             embedding_function=self._embeddings,
             persist_directory=path,
         )
-        self._interactions = Chroma(
-            collection_name="interactions",
+        self._memories = Chroma(
+            collection_name="memories",
             embedding_function=self._embeddings,
             persist_directory=path,
         )
@@ -68,14 +68,15 @@ class SemanticMemory:
         self._documents.add_texts(texts=chunks, metadatas=metadatas, ids=ids)
         return doc_id
 
-    def ingest_interaction(self, user_input: str, output: str, run_id: str) -> None:
-        """Embed and store a user_input/agent_output pair keyed by run_id."""
-        text = f"User: {user_input}\nAgent: {output}"
-        self._interactions.add_texts(
+    def remember(self, text: str) -> str:
+        """Store one approved long-term memory. Returns the memory id."""
+        memory_id = str(uuid.uuid4())
+        self._memories.add_texts(
             texts=[text],
-            metadatas=[{"run_id": run_id, "user_input": user_input}],
-            ids=[run_id],
+            metadatas=[{"memory_id": memory_id}],
+            ids=[memory_id],
         )
+        return memory_id
 
     # ------------------------------------------------------------------
     # Retrieval
@@ -96,14 +97,14 @@ class SemanticMemory:
             if score >= score_threshold
         ]
 
-    def search_interactions(
+    def search_memories(
         self, query: str, k: int = 3, score_threshold: float = 0.7
     ) -> list[MemoryChunk]:
-        results = self._interactions.similarity_search_with_relevance_scores(query, k=k)
+        results = self._memories.similarity_search_with_relevance_scores(query, k=k)
         return [
             MemoryChunk(
                 content=doc.page_content,
-                source="interactions",
+                source="memories",
                 score=score,
                 metadata=doc.metadata,
             )
@@ -115,12 +116,12 @@ class SemanticMemory:
         """Search both collections, deduplicate by content, rank by score."""
         threshold = settings.memory_score_threshold
         doc_results = self.search_documents(query, k=k, score_threshold=threshold)
-        inter_results = self.search_interactions(query, k=k, score_threshold=threshold)
+        memory_results = self.search_memories(query, k=k, score_threshold=threshold)
 
         seen: set[str] = set()
         combined: list[MemoryChunk] = []
         for chunk in sorted(
-            doc_results + inter_results, key=lambda c: c.score, reverse=True
+            doc_results + memory_results, key=lambda c: c.score, reverse=True
         ):
             if chunk.content not in seen:
                 seen.add(chunk.content)

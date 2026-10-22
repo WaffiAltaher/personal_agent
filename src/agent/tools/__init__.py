@@ -17,7 +17,7 @@ from agent.tools.google_calendar import (
     get_calendar_event,
     list_calendar_events,
 )
-from agent.tools.memory import retrieve_episodic_memory, retrieve_memory
+from agent.tools.memory import remember, retrieve_episodic_memory, retrieve_memory
 from agent.tools.web import fixture_web_search, web_search
 from agent.tools.mcp_loader import McpServer, load_mcp_tools
 from agent.tools.ms365_mcp import ms365_fixture_server, ms365_server
@@ -36,6 +36,7 @@ LOCAL_TOOLS = [
     write_action(create_draft_email),  # saves a draft to Gmail
     read_tool(retrieve_memory),
     read_tool(retrieve_episodic_memory),
+    write_action(remember),
 ]
 
 

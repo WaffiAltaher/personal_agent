@@ -117,8 +117,6 @@ def test_run_log_records_step_limit_outcome(tmp_path, monkeypatch):
         "agent.graph.get_episodic_memory",
         lambda: type("M", (), {"log_run": capture})(),
     )
-    monkeypatch.setattr("agent.graph.get_semantic_memory", lambda: type("M", (), {"ingest_interaction": lambda *a, **k: None})())
-
     result = {
         "messages": [
             HumanMessage(content="loop"),

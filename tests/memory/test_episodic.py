@@ -18,7 +18,7 @@ def _sample_run(**kwargs) -> RunRecord:
         tools_called=["web_search"],
         token_usage={"prompt": 100, "completion": 50, "total": 150},
         cost_usd=0.001,
-        success=True,
+        outcome="completed",
     )
     defaults.update(kwargs)
     return RunRecord(**defaults)
@@ -39,7 +39,7 @@ def test_insert_run(mem):
     assert saved.tools_called == ["web_search"]
     assert saved.token_usage == {"prompt": 100, "completion": 50, "total": 150}
     assert saved.cost_usd == pytest.approx(0.001)
-    assert saved.success is True
+    assert saved.outcome == "completed"
     assert saved.error_message is None
 
 

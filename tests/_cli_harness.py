@@ -51,7 +51,7 @@ def cli_run(monkeypatch, scripted_model):
         monkeypatch.setattr(cli, "get_callback_handler", lambda **kwargs: seen["handler"])
         monkeypatch.setattr(cli, "load_all_tools", load_all_tools)
         monkeypatch.setattr(cli, "get_checkpointer", get_checkpointer)
-        monkeypatch.setattr(cli, "log_run_to_memory", lambda result, user_input: None)
+        monkeypatch.setattr(cli, "log_run_to_memory", lambda result, user_input, **kwargs: None)
         monkeypatch.setattr(cli, "flush_traces", lambda: seen.__setitem__("flushed", seen["flushed"] + 1))
         monkeypatch.setattr(cli, "_prompt_decision", lambda: "approve")
         monkeypatch.setattr(sys, "argv", ["agent.cli", "--fixtures", "Mail Ann, then Bob."])

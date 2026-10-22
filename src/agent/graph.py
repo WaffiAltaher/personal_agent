@@ -66,7 +66,8 @@ from typing_extensions import TypedDict
 
 from agent.chat_model import create_chat_model
 from agent.config import settings
-from agent.memory import ContextBudgetManager, RunRecord, TokenCounter, get_episodic_memory, get_semantic_memory
+from agent.memory import ContextBudgetManager, TokenCounter, get_episodic_memory
+from agent.memory.run_log import build_run_record
 from agent.tools import LOCAL_TOOLS
 from agent.tools.classification import is_read
 from agent.tools.mcp_loader import TransientMcpError
@@ -642,67 +643,30 @@ def build_graph(
 # 8. Post-run memory logging
 # ---------------------------------------------------------------------------
 
-def log_run_to_memory(result: dict, user_input: str) -> None:
+def log_run_to_memory(
+    result: dict,
+    user_input: str,
+    *,
+    model_name: str | None = None,
+    run_date: date | None = None,
+    error: str | None = None,
+) -> None:
     """
-    Extract run data from a completed graph result dict and persist it to both
-    episodic memory (SQLite) and semantic memory (Chroma interactions).
+    Persist an episodic run log entry from a completed (or failed) graph result.
 
-    Call this after agent_graph.invoke() returns (outside any interrupt loop).
-    Failures are silently caught so memory issues never break the main flow.
+    Call this after the conversation driver finishes (outside any interrupt loop).
+    Write failures are logged and do not crash the caller.
     """
     try:
-        messages: list[BaseMessage] = result.get("messages", [])
+        from agent.config import settings as _settings
 
-        # Final answer: last AIMessage without pending tool calls
-        final_output = ""
-        for msg in reversed(messages):
-            if isinstance(msg, AIMessage) and not getattr(msg, "tool_calls", None):
-                if isinstance(msg.content, str):
-                    final_output = msg.content
-                elif isinstance(msg.content, list):
-                    final_output = " ".join(
-                        block["text"]
-                        for block in msg.content
-                        if isinstance(block, dict) and block.get("type") == "text"
-                    )
-                break
-
-        # All tool names called during the run
-        tools_called: list[str] = [
-            tc["name"]
-            for msg in messages
-            if isinstance(msg, AIMessage)
-            for tc in getattr(msg, "tool_calls", [])
-        ]
-
-        # Token usage from the last AI message that carries usage_metadata
-        token_usage: dict | None = None
-        for msg in reversed(messages):
-            if isinstance(msg, AIMessage):
-                meta = getattr(msg, "usage_metadata", None)
-                if meta:
-                    token_usage = {
-                        "prompt": meta.get("input_tokens", 0),
-                        "completion": meta.get("output_tokens", 0),
-                        "total": meta.get("total_tokens", 0),
-                    }
-                    break
-
-        step_limit = is_step_limit_answer(messages[-1] if messages else None)
-        run = RunRecord(
-            user_input=user_input,
-            final_output=final_output,
-            tools_called=tools_called,
-            token_usage=token_usage,
-            success=not step_limit,
-            outcome="step limit" if step_limit else "completed",
+        run = build_run_record(
+            result,
+            user_input,
+            model_name=model_name or _settings.model_name,
+            run_date=run_date or date.today(),
+            error=error,
         )
-
-        run_id = get_episodic_memory().log_run(run)
-
-        if final_output:
-            get_semantic_memory().ingest_interaction(user_input, final_output, run_id)
-
-    except Exception:
-        # Memory failures must not crash the agent
-        pass
+        get_episodic_memory().log_run(run)
+    except Exception as exc:
+        logger.warning("Failed to write run log: %s", exc)
