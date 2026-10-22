@@ -12,14 +12,19 @@ scopes it asks for to these tools: no Mail.Send) and by the loader, by name, wha
 annotations the server sets.
 """
 
-import os
 import sys
+import tempfile
 
 from agent.config import Settings, settings as default_settings
+from agent.tools.mcp_environment import fixture_environment, system_environment
 from agent.tools.mcp_loader import LoginCheck, McpServer
 
 NAME = "ms365"
 PACKAGE = "@softeria/ms-365-mcp-server@0.159.1"  # exact pin; review the release diff before bumping (ADR-005)
+
+# Both servers start here, not in the repo: the real server reads a `.env` from its working
+# directory on its own, and this keeps the repo's secrets out of its reach.
+WORKING_DIRECTORY = tempfile.gettempdir()
 
 # What `--read-only --preset outlook` exposes at the pinned version without --org-mode
 # (Graph GET tools, POST tools the server marks read-only, and download-bytes), minus
@@ -107,10 +112,11 @@ def ms365_server(settings: Settings = default_settings) -> McpServer:
             connection=None,
             unavailable_reason="MS365_MCP_CLIENT_ID and MS365_MCP_TENANT_ID are not set",
         )
-    # The token cache stays in the macOS keychain (ADR-005): MS365_MCP_USE_KEYTAR is never set here.
+    # Only the system basics and this server's own settings (see mcp_environment). So the shell's
+    # MS365_MCP_USE_KEYTAR and ENABLED_TOOLS never reach the server: the token cache stays in the
+    # macOS keychain (ADR-005), and ENABLED_TOOLS would override --enabled-tools.
     env = {
-        # ENABLED_TOOLS in the environment would override --enabled-tools.
-        **{key: value for key, value in os.environ.items() if key != "ENABLED_TOOLS"},
+        **system_environment(),
         "MS365_MCP_CLIENT_ID": settings.ms365_mcp_client_id,
         "MS365_MCP_TENANT_ID": settings.ms365_mcp_tenant_id,
     }
@@ -131,6 +137,7 @@ def ms365_server(settings: Settings = default_settings) -> McpServer:
             ],
             "transport": "stdio",
             "env": env,
+            "cwd": WORKING_DIRECTORY,
         },
         **_TOOL_POLICY,
     )
@@ -149,8 +156,9 @@ def ms365_fixture_server() -> McpServer:
             "command": sys.executable,
             "args": ["-m", "fixture_world.ms365"],
             "transport": "stdio",
-            # Passes FIXTURE_WORLD_TODAY through when set (the stdio client's default env drops it).
-            "env": {**os.environ},
+            # The Fixture world's own settings (its clock, failure switches, draft log) and the system basics.
+            "env": fixture_environment(),
+            "cwd": WORKING_DIRECTORY,  # as the real server: outside the repo
         },
         **_TOOL_POLICY,
     )
