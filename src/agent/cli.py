@@ -9,6 +9,7 @@ Use ``--fixtures`` for the seeded Fixture world (no Google login check).
 import asyncio
 import sys
 import uuid
+from contextlib import nullcontext
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langfuse import propagate_attributes
@@ -17,6 +18,7 @@ from agent.auth.google import GoogleLoginRequired, check_google_login
 from agent.chat_model import ModelConfigError, create_chat_model
 from agent.conversation import run_conversation
 from agent.graph import build_graph, get_checkpointer, log_run_to_memory
+from agent.memory import fixtures_semantic_memory
 from agent.tracing import flush_traces, get_callback_handler, verify_connection
 from agent.config import settings
 from agent.tools import load_all_tools
@@ -174,53 +176,72 @@ async def main():
 
     # Against the Fixture world, "today" is its pinned date, for the model and the stand-ins alike.
     today = clock.pin_today() if fixtures else None
+    memory_ctx = fixtures_semantic_memory() if fixtures else nullcontext()
+    result: dict = {"messages": []}
+    run_error: str | None = None
 
-    async with get_checkpointer() as checkpointer:
-        tools, notices = await load_all_tools(fixtures=fixtures)
-        if fixtures:
-            print(f"Running against the Fixture world (seeded MS365 stand-in and fake Informer API), today {today}.")
-        # An unavailable integration doesn't stop the run; say which one and why.
-        for notice in notices:
-            print(f"Notice: {notice}")
-        agent_graph = build_graph(checkpointer, tools, model, today=today)
+    try:
+        with memory_ctx:
+            async with get_checkpointer() as checkpointer:
+                tools, notices = await load_all_tools(fixtures=fixtures)
+                if fixtures:
+                    print(
+                        f"Running against the Fixture world (seeded MS365 stand-in and fake Informer API), "
+                        f"today {today}."
+                    )
+                # An unavailable integration doesn't stop the run; say which one and why.
+                for notice in notices:
+                    print(f"Notice: {notice}")
+                agent_graph = build_graph(checkpointer, tools, model, today=today)
 
-        with propagate_attributes(
-            user_id="waffi",
-            trace_name="cli-run",
-            metadata={"prompt-version": settings.prompt_version},
-        ):
-            result = await run_conversation(
-                agent_graph,
-                config,
-                tools=tools,
-                user_message=user_input,
-                today=today,
+                with propagate_attributes(
+                    user_id="waffi",
+                    trace_name="cli-run",
+                    metadata={"prompt-version": settings.prompt_version},
+                ):
+                    result = await run_conversation(
+                        agent_graph,
+                        config,
+                        tools=tools,
+                        user_message=user_input,
+                        today=today,
+                    )
+                    # HITL loop — handle zero or more interrupts per run.
+                    while "__interrupt__" in result:
+                        for interrupt_obj in result["__interrupt__"]:
+                            _display_interrupt(interrupt_obj.value)
+
+                        decision = _prompt_decision()
+                        print(f"\nResuming with: {decision}\n")
+
+                        result = await run_conversation(
+                            agent_graph,
+                            config,
+                            tools=tools,
+                            resume_decision=decision,
+                        )
+
+        last = result["messages"][-1]
+        print(_stringify_content(last.content))
+
+        if debug:
+            _display_debug_trace(result)
+
+        # A Fixture-world run is about seeded stand-in data, not the owner's: keep it out of real memory.
+        if not fixtures:
+            log_run_to_memory(result, user_input, model_name=settings.model_name)
+    except Exception as exc:
+        run_error = f"{type(exc).__name__}: {exc}"
+        if not fixtures:
+            log_run_to_memory(
+                result,
+                user_input,
+                model_name=settings.model_name,
+                error=run_error,
             )
-            # HITL loop — handle zero or more interrupts per run.
-            while "__interrupt__" in result:
-                for interrupt_obj in result["__interrupt__"]:
-                    _display_interrupt(interrupt_obj.value)
-
-                decision = _prompt_decision()
-                print(f"\nResuming with: {decision}\n")
-
-                result = await run_conversation(
-                    agent_graph,
-                    config,
-                    tools=tools,
-                    resume_decision=decision,
-                )
-
-    last = result["messages"][-1]
-    print(_stringify_content(last.content))
-
-    if debug:
-        _display_debug_trace(result)
-
-    # A Fixture-world run is about seeded stand-in data, not the owner's: keep it out of real memory.
-    if not fixtures:
-        log_run_to_memory(result, user_input, model_name=settings.model_name)
-    flush_traces()
+        raise
+    finally:
+        flush_traces()
 
 
 if __name__ == "__main__":

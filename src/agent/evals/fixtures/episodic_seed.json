@@ -1,0 +1,12 @@
+[
+  {
+    "user_input": "How much VAT do I owe for Q3 2026?",
+    "final_output": "The VAT position is -375.00 EUR.",
+    "timestamp": "2026-10-02T09:15:00+02:00"
+  },
+  {
+    "user_input": "When is the October payroll run due?",
+    "final_output": "Payroll is due on the 25th.",
+    "timestamp": "2026-10-05T14:30:00+02:00"
+  }
+]

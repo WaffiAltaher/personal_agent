@@ -60,7 +60,7 @@ def test_state_never_loses_messages_when_context_is_huge(small_context_limits):
 
 def test_reduced_view_keeps_first_user_message_and_answers_every_tool_call(small_context_limits):
     first_question = "What did I ask?"
-    big = _chars_for_tokens(300)
+    big = _chars_for_tokens(850)
     messages = [
         HumanMessage(content=first_question),
         AIMessage(content="searching", tool_calls=[{"id": "a1", "name": "search", "args": {}}]),
@@ -71,17 +71,18 @@ def test_reduced_view_keeps_first_user_message_and_answers_every_tool_call(small
         ToolMessage(content=big, tool_call_id="a2", name="search"),
     ]
     system = "system prompt"
-    view = build_model_view(
+    view, stubbed = build_model_view(
         messages,
         system_text=system,
         tools=[],
         last_model_input_tokens=None,
-        message_count_at_last_model_call=0,
+        message_count_at_last_model_call=6,
     )
 
     assert view, "view must not be empty"
     assert isinstance(view[0], SystemMessage)
     assert view[1].content == first_question
+    assert stubbed, "large tool results must be stubbed above the threshold"
 
     tool_ids = {
         tc["id"]
@@ -143,12 +144,12 @@ def test_after_reduction_next_estimate_stays_below_clear_threshold(small_context
         AIMessage(content="summary"),
     ]
     system = "sys"
-    view = build_model_view(
+    view, stubbed_ids = build_model_view(
         messages,
         system_text=system,
         tools=[],
         last_model_input_tokens=None,
-        message_count_at_last_model_call=0,
+        message_count_at_last_model_call=3,
     )
     cleared = next(m for m in view if isinstance(m, ToolMessage))
     assert "result cleared" in cleared.content
@@ -168,16 +169,18 @@ def test_after_reduction_next_estimate_stays_below_clear_threshold(small_context
     ) + len(system) // 4
     assert reduced_total <= SMALL_CLEAR_TARGET
 
-    second_pass = build_model_view(
+    second_pass, second_stubbed = build_model_view(
         messages,
         system_text=system,
         tools=[],
         last_model_input_tokens=reduced_total,
         message_count_at_last_model_call=len(messages),
+        stubbed_tool_call_ids=stubbed_ids,
     )
     tool_in_view = next(m for m in second_pass if isinstance(m, ToolMessage))
-    assert big in tool_in_view.content
-    assert "result cleared" not in tool_in_view.content
+    assert big not in tool_in_view.content
+    assert "result cleared" in tool_in_view.content
+    assert second_stubbed == stubbed_ids
 
 
 def test_estimate_counts_assistant_reply_since_reported_input():

@@ -73,7 +73,8 @@
       "approval": "reject",
       "required_tools": ["informer_revenue"],
       "forbidden_tools": ["informer_trial_balance", "create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
-      "expected_facts": ["2500.00"]
+      "expected_facts": ["2500.00"],
+      "require_facts": true
     },
     {
       "id": "finance-vat-q3",
@@ -82,7 +83,8 @@
       "approval": "reject",
       "required_tools": ["informer_vat_position"],
       "forbidden_tools": ["informer_trial_balance", "create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
-      "expected_facts": ["-375.00"]
+      "expected_facts": ["-375.00"],
+      "require_facts": true
     },
     {
       "id": "finance-revenue-period-range",
@@ -91,7 +93,8 @@
       "approval": "reject",
       "required_tools": ["informer_revenue"],
       "forbidden_tools": ["informer_trial_balance", "create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
-      "expected_facts": ["1000.00"]
+      "expected_facts": ["1000.00"],
+      "require_facts": true
     },
     {
       "id": "finance-vat-negative-quarter",
@@ -100,7 +103,8 @@
       "approval": "reject",
       "required_tools": ["informer_vat_position"],
       "forbidden_tools": ["informer_trial_balance", "create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
-      "expected_facts": ["-1000.00"]
+      "expected_facts": ["-1000.00"],
+      "require_facts": true
     },
     {
       "id": "upload-purchase-approved",
@@ -142,6 +146,7 @@
       "required_tools": ["informer_vat_position", "informer_check_purchase_invoice", "informer_upload_purchase_invoice"],
       "forbidden_tools": ["create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
       "expected_facts": ["-375.00"],
+      "require_facts": true,
       "expected_outcome": {"upload_count": 0}
     },
     {

@@ -13,13 +13,25 @@ from agent.config import settings
 
 TRUNCATION_MARKER = "[Tool result truncated at {max_tokens} tokens]"
 CLEARED_STUB = "[result cleared, ~{tokens} tokens; call the tool again if needed]"
+CLEARED_STUB_PREFIX = CLEARED_STUB.split("{")[0]
 
 
 def estimate_tokens(text: str) -> int:
     return len(text) // 4
 
 
-def cap_tool_result_content(content: str, max_tokens: int | None = None) -> str:
+def _text_blocks(content: list) -> bool:
+    return bool(content) and all(
+        isinstance(block, dict) and block.get("type") == "text" for block in content
+    )
+
+
+def cap_tool_result_content(content: str | list, max_tokens: int | None = None) -> str | list:
+    if isinstance(content, list):
+        if not _text_blocks(content):
+            return content
+        joined = "".join(str(block.get("text", "")) for block in content)
+        return cap_tool_result_content(joined, max_tokens)
     cap = settings.tool_result_max_tokens if max_tokens is None else max_tokens
     text = content if isinstance(content, str) else str(content)
     if estimate_tokens(text) <= cap:
@@ -72,6 +84,38 @@ def _view_token_total(system_text: str, tools: list[BaseTool], messages: list[Ba
     return total
 
 
+def _latest_ai_tool_batch(messages: list[BaseMessage]) -> AIMessage | None:
+    for message in reversed(messages):
+        if isinstance(message, AIMessage) and getattr(message, "tool_calls", None):
+            return message
+    return None
+
+
+def _protected_tool_call_ids(
+    messages: list[BaseMessage],
+    message_count_at_last_model_call: int,
+) -> set[str]:
+    """Tool results the model has not seen yet (and unanswered calls) must stay full."""
+    protected: set[str] = set()
+    for msg in messages[message_count_at_last_model_call:]:
+        if isinstance(msg, ToolMessage):
+            protected.add(msg.tool_call_id)
+    last_ai = _latest_ai_tool_batch(messages)
+    if last_ai is not None:
+        answered = {m.tool_call_id for m in messages if isinstance(m, ToolMessage)}
+        for tc in last_ai.tool_calls or []:
+            if tc["id"] not in answered:
+                protected.add(tc["id"])
+    return protected
+
+
+def _is_cleared_stub(message: ToolMessage) -> bool:
+    content = message.content
+    if isinstance(content, str):
+        return CLEARED_STUB_PREFIX in content
+    return False
+
+
 def _cleared_stub(original: ToolMessage) -> ToolMessage:
     tokens = _message_content_tokens(original)
     return ToolMessage(
@@ -92,9 +136,11 @@ def build_model_view(
     system_message: SystemMessage | None = None,
     clear_threshold: int | None = None,
     clear_target: int | None = None,
-) -> list[BaseMessage]:
+    stubbed_tool_call_ids: set[str] | None = None,
+) -> tuple[list[BaseMessage], set[str]]:
     threshold = settings.context_clear_threshold if clear_threshold is None else clear_threshold
     target = settings.context_clear_target if clear_target is None else clear_target
+    stubbed = set(stubbed_tool_call_ids or ())
 
     context_tokens = estimate_context_tokens(
         state_messages=state_messages,
@@ -105,20 +151,31 @@ def build_model_view(
     )
     working = copy.deepcopy(state_messages)
     system_msg = system_message if system_message is not None else SystemMessage(content=system_text)
+    protected = _protected_tool_call_ids(working, message_count_at_last_model_call)
 
     def view_total() -> int:
         return _view_token_total(system_text, tools, working)
 
-    if context_tokens <= threshold:
-        return [system_msg] + working
-
-    tool_indices = [i for i, m in enumerate(working) if isinstance(m, ToolMessage)]
-    for idx in tool_indices:
-        if view_total() <= target:
-            break
-        original = working[idx]
-        if isinstance(original, ToolMessage) and CLEARED_STUB.split("{")[0] not in original.content:
+    def apply_stub(idx: int, original: ToolMessage) -> None:
+        nonlocal stubbed
+        if original.tool_call_id in protected:
+            return
+        if not _is_cleared_stub(original):
             working[idx] = _cleared_stub(original)
+            stubbed.add(original.tool_call_id)
+
+    for idx, msg in enumerate(working):
+        if isinstance(msg, ToolMessage) and msg.tool_call_id in stubbed:
+            apply_stub(idx, msg)
+
+    if context_tokens > threshold:
+        tool_indices = [i for i, m in enumerate(working) if isinstance(m, ToolMessage)]
+        for idx in tool_indices:
+            if view_total() <= target:
+                break
+            original = working[idx]
+            if isinstance(original, ToolMessage):
+                apply_stub(idx, original)
 
     view = [system_msg] + working
     if not view:
@@ -138,4 +195,4 @@ def build_model_view(
     if tool_ids - answered:
         raise RuntimeError("model view has unanswered tool calls")
 
-    return view
+    return view, stubbed

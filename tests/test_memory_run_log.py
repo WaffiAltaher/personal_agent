@@ -158,6 +158,33 @@ def test_run_log_usage_is_summed_over_every_model_call(episodic):
     assert saved.cost_usd == pytest.approx(0.00016875)  # 150 in + 15 out at 2026-10-07 Gemini rates
 
 
+def test_run_log_treats_only_the_exact_step_limit_answer_as_step_limit(episodic):
+    from agent.graph import STEP_LIMIT_ANSWER
+
+    log_run_to_memory(
+        {"messages": [AIMessage(content=STEP_LIMIT_ANSWER, usage_metadata=_usage(5, 1))]},
+        "loop",
+        model_name="google_genai:gemini-3.8-flash",
+        run_date=date(2026, 10, 7),
+    )
+    assert episodic.get_recent_runs(1)[0].outcome == "step limit"
+
+    log_run_to_memory(
+        {
+            "messages": [
+                AIMessage(
+                    content="I stopped because of the step limit you configured.",
+                    usage_metadata=_usage(5, 1),
+                )
+            ]
+        },
+        "mention",
+        model_name="google_genai:gemini-3.8-flash",
+        run_date=date(2026, 10, 7),
+    )
+    assert episodic.get_recent_runs(1)[0].outcome == "completed"
+
+
 def test_run_log_records_rejected_and_error_outcomes(episodic):
     rejected_messages = [
         AIMessage(content="", tool_calls=[{"id": "w1", "name": "send_mail", "args": {}}]),

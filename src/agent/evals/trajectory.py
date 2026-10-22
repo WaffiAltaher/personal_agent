@@ -65,7 +65,9 @@ def score_trajectory(scenario: Scenario, tool_calls: list[ToolCallRecord], *, co
 def score_facts(scenario: Scenario, final_answer: str) -> FactsScore:
     answer = final_answer.lower()
     found = [f for f in scenario.expected_facts if f.lower() in answer]
-    return FactsScore(found=found, missing=[f for f in scenario.expected_facts if f not in found])
+    found_lower = {f.lower() for f in found}
+    missing = [f for f in scenario.expected_facts if f.lower() not in found_lower]
+    return FactsScore(found=found, missing=missing)
 
 
 def summarise(runs: list[RunResult]) -> Summary:
