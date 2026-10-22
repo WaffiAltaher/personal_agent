@@ -10,7 +10,7 @@ not counted.
 from datetime import date
 from statistics import mean
 
-from agent.evals.pricing import cost_usd
+from agent.pricing import cost_usd
 from agent.evals.records import Efficiency, ModelUsage, RunResult
 
 

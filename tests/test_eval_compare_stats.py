@@ -11,6 +11,7 @@ from agent.evals.records import (
     EvalResults,
     FactsScore,
     GenerationScores,
+    OutcomeScore,
     RunResult,
     TrajectoryScore,
 )
@@ -55,7 +56,9 @@ def _run(
         notices=[],
         drafts=[],
         trajectory=_trajectory(passed=passed),
+        outcome=OutcomeScore(applicable=False, passed=True),
         answer_facts=FactsScore(found=[], missing=[]),
+        passed=passed,
         generation=generation,
     )
 

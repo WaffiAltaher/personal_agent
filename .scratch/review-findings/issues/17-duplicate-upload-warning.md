@@ -6,7 +6,7 @@
 
 **Blocked by:** 16
 
-**Status:** claimed
+**Status:** resolved
 
 **Closes:** (decision on duplicate uploads, as amended by Q37)
 
@@ -19,3 +19,8 @@
 - [ ] Test: different contents are neither reported nor refused
 
 Spec: `../spec.md`. Decisions: `../findings.md` ("Decisions taken").
+
+## Comments
+
+- Implemented on `ticket/17-duplicate-upload`: upload log is a file (`purchase_upload_log` setting, default `~/.informer_mcp/purchase-uploads.jsonl`) of SHA-256 fingerprint and date per successful hand-over; `check_purchase_invoice` reports `already_uploaded_on`/`warning`; `upload_purchase_invoice(path, allow_duplicate=false)` refuses repeats with the earlier date and logs only after a successful hand-over; over-cap files are refused by `stat` before `read_bytes`. Fixture world takes its log and downloads folder from `FIXTURE_WORLD_INFORMER_UPLOAD_LOG` and `FIXTURE_WORLD_INFORMER_DOWNLOADS_DIR`, since the child env allowlist (ticket 11) forwards only `FIXTURE_WORLD_*`.
+- Tests: 31 pass in `tests/informer_server/test_purchase_upload.py` and `tests/test_fixture_world_informer_uploads.py`; full suite 294 passed, 1 deselected (live).

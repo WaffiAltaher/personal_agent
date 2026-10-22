@@ -6,7 +6,7 @@
 
 **Blocked by:** 12
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 **Closes:** M1, M7 (decision (f))
 
