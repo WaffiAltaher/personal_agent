@@ -24,4 +24,4 @@ Spec: `../spec.md`. Decisions: `../findings.md` ("Decisions taken").
 - Startup (`src/agent/tools/mcp_loader.py`) now opens one MS365 (or any server's) session for both the tool listing and the login check, so the server starts once. Tools still open their own session per call, so they work after startup.
 - The login-failure notice is raised after the session closes, so it isn't wrapped in the session's task group (the boundary-failure test caught this).
 - `tests/test_ms365_startup_once.py`: kept the launch-count test. The second test named `ms365_get-mailbox-settings`, which the Fixture world doesn't have, so it is now `ms365_list-outlook-contacts`.
-- Full default suite: 283 passed, 1 deselected (live).
+- Full default suite: 283 passed, 1 deselected (live) before merging feat/review-findings; 310 passed, 1 deselected (live) after it.
