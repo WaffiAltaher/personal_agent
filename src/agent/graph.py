@@ -89,8 +89,9 @@ logger = logging.getLogger(__name__)
 # Every node receives it, every node returns a partial update to it.
 #
 # `add_messages` is a reducer: instead of overwriting the messages list
-# on each node return, it *appends* the new messages to the existing list.
-# This is what gives the agent its memory within a single run.
+# on each node return, it *merges* the returned messages into the list by ID.
+# A message whose ID is already in the list replaces that message; any other
+# message is appended. This is what gives the agent its memory within a single run.
 
 class AgentState(TypedDict, total=False):
     messages: Annotated[list[BaseMessage], add_messages]
@@ -538,8 +539,8 @@ def build_graph(
     async def agent_node(state: AgentState) -> dict:
         """
         The reasoning node. Calls the LLM with the current message history.
-        Returns a dict with a `messages` key. The add_messages reducer appends
-        it to state rather than overwriting.
+        Returns a dict with a `messages` key. The add_messages reducer merges
+        it into state by message ID rather than overwriting the list.
         """
         count = state.get("model_call_count", 0)
         if count >= max_iterations:
@@ -641,10 +642,12 @@ def build_graph(
                     content=(
                         f"Tool '{tc['name']}' failed unexpectedly. "
                         f"Error: {type(exc).__name__}: {exc}. "
-                        "Please let the user know this tool is temporarily unavailable "
-                        "and suggest they try again later or use an alternative approach."
+                        "This was a crash in the tool layer, not a normal tool result, so the "
+                        "outcome is unknown: do not treat it as a success, and tell the user what failed."
                     ),
                     tool_call_id=tc["id"],
+                    name=tc["name"],
+                    status="error",
                 )
                 for tc in tool_calls
             ]
