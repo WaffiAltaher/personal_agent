@@ -6,7 +6,7 @@
 
 **Blocked by:** 13
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 **Closes:** (ADR-012 as amended; decisions on upload source and safety, Q36, Q37)
 
