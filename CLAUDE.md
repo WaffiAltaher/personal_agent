@@ -71,7 +71,7 @@ Approval **fails closed**: every bound tool is classified read or Write action (
 - Langfuse traces to `http://localhost:3000` by default — needs a local Langfuse instance running
 - Google credentials file must be manually downloaded from GCP console and placed at `credentials/google_credentials.json`
 - The `credentials/` and `checkpoints/` directories are gitignored
-- `docs/`, `notebooks/`, and `.claude/skills/` are gitignored. A worktree does not have them. Read them from the primary checkout (`git worktree list`).
+- `notebooks/`, `.claude/skills/`, and the rest of `docs/` are gitignored. A worktree does not have those. Read them from the primary checkout (`git worktree list`). `docs/agents/` and `docs/ARCHITECTURE_DECISIONS.md` are tracked.
 - An MCP child sees only its allowlisted environment. A new variable is `FIXTURE_WORLD_*` or one of that server's own settings.
 - Phase roadmap is in `docs/MASTER_PLAN.md`. Phases 5–7 are implemented on `feat/complete-phases-5-7` (spec and tickets in `.scratch/complete-phases-5-7/`); live credentials setup (ticket 01) is still pending
 

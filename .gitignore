@@ -24,6 +24,8 @@ data/evals/
 .cursor/
 learning/
 notebooks/
-docs/
+docs/*
+!docs/agents/
+!docs/ARCHITECTURE_DECISIONS.md
 .agents/skills/
 .claude/skills/
