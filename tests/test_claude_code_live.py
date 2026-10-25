@@ -32,10 +32,14 @@ def test_real_claude_code_asks_for_both_tool_calls_in_one_turn_with_a_small_cont
     real = shutil.which("claude")
     if real is None:
         pytest.skip("blocked: no claude binary on PATH")
-    # A pass-through that keeps each raw CLI result, so the test sees the turns and calls made.
-    results = tmp_path / "results.jsonl"
+    # A pass-through that keeps each raw CLI result, so the test sees the turns and calls made,
+    # and exits with the CLI's own status.
+    results, last = tmp_path / "results.jsonl", tmp_path / "last.json"
     wrapper = tmp_path / "claude"
-    wrapper.write_text(f'#!/bin/sh\n"{real}" "$@" | tee -a "{results}"\necho >> "{results}"\n')
+    wrapper.write_text(
+        f'#!/bin/sh\n"{real}" "$@" > "{last}"\nstatus=$?\n'
+        f'cat "{last}" >> "{results}"\necho >> "{results}"\ncat "{last}"\nexit $status\n'
+    )
     wrapper.chmod(0o755)
     model = create_chat_model("claude_code:haiku", settings=settings.model_copy(update={"claude_code_binary": str(wrapper)}))
 
