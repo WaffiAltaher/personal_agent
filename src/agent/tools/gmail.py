@@ -187,23 +187,15 @@ def _save_attachment(
 ) -> str:
     """Check the requested attachment against the message, fetch its bytes and save them into gmail/."""
     matches = [a for a in _list_attachments(payload) if a["attachment_id"] == attachment_id]
-    if not matches:
-        return f"Error: the message has no attachment with ID {attachment_id}."
-    attachment = matches[0]
-    real_name = attachment["file_name"]
-    if file_name != real_name:
-        return (
-            f"Error: file_name {file_name!r} does not match the attachment's real name {real_name!r}. "
-            "Use the exact name get_gmail_message lists."
-        )
-    if attachment["mime_type"] == "message/rfc822":
-        return f"Error: {real_name!r} is an attached email; only file attachments can be saved."
-    if attachment["inline"] and not include_inline:
-        return (
-            f"Error: {real_name!r} is an inline image in the message body, not a file attachment. "
-            "Pass include_inline=true only if the owner asked for the images in the email."
-        )
-    refusal = attachment_save.check_listed_size(real_name, attachment["size"])
+    attachment = matches[0] if matches else {}
+    real_name = attachment.get("file_name", "")
+    listed = attachment_save.ListedAttachment(
+        name=real_name,
+        inline=attachment["inline"],
+        size=attachment["size"],
+        not_a_file="an attached email" if attachment["mime_type"] == "message/rfc822" else None,
+    ) if matches else None
+    refusal = attachment_save.check_request(listed, attachment_id, file_name, include_inline, "get_gmail_message")
     if refusal:
         return refusal
     data = fetch_data(attachment["gmail_attachment_id"])

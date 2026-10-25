@@ -8,9 +8,10 @@ every approval prompt is answered with the scenario's approval policy through
 `run_conversation`, as the CLI does with the owner's answer.
 
 Only tools that stay inside the Fixture world are bound: the Fixture world's MCP tools plus
-the local tools in EVAL_LOCAL_TOOLS (the seeded web search and Gmail stand-ins). The other local
-tools reach the owner's real Gmail, Google Calendar, memory store or files, and an auto-approved
-Write action there would be real. The agent folder, where attachments are saved, is the run's own
+the local tools in EVAL_LOCAL_TOOLS (the seeded web search), and the Gmail stand-ins in
+EVAL_GMAIL_TOOLS only in a scenario that requires one of them. The other local tools reach the
+owner's real Gmail, Google Calendar, memory store or files, and an auto-approved Write action
+there would be real. The agent folder, where attachments are saved, is the run's own
 `Downloads/personal_agent`, inside the Downloads folder the Informer upload accepts.
 """
 
@@ -93,15 +94,13 @@ def _isolated_eval_episodic(workdir: Path, scenario: Scenario) -> Iterator[None]
         memory_module._episodic = prev
 
 # Local tools that touch nothing real in Fixture-world mode: safe to bind in an eval. (The web
-# search and the Gmail tools are the Fixture world's seeded ones there, under the real tools'
-# names; the Gmail save writes into the run's agent folder.)
-EVAL_LOCAL_TOOLS = frozenset({
-    web_search.name,
-    retrieve_episodic_memory.name,
-    search_gmail.name,
-    get_gmail_message.name,
-    save_gmail_attachment.name,
-})
+# search is the Fixture world's seeded one there, under the real tool's name.)
+EVAL_LOCAL_TOOLS = frozenset({web_search.name, retrieve_episodic_memory.name})
+
+# The Fixture world's Gmail stand-ins, under the real tools' names (the save writes into the
+# run's agent folder). Safe too, but bound only in a scenario whose required_tools names one,
+# so that every other scenario keeps the tool set it was written against.
+EVAL_GMAIL_TOOLS = frozenset({search_gmail.name, get_gmail_message.name, save_gmail_attachment.name})
 
 ModelFactory = Callable[[Scenario], BaseChatModel]
 ToolLoader = Callable[[], Awaitable[tuple[list[BaseTool], list[str]]]]
@@ -126,10 +125,19 @@ def trace_attributes(scenario: Scenario, *, model_name: str, eval_run_id: str, r
 
 
 async def load_fixture_world_tools() -> tuple[list[BaseTool], list[str]]:
-    """The Fixture world's MCP tools plus the local tools in EVAL_LOCAL_TOOLS, and any notices."""
+    """The Fixture world's MCP tools plus the local tools in EVAL_LOCAL_TOOLS and EVAL_GMAIL_TOOLS,
+    and any notices. `run_scenario` drops the Gmail ones unless the scenario needs them."""
     tools, notices = await load_all_tools(fixtures=True)
     local = {t.name for t in LOCAL_TOOLS}
-    return [t for t in tools if t.name not in local or t.name in EVAL_LOCAL_TOOLS], notices
+    allowed = EVAL_LOCAL_TOOLS | EVAL_GMAIL_TOOLS
+    return [t for t in tools if t.name not in local or t.name in allowed], notices
+
+
+def scenario_tools(scenario: Scenario, tools: list[BaseTool]) -> list[BaseTool]:
+    """`tools` without the Gmail stand-ins, unless the scenario requires one of them."""
+    if EVAL_GMAIL_TOOLS & set(scenario.required_tools):
+        return tools
+    return [t for t in tools if t.name not in EVAL_GMAIL_TOOLS]
 
 
 @contextmanager
@@ -252,6 +260,7 @@ async def run_scenario(
         }
         with _isolated_eval_episodic(work, scenario), _environment(env), _agent_folder(agent_folder):
             tools, notices = await load_tools()
+            tools = scenario_tools(scenario, tools)
             if failure and failure.server == "ms365":
                 switch.set(failure.mode, failure.times)  # after loading: it hits the run, not startup
 

@@ -71,8 +71,12 @@ def _text(message: ToolMessage) -> str:
 
 async def _call(tool: BaseTool, args: dict) -> tuple[bool, str]:
     """Call a server tool; (succeeded, its text)."""
-    message = await tool.ainvoke({"type": "tool_call", "id": f"call-{uuid.uuid4().hex}", "name": tool.name,
-                                  "args": args})
+    message = await tool.ainvoke({
+        "type": "tool_call",
+        "id": f"call-{uuid.uuid4().hex}",
+        "name": tool.name,
+        "args": args,
+    })
     return message.status != "error", _text(message)
 
 
@@ -87,32 +91,26 @@ def _is_file_attachment(attachment: dict) -> bool:
     return "contentBytes" in attachment
 
 
-async def _save(tools: Mapping[str, BaseTool], message_id: str, attachment_id: str, file_name: str,
-                include_inline: bool) -> str:
+async def _save(
+    tools: Mapping[str, BaseTool],
+    message_id: str,
+    attachment_id: str,
+    file_name: str,
+    include_inline: bool,
+) -> str:
     listed_ok, listed = await _call(tools[LIST_TOOL], {"messageId": message_id})
     if not listed_ok:
         return f"Error: could not list the attachments of message {message_id}: {listed}"
     matches = [a for a in json.loads(listed).get("value", []) if a.get("id") == attachment_id]
-    if not matches:
-        return f"Error: the message has no attachment with ID {attachment_id}."
-    attachment = matches[0]
+    attachment = matches[0] if matches else {}
     real_name = attachment.get("name") or ""
-    if file_name != real_name:
-        return (
-            f"Error: file_name {file_name!r} does not match the attachment's real name {real_name!r}. "
-            "Use the exact name list-mail-attachments lists."
-        )
-    if not _is_file_attachment(attachment):
-        return (
-            f"Error: {real_name!r} is an attached email or a cloud link, not a file; "
-            "only file attachments can be saved."
-        )
-    if attachment.get("isInline") and not include_inline:
-        return (
-            f"Error: {real_name!r} is an inline image in the message body, not a file attachment. "
-            "Pass include_inline=true only if the owner asked for the images in the email."
-        )
-    refusal = attachment_save.check_listed_size(real_name, attachment.get("size"))
+    found = attachment_save.ListedAttachment(
+        name=real_name,
+        inline=bool(attachment.get("isInline")),
+        size=attachment.get("size"),
+        not_a_file=None if _is_file_attachment(attachment) else "an attached email or a cloud link, not a file",
+    ) if matches else None
+    refusal = attachment_save.check_request(found, attachment_id, file_name, include_inline, LIST_TOOL)
     if refusal:
         return refusal
     temporary = attachment_save.temporary_path(OUTLOOK_FOLDER)
@@ -131,8 +129,9 @@ async def _save(tools: Mapping[str, BaseTool], message_id: str, attachment_id: s
 def build_save_attachment(name: str, tools: Mapping[str, BaseTool]) -> BaseTool:
     """The model-facing save tool, over the server's list-mail-attachments and download-bytes-to-file."""
 
-    async def save_attachment(message_id: str, attachment_id: str, file_name: str,
-                              include_inline: bool = False) -> str:
+    async def save_attachment(
+        message_id: str, attachment_id: str, file_name: str, include_inline: bool = False
+    ) -> str:
         try:
             return await _save(tools, message_id, attachment_id, file_name, include_inline)
         except Exception as e:

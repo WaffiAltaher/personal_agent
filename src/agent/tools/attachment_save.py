@@ -1,3 +1,4 @@
+# src/agent/tools/attachment_save.py
 """
 The save rules for email attachments, shared by every mailbox (spec: The save rules).
 
@@ -21,6 +22,7 @@ import itertools
 import os
 import re
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 from agent.config import settings
@@ -55,6 +57,47 @@ def check_listed_size(file_name: str, size: int | None) -> str | None:
     if size is not None and size > MAX_ATTACHMENT_BYTES:
         return _too_large(file_name, size)
     return None
+
+
+@dataclass(frozen=True)
+class ListedAttachment:
+    """An attachment as its mailbox lists it, for checking a save request before downloading."""
+
+    name: str  # the attachment's real file name
+    inline: bool
+    size: int | None  # None when the mailbox doesn't list it
+    not_a_file: str | None = None  # what it is instead (an attached email, a cloud link), if not a file
+
+
+def check_request(
+    attachment: ListedAttachment | None,
+    attachment_id: str,
+    file_name: str,
+    include_inline: bool,
+    listed_by: str,
+) -> str | None:
+    """
+    The refusal for a save request, or None when it may go ahead: the attachment must exist
+    (`None` when the message has none with that ID), `file_name` must be its real name, it must
+    be a file, an inline one needs `include_inline`, and its listed size must be within the cap.
+    `listed_by` names the tool that lists the attachments, for the name-mismatch refusal.
+    """
+    if attachment is None:
+        return f"Error: the message has no attachment with ID {attachment_id}."
+    real_name = attachment.name
+    if file_name != real_name:
+        return (
+            f"Error: file_name {file_name!r} does not match the attachment's real name {real_name!r}. "
+            f"Use the exact name {listed_by} lists."
+        )
+    if attachment.not_a_file:
+        return f"Error: {real_name!r} is {attachment.not_a_file}; only file attachments can be saved."
+    if attachment.inline and not include_inline:
+        return (
+            f"Error: {real_name!r} is an inline image in the message body, not a file attachment. "
+            "Pass include_inline=true only if the owner asked for the images in the email."
+        )
+    return check_listed_size(real_name, attachment.size)
 
 
 def save_bytes(data: bytes, file_name: str, mailbox: str) -> str:

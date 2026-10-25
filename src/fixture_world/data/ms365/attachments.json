@@ -21,6 +21,22 @@
       "contentId": "logo@cloudhost.example",
       "contentLocation": null,
       "contentBytes": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4P5MBAAQzAZncH4SNAAAAAElFTkSuQmCC"
+    },
+    {
+      "id": "AAMkAGZpeHR1cmUAATTACH03",
+      "lastModifiedDateTime": "2026-10-01T05:59:58Z",
+      "name": "Re: CloudHost contract renewal",
+      "contentType": null,
+      "size": 18432,
+      "isInline": false
+    },
+    {
+      "id": "AAMkAGZpeHR1cmUAATTACH04",
+      "lastModifiedDateTime": "2026-10-01T05:59:58Z",
+      "name": "CloudHost usage report.xlsx",
+      "contentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "size": 0,
+      "isInline": false
     }
   ]
 }

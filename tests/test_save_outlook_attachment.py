@@ -31,6 +31,12 @@ PDF_ID = "AAMkAGZpeHR1cmUAATTACH01"
 LOGO_ID = "AAMkAGZpeHR1cmUAATTACH02"
 PDF_NAME = "CH-2026-1044.pdf"
 LOGO_NAME = "cloudhost-logo.png"
+# Not files: an attached email and a cloud link, listed without `contentBytes` (the pinned
+# server strips `@odata.type`).
+ITEM_ID = "AAMkAGZpeHR1cmUAATTACH03"
+ITEM_NAME = "Re: CloudHost contract renewal"
+REFERENCE_ID = "AAMkAGZpeHR1cmUAATTACH04"
+REFERENCE_NAME = "CloudHost usage report.xlsx"
 
 
 def _seeded_bytes(attachment_id: str) -> bytes:
@@ -176,6 +182,43 @@ async def test_an_inline_attachment_is_refused_without_include_inline_and_saved_
 
     assert (agent_folder / "outlook" / LOGO_NAME).read_bytes() == _seeded_bytes(LOGO_ID)
     assert not saved.startswith("Error:")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("attachment_id", "file_name"), [(ITEM_ID, ITEM_NAME), (REFERENCE_ID, REFERENCE_NAME)])
+async def test_an_attached_email_or_a_cloud_link_is_refused_with_a_reason_and_writes_nothing(
+    tools, agent_folder, attachment_id, file_name
+):
+    result = await _save(tools, attachment_id=attachment_id, file_name=file_name)
+
+    assert result.startswith("Error:")
+    assert file_name in result
+    assert "only file attachments can be saved" in result
+    assert not (agent_folder / "outlook").exists() or not any((agent_folder / "outlook").iterdir())
+
+
+def _listed(content) -> dict[str, dict]:
+    text = content if isinstance(content, str) else "".join(block["text"] for block in content)
+    return {a["id"]: a for a in json.loads(text)["value"]}
+
+
+@pytest.mark.asyncio
+async def test_a_file_attachment_is_recognised_by_its_content_bytes_so_the_save_lists_without_select(tools):
+    # The pinned server strips `@odata.type`, so only `contentBytes` tells a file attachment
+    # apart. A `select` would drop it, and every attachment would be refused as not a file.
+    listed = _listed(await tools["ms365_list-mail-attachments"].ainvoke({"messageId": MESSAGE_ID}))
+    selected = _listed(
+        await tools["ms365_list-mail-attachments"].ainvoke(
+            {"messageId": MESSAGE_ID, "select": "id,name,size,isInline"}
+        )
+    )
+
+    assert all("@odata.type" not in a for a in listed.values())
+    assert "contentBytes" in listed[PDF_ID]
+    assert "contentBytes" not in listed[ITEM_ID]
+    assert "contentBytes" not in listed[REFERENCE_ID]
+    assert "contentBytes" not in selected[PDF_ID]
+    assert not (await _save(tools)).startswith("Error:")
 
 
 @pytest.mark.asyncio
