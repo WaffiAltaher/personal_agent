@@ -14,6 +14,9 @@ python -m agent.cli "<question>"
 # Log in to Google (Gmail/Calendar) when startup says the token is missing or dead
 python -m agent.auth.google
 
+# Log in to Claude Code (claude_code: models) when startup says it is not logged in
+claude auth login
+
 # Run evals against the Fixture world; compare two result files
 python -m agent.evals --model <provider:model> --judge-model <provider:model> [--repeats N]
 python -m agent.evals compare a.json b.json
@@ -26,7 +29,7 @@ uv run pytest tests/test_tools.py::test_read_file -v
 
 ## Architecture
 
-This is a personal data agent built on LangGraph with a ReAct (Reason + Act) loop. It connects to Microsoft 365 (Outlook mail/calendar/contacts, via the third-party `@softeria/ms-365-mcp-server`), Informer accounting (via the self-authored MCP server in `src/informer_mcp/`), Gmail, Google Calendar, local files, and web search (Tavily). The model is chosen by `MODEL_NAME` as `provider:model` (default `google_genai:gemini-3.8-flash`; `anthropic:` models also supported). Business vocabulary is in `GLOSSARY.md`.
+This is a personal data agent built on LangGraph with a ReAct (Reason + Act) loop. It connects to Microsoft 365 (Outlook mail/calendar/contacts, via the third-party `@softeria/ms-365-mcp-server`), Informer accounting (via the self-authored MCP server in `src/informer_mcp/`), Gmail, Google Calendar, local files, and web search (Tavily). The model is chosen by `MODEL_NAME` as `provider:model` (default `claude_code:claude-sonnet-5-5`, the owner's Claude subscription through the Claude Code CLI, ADR-016; `google_genai:` and `anthropic:` models also supported). Business vocabulary is in `GLOSSARY.md`.
 
 ### Core flow
 
@@ -50,7 +53,9 @@ CLI → graph.py (LangGraph) → agent_node (LLM) → human_review_node → tool
 
 **`src/agent/evals/`** — eval harness: scenarios over the Fixture world, trajectory metrics, RAGAS generation metrics, cost/latency, model-comparison reports.
 
-**`src/agent/config.py`** — Pydantic Settings loading from `.env`. Required: `GOOGLE_API_KEY`, `TAVILY_API_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`. Optional: `ANTHROPIC_API_KEY` (required for `anthropic:` models), `MS365_MCP_*`, `INFORMER_*`, `EVAL_JUDGE_MODEL`.
+**`src/agent/config.py`** — Pydantic Settings loading from `.env`. Required: `GOOGLE_API_KEY` (embeddings; use a key from a Google project with billing turned off), `TAVILY_API_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`. Optional: `ANTHROPIC_API_KEY` (required for `anthropic:` models), `CLAUDE_CODE_BINARY` and `CLAUDE_CODE_TIMEOUT_S` (`claude_code:` models), `MS365_MCP_*`, `INFORMER_*`, `EVAL_JUDGE_MODEL`.
+
+**`src/agent/auth/claude_code.py`** — Claude Code login check. With a `claude_code:` agent or judge model, real-mode CLI startup runs `claude auth status` and stops unless it is logged in with a claude.ai subscription, naming `claude auth login`. Tests never call the real `claude`: they point `CLAUDE_CODE_BINARY` at the stand-in `src/fixture_world/claude_code.py`, and `tests/conftest.py` sets it to a missing binary otherwise.
 
 **`src/agent/auth/google.py`** — OAuth2 for Gmail/Calendar. Real-mode CLI startup checks the token before the run; a missing or dead refresh token stops startup and names `python -m agent.auth.google` (the only command that opens a browser). Token saved to `credentials/token.json` and auto-refreshes while valid. Testing-mode refresh tokens expire seven days after issue, regardless of use.
 
@@ -66,7 +71,7 @@ Approval **fails closed**: every bound tool is classified read or Write action (
 ## Development notes
 
 - Python 3.13, managed with `uv`
-- Live credentials setup (Gemini, Anthropic, Informer, Azure/MS365 login, Langfuse): run `./scripts/setup_wizard.sh`
+- Live credentials setup (Claude Code login, Google key, optional Gemini/Anthropic, Informer, Azure/MS365 login, Langfuse): run `./scripts/setup_wizard.sh`
 - No linter is configured yet (pylint/flake8 disabled in `.vscode/settings.json`)
 - Langfuse traces to `http://localhost:3000` by default — needs a local Langfuse instance running
 - Google credentials file must be manually downloaded from GCP console and placed at `credentials/google_credentials.json`
