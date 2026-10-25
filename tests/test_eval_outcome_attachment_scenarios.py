@@ -10,12 +10,14 @@ import re
 
 import pytest
 from langchain_core.messages import AIMessage
+from langchain_core.utils.function_calling import convert_to_openai_tool
 
 import agent.graph as graph_module
 from agent.config import settings
 from agent.evals.harness import run_eval
 from agent.evals.outcome import score_outcome
 from agent.evals.scenarios import DEFAULT_DATASET, Dataset, Scenario, load_dataset
+from conftest import ScriptedChatModel
 
 DATASET = load_dataset(DEFAULT_DATASET)
 
@@ -208,3 +210,34 @@ def test_outlook_to_informer_chain_fails_on_wrong_upload_bytes_or_one_approval()
                              expected_bytes=expected, saved=saved, approvals=2).passed
     assert not score_outcome(scenario, [(OUTLOOK_PDF, OUTLOOK_PDF_BYTES)], final_answer="",
                              expected_bytes=expected, saved=saved, approvals=1).passed
+
+
+GMAIL_STAND_INS = {"search_gmail", "get_gmail_message", "save_gmail_attachment"}
+
+
+async def _offered_tools(scenario_id: str) -> set[str]:
+    """The tool names the eval run offers the model in this scenario."""
+    offered: set[str] = set()
+
+    class RecordingModel(ScriptedChatModel):
+        def bind_tools(self, tools, **kwargs):
+            offered.update(convert_to_openai_tool(t)["function"]["name"] for t in tools)
+            return self
+
+    await run_eval(
+        Dataset(format_version=1, dataset_version="test", scenarios=[_scenario(scenario_id)]),
+        model_name="scripted",
+        model_factory=lambda s: RecordingModel(messages=iter([_answer("Done.")])),
+    )
+    return offered
+
+
+@pytest.mark.asyncio
+async def test_the_gmail_stand_ins_are_offered_in_the_gmail_attachment_scenario():
+    assert GMAIL_STAND_INS <= await _offered_tools(GMAIL_SCENARIO)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scenario_id", [OUTLOOK_SCENARIO, CHAIN_SCENARIO, "inbox-logged-out"])
+async def test_the_gmail_stand_ins_are_not_offered_in_scenarios_that_dont_need_them(scenario_id):
+    assert not GMAIL_STAND_INS & await _offered_tools(scenario_id)
