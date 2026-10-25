@@ -33,6 +33,7 @@ dependencies = [
 
 [project.scripts]
 informer-mcp = "informer_mcp.server:main"
+fixture-claude-code = "fixture_world.claude_code:main"
 
 [dependency-groups]
 dev = [

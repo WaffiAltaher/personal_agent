@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     # Agent behaviour (sensible defaults for now)
     model_name: str = "google_genai:gemini-3.8-flash"  # provider:model, see agent/chat_model.py
     max_iterations: int = 10
+    # claude_code: models (agent/claude_code_model.py): the Claude Code CLI, and how long one call may take
+    claude_code_binary: str = "claude"
+    claude_code_timeout_s: float = 180
 
     # Memory layer
     sqlite_path: str = "data/episodic.db"
