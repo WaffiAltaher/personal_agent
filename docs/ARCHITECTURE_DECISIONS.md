@@ -310,6 +310,26 @@ Two plain tools were chosen over a hidden check that the Approval step calls bef
 
 ---
 
+## ADR-015: Outlook attachment saves go through an agent-side wrapper that confines the server's local-file write
+**Date:** 2026-10-25
+**Status:** Accepted
+
+**Context:** The owner wants the agent to save email attachments from Outlook and Gmail into its own folder, `~/Downloads/personal_agent`, with each mailbox writing only into its own subfolder. For Outlook, the pinned `@softeria/ms-365-mcp-server` already offers `download-bytes-to-file`. It writes Graph bytes to **any absolute path** the caller gives it, refuses an existing file, and is annotated `readOnlyHint` although it writes to disk, which is why it was kept out of the agent's tools. The Approval prompt shows a Write action's raw arguments (ADR-012). For the server's tool, those would be a Graph path and an output path, with nothing showing which attachment is being saved.
+
+**Decision:** The model never sees `download-bytes-to-file`. The agent exposes its own Write action, `ms365_save_attachment(message_id, attachment_id, file_name, include_inline=false)`. It looks the attachment up with `list-mail-attachments` and refuses unless `file_name` matches the real name. It then chooses the path itself, inside `outlook/`, and calls the server's tool with a temporary name, then applies the shared save rules (no overwrite, skip identical copies, `(1)`/`(2)` on a clash, 25 MB cap). The Gmail save follows the same contract and rules.
+
+**Reasoning:**
+- **Exposing the server's tool as a Write action guarded only by Approval** would leave the destination to the model and to the owner's reading of a path in every prompt.
+- **A Microsoft login of our own** for downloading would go against ADR-005: the server owns the Graph login.
+- **A required `file_name` argument** puts the real attachment name into the generic Approval prompt, without adding mailbox logic to the graph (ADR-012's reason for avoiding a private protocol between graph and server). The wrapper checks the name again at save time rather than trusting what Approval showed.
+
+**Consequences:**
+- The MS365 server's enabled tools now include `download-bytes-to-file`, and the loader must keep it unbound by name. A test pins this.
+- The save costs one extra Graph call (the attachment lookup) and a rename on disk.
+- If the server changes `download-bytes-to-file`'s contract, the wrapper is the one place to fix. Review it when bumping the pin.
+
+---
+
 <!-- Template for new decisions:
 
 ## ADR-XXX: [Title]

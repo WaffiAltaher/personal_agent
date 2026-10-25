@@ -45,7 +45,7 @@ _Avoid_: email (when unsent), message
 ## Agent actions
 
 **Write action**:
-Any tool call that changes data in an external system; it always needs the owner's approval first and is never retried automatically.
+Any tool call that changes data in an external system or on the owner's computer; it always needs the owner's approval first and is never retried automatically.
 _Avoid_: mutation, side effect
 
 **Approval**:
