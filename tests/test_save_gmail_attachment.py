@@ -30,6 +30,8 @@ CSV_ID = "3"
 PDF_NAME = "energy-bill-2026-10.pdf"
 LOGO_NAME = "logo.png"
 CSV_NAME = "meter-readings.csv"
+EMAIL_ID = "4"  # an attached email (message/rfc822): not a file
+EMAIL_NAME = "Your new contract.eml"
 
 
 def _seeded_message() -> dict:
@@ -192,6 +194,16 @@ async def test_an_inline_attachment_is_refused_without_include_inline_and_saved_
 
     assert (agent_folder / "gmail" / LOGO_NAME).read_bytes() == _seeded_bytes(LOGO_ID)
     assert not saved.startswith("Error:")
+
+
+@pytest.mark.asyncio
+async def test_an_attached_email_is_refused_with_a_reason_and_writes_nothing(tools, agent_folder):
+    result = await _save(tools, attachment_id=EMAIL_ID, file_name=EMAIL_NAME)
+
+    assert result.startswith("Error:")
+    assert EMAIL_NAME in result
+    assert "only file attachments can be saved" in result
+    assert not (agent_folder / "gmail").exists() or not any((agent_folder / "gmail").iterdir())
 
 
 @pytest.mark.asyncio

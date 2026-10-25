@@ -115,12 +115,32 @@
           "attachmentId": "ANGjdJ8fixtureCsv004",
           "size": 39
         }
+      },
+      {
+        "partId": "4",
+        "mimeType": "message/rfc822",
+        "filename": "Your new contract.eml",
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": "message/rfc822; name=\"Your new contract.eml\""
+          },
+          {
+            "name": "Content-Disposition",
+            "value": "attachment; filename=\"Your new contract.eml\""
+          }
+        ],
+        "body": {
+          "attachmentId": "ANGjdJ8fixtureEml004",
+          "size": 106
+        }
       }
     ],
     "attachmentData": {
       "ANGjdJ8fixturePdf004": "JVBERi0xLjQKJeLjz9MKMSAwIG9iajw8L1R5cGUvQ2F0YWxvZy9QYWdlcyAyIDAgUj4-ZW5kb2JqCjIgMCBvYmo8PC9UeXBlL1BhZ2VzL0tpZHNbMyAwIFJdL0NvdW50IDE-PmVuZG9iagozIDAgb2JqPDwvVHlwZS9QYWdlL1BhcmVudCAyIDAgUi9NZWRpYUJveFswIDAgNTk1IDg0Ml0-PmVuZG9iagolIEVuZXJnaWUgRGlyZWN0IC0gZW5lcmd5IGJpbGwgT2N0b2JlciAyMDI2IC0gRVVSIDg3LjQwCnRyYWlsZXI8PC9Sb290IDEgMCBSPj4KJSVFT0YK",
       "ANGjdJ8fixtureLogo004": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4P5MBAAQzAZncH4SNAAAAAElFTkSuQmCC",
-      "ANGjdJ8fixtureCsv004": "ZGF0ZSxrV2gKMjAyNi0wOS0wMSwyOTgKMjAyNi0xMC0wMSwzMTIK"
+      "ANGjdJ8fixtureCsv004": "ZGF0ZSxrV2gKMjAyNi0wOS0wMSwyOTgKMjAyNi0xMC0wMSwzMTIK",
+      "ANGjdJ8fixtureEml004": "RnJvbTogY29udHJhY3RzQGVuZXJnaWVkaXJlY3QuZXhhbXBsZQ0KU3ViamVjdDogWW91ciBuZXcgY29udHJhY3QNCg0KWW91ciBjb250cmFjdCBzdGFydHMgb24gMSBOb3ZlbWJlci4NCg"
     }
   }
 ]
