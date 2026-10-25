@@ -1,6 +1,6 @@
 # 03: Usage limit, timeout and CLI errors stop the run with a message
 
-**What to build:** When a Claude Code call can't produce a turn, the owner's run stops with a message they can act on, and the run can be resumed later. Nothing is retried, nothing falls back to an API key or another model, and nothing waits.
+**What to build:** When a Claude Code call can't produce a turn, the owner's run stops with a message they can act on. Nothing is retried, nothing falls back to an API key or another model, and nothing waits.
 
 **Blocked by:** 01
 
