@@ -3,6 +3,8 @@ cli.py — Entry point with Langfuse tracing wired in.
 
 Real-mode runs check the Google login before the agent starts. If Gmail or Calendar
 would need a new browser login, startup stops and names ``python -m agent.auth.google``.
+With a ``claude_code:`` agent or judge model they also check the Claude Code login, and stop
+naming ``claude auth login`` unless it is a claude.ai login.
 Use ``--fixtures`` for the seeded Fixture world (no Google login check).
 """
 
@@ -14,6 +16,7 @@ from contextlib import nullcontext
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langfuse import propagate_attributes
 from langgraph.errors import GraphRecursionError
+from agent.auth.claude_code import ClaudeCodeLoginRequired, check_claude_code_login
 from agent.auth.google import GoogleLoginRequired, check_google_login
 from agent.chat_model import ModelConfigError, create_chat_model
 from agent.conversation import run_conversation
@@ -155,6 +158,13 @@ async def main():
         except FileNotFoundError as exc:
             print(f"Cannot start: {exc}")
             sys.exit(1)
+        # A claude_code: agent or judge model runs on the Claude Code login; check it the same way.
+        if any((m or "").startswith("claude_code:") for m in (settings.model_name, settings.eval_judge_model)):
+            try:
+                check_claude_code_login(settings.claude_code_binary)
+            except (ClaudeCodeLoginRequired, FileNotFoundError) as exc:
+                print(f"Cannot start: {exc}")
+                sys.exit(1)
 
     # Each CLI run gets a fresh thread_id so runs are independent.
     # The checkpointer uses this to namespace the checkpoint.
