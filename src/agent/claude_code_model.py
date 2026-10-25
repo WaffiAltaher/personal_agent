@@ -11,6 +11,7 @@ environment so it can never bill an API key.
 
 import functools
 import json
+import logging
 import os
 import re
 import signal
@@ -25,6 +26,8 @@ from langchain_core.messages.ai import UsageMetadata, add_usage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import Runnable
 from langchain_core.utils.function_calling import convert_to_openai_tool
+
+logger = logging.getLogger(__name__)
 
 
 class ClaudeCodeError(RuntimeError):
@@ -97,11 +100,14 @@ class ClaudeCodeChatModel(BaseChatModel):
                 message = _parse_reply(results[0], tools)
             except ClaudeCodeError as problem:
                 # One re-ask, telling Claude what was wrong; a second invalid reply stops the run.
+                logger.warning("Re-asking Claude Code: %s", problem)
                 results.append(self._run(f"{prompt}\n\n{_re_ask(problem)}", conversation))
                 message = _parse_reply(results[1], tools)
         # Every CLI call this turn made counts, the re-ask included; the model is the final call's.
         message.usage_metadata = functools.reduce(add_usage, (_usage(r.get("usage") or {}) for r in results))
         message.response_metadata = _reported_model(results[-1])
+        # The context check needs the final call's prompt size, not the sum; the usage stays the sum.
+        message.response_metadata["prompt_input_tokens"] = _usage(results[-1].get("usage") or {})["input_tokens"]
         return ChatResult(generations=[ChatGeneration(message=message)])
 
 
@@ -118,7 +124,7 @@ def _reply_contract(tools: list[dict]) -> str:
         "\n\nThe tools below are run by the agent, not by you. Reply with exactly one JSON object and "
         'nothing else, either an answer: {"kind": "answer", "text": "..."} or tool calls for the agent '
         'to run (one or several): {"kind": "tool_calls", "calls": [{"name": "...", "args": {...}}]}. '
-        "Each call's args must match that tool's parameters schema.\n\nTools:\n" + json.dumps(tools, indent=1)
+        "Each call's args must match that tool's parameters schema.\n\nTools:\n" + json.dumps(tools, separators=(",", ":"))
     )
 
 
@@ -178,7 +184,7 @@ def _parse_reply(result: dict, tools: list[dict]) -> AIMessage:
         raise ClaudeCodeError(f"Claude's reply came after {result['num_turns']} turns: it tried to use a tool itself.")
     text = result["result"]
     try:
-        reply = json.loads(text)
+        reply = json.loads(_unfenced(text))
     except json.JSONDecodeError:
         reply = None
     if isinstance(reply, dict) and reply.get("kind") == "answer" and isinstance(reply.get("text"), str):
@@ -192,6 +198,15 @@ def _parse_reply(result: dict, tools: list[dict]) -> AIMessage:
             {"name": c["name"], "args": c["args"], "id": f"call_{uuid.uuid4().hex}"} for c in reply["calls"]
         ])
     raise ClaudeCodeError(f"Claude's reply is not an answer or tool calls in the agreed JSON shape: {text[:200]!r}")
+
+
+# One whole reply inside one Markdown code fence, ```json or ```; anything around it stays invalid.
+_FENCED = re.compile(r"\A\s*```(?:json)?[ \t]*\n(.*)\n[ \t]*```\s*\Z", re.DOTALL)
+
+
+def _unfenced(text: str) -> str:
+    """The reply without its code fence, if it is exactly one fenced block (ADR-016 amendment)."""
+    return fenced[1] if (fenced := _FENCED.match(text)) else text
 
 
 def _is_call(call) -> bool:

@@ -355,6 +355,7 @@ Two plain tools were chosen over a hidden check that the Approval step calls bef
 - Tests drive a stand-in `claude` executable at the subprocess boundary (ADR-011), selected with `CLAUDE_CODE_BINARY`. One `live` test calls the real CLI and guards the isolated context size, since a Claude Code update could start loading the owner's setup again.
 - The wrapper depends on Claude Code's CLI flags and its `--output-format json` shape. Recheck them when Claude Code updates.
 - Embeddings still need `GOOGLE_API_KEY`: neither CLI offers them.
+- Amended 2026-10-25 (ticket 09): a reply that is exactly one JSON object inside one Markdown code fence (```json or ```) is accepted like an unfenced one, because Sonnet fenced most replies and each re-ask doubled the turn's cost; anything else around the object (a stray tag, prose) is still invalid and re-asked.
 
 ---
 

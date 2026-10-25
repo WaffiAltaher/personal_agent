@@ -29,7 +29,7 @@ from agent.evals.generation import ChatModelJudge
 from agent.graph import build_graph
 from agent.memory.run_log import build_run_record
 from agent.model_binding import bind_agent_tools
-from agent.tools.classification import write_action
+from agent.tools.classification import read_tool, write_action
 from fixture_world import claude_code as fake_cli
 
 REPO = Path(__file__).resolve().parents[1]
@@ -131,6 +131,18 @@ def test_bound_tools_go_in_with_their_descriptions_and_argument_schemas(cli):
         assert text in prompt
 
 
+def test_bound_tools_go_in_as_compact_json(cli):
+    # Real-mode tool definitions are large (ticket 09): indentation alone would cost thousands of tokens.
+    cli.script([json.dumps({"kind": "answer", "text": "ok"})])
+
+    with_tools().invoke("hi")
+
+    listing = system_prompt(cli.calls()[0]).rsplit("Tools:\n", 1)[1]
+    tools = json.loads(listing)
+    assert [t["name"] for t in tools] == ["search_mail", "send_mail"]
+    assert listing == json.dumps(tools, separators=(",", ":"))  # no whitespace between tokens
+
+
 def test_an_answer_reply_becomes_an_ai_message(cli):
     cli.script([json.dumps({"kind": "answer", "text": "No mail from Bob."})])
 
@@ -160,7 +172,9 @@ ANSWER = json.dumps({"kind": "answer", "text": "No mail from Bob."})
 INVALID_REPLIES = {
     "not json": "not json",
     "a json array": "[]",
-    "fenced json": f"```json\n{ANSWER}\n```",  # the contract asks for the object and nothing else
+    # A fenced object is accepted only on its own: as really seen (2026-10-25), with a stray tag before it.
+    "fenced json after a stray tag": f"<name>search_gmail</name>\n```json\n{ANSWER}\n```",
+    "fenced json after prose": f"Here you go:\n```json\n{ANSWER}\n```",
     "neither shape": json.dumps({"kind": "shrug"}),
     "an answer without text": json.dumps({"kind": "answer"}),
     "an unknown tool": json.dumps({"kind": "tool_calls", "calls": [{"name": "delete_everything", "args": {}}]}),
@@ -170,6 +184,16 @@ INVALID_REPLIES = {
     # Claude tried a tool of its own: the CLI took more than one turn, even though the final text parses.
     "a native tool attempt": {"result": ANSWER, "num_turns": 3},
 }
+
+
+@pytest.mark.parametrize("fence", ["```json", "```"])
+def test_one_object_in_one_code_fence_is_accepted_without_a_re_ask(cli, fence):
+    cli.script([f"{fence}\n{ANSWER}\n```"])
+
+    reply = with_tools().invoke("Any mail from Bob?")
+
+    assert reply.content == "No mail from Bob."
+    assert len(cli.calls()) == 1
 
 
 @pytest.mark.parametrize("invalid", INVALID_REPLIES.values(), ids=INVALID_REPLIES.keys())
@@ -200,6 +224,42 @@ def test_the_re_ask_tells_claude_what_was_wrong(cli):
     assert "delete_everything" not in system_prompt(first)
     assert "delete_everything" in system_prompt(second)
     assert sent_messages(second) == sent_messages(first)  # the owner's conversation itself is unchanged
+
+
+def test_a_re_ask_logs_its_reason_as_a_warning(cli, caplog):
+    cli.script([INVALID_REPLIES["an unknown tool"], ANSWER])
+
+    with caplog.at_level("WARNING"):
+        with_tools().invoke("Any mail from Bob?")
+
+    [warning] = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert "delete_everything" in warning.getMessage()
+
+
+@pytest.mark.asyncio
+async def test_the_context_check_after_a_re_asked_turn_sees_the_final_call_s_prompt_size(cli, caplog, monkeypatch):
+    # Each call's prompt is 60k tokens: the turn's usage sums to 120k, but the context is 60k.
+    monkeypatch.setattr(settings, "context_clear_threshold", 100_000)
+    prompt_of_60k = {"input_tokens": 1_000, "output_tokens": 10, "cache_read_input_tokens": 59_000}
+    cli.script([
+        {"result": "not json", "usage": prompt_of_60k},
+        {"result": json.dumps({"kind": "tool_calls", "calls": [{"name": "search_mail", "args": {"query": "Bob"}}]}),
+         "usage": prompt_of_60k},
+        {"result": ANSWER, "usage": prompt_of_60k},
+    ])
+    tools = [read_tool(search_mail)]
+    graph = build_graph(checkpointer=InMemorySaver(), tools=tools, model=claude_code())
+
+    with caplog.at_level("WARNING", logger="agent.graph"):
+        done = await run_conversation(
+            graph, {"configurable": {"thread_id": "t-context"}}, tools=tools, user_message="Any mail from Bob?",
+        )
+
+    assert done["messages"][-1].content == "No mail from Bob."
+    assert not [r for r in caplog.records if "clear threshold" in r.getMessage()]
+    # The run log and cost still count both calls of the re-asked turn.
+    first_turn = next(m for m in done["messages"] if isinstance(m, AIMessage))
+    assert first_turn.usage_metadata["input_tokens"] == 120_000
 
 
 def test_a_re_asked_turn_counts_the_usage_of_both_cli_calls(cli):

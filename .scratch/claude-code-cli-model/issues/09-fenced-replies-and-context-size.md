@@ -4,14 +4,14 @@
 
 **Blocked by:** 01, 02, 04
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] A reply that is exactly one JSON object inside one Markdown code fence (```json or ```) is accepted like an unfenced one; anything else around it (a stray `<name>…</name>` tag, prose) is still invalid and re-asked
-- [ ] The context check after a `claude_code:` turn uses the final CLI call's prompt size, not the usage summed across a re-ask; the run log, cost and eval efficiency still count every call
-- [ ] The bound tools go into the prompt as compact JSON
-- [ ] Every re-ask logs its reason (the validation error) as a warning
-- [ ] The live test still passes (run it once)
-- [ ] The whole test suite passes
+- [x] A reply that is exactly one JSON object inside one Markdown code fence (```json or ```) is accepted like an unfenced one; anything else around it (a stray `<name>…</name>` tag, prose) is still invalid and re-asked
+- [x] The context check after a `claude_code:` turn uses the final CLI call's prompt size, not the usage summed across a re-ask; the run log, cost and eval efficiency still count every call
+- [x] The bound tools go into the prompt as compact JSON
+- [x] Every re-ask logs its reason (the validation error) as a warning
+- [x] The live test still passes (run it once)
+- [x] The whole test suite passes
 
 Traps:
 - ADR-016 and ticket 02 decided fences are malformed. This ticket reverses that for one cleanly fenced object only; record the change in ADR-016.
