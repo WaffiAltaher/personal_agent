@@ -9,14 +9,17 @@ process runs from an empty temporary directory, and the API-key variables are re
 environment so it can never bill an API key.
 """
 
+import functools
 import json
 import os
 import subprocess
 import tempfile
 import uuid
 
+import jsonschema
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
+from langchain_core.messages.ai import UsageMetadata, add_usage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import Runnable
 from langchain_core.utils.function_calling import convert_to_openai_tool
@@ -66,10 +69,22 @@ class ClaudeCodeChatModel(BaseChatModel):
         self, messages: list[BaseMessage], stop=None, run_manager=None, tools: list[dict] | None = None, **kwargs,
     ) -> ChatResult:
         system = "\n\n".join(m.text for m in messages if isinstance(m, SystemMessage))
-        conversation = [_entry(m) for m in messages if not isinstance(m, SystemMessage)]
+        conversation = json.dumps([_entry(m) for m in messages if not isinstance(m, SystemMessage)])
         rules = _CONVERSATION_RULES + (_reply_contract(tools) if tools else "")
-        result = self._run("\n\n".join(filter(None, [system, rules])), json.dumps(conversation))
-        message = _parse_reply(result["result"]) if tools else AIMessage(content=result["result"])
+        prompt = "\n\n".join(filter(None, [system, rules]))
+        results = [self._run(prompt, conversation)]
+        if not tools:
+            message = AIMessage(content=results[0]["result"])
+        else:
+            try:
+                message = _parse_reply(results[0], tools)
+            except ClaudeCodeError as problem:
+                # One re-ask, telling Claude what was wrong; a second invalid reply stops the run.
+                results.append(self._run(f"{prompt}\n\n{_re_ask(problem)}", conversation))
+                message = _parse_reply(results[1], tools)
+        # Every CLI call this turn made counts, the re-ask included; the model is the final call's.
+        message.usage_metadata = functools.reduce(add_usage, (_usage(r.get("usage") or {}) for r in results))
+        message.response_metadata = _reported_model(results[-1])
         return ChatResult(generations=[ChatGeneration(message=message)])
 
 
@@ -90,8 +105,16 @@ def _reply_contract(tools: list[dict]) -> str:
     )
 
 
-def _parse_reply(text: str) -> AIMessage:
+def _re_ask(problem: ClaudeCodeError) -> str:
+    return f"Your previous reply to this conversation was invalid: {problem} Reply again, following the rules above."
+
+
+def _parse_reply(result: dict, tools: list[dict]) -> AIMessage:
     """The AI message for a reply in the contract's shape; ClaudeCodeError for anything else."""
+    # More than one turn means Claude tried a tool of its own, however the final text looks (ADR-016).
+    if result.get("num_turns", 1) > 1:
+        raise ClaudeCodeError(f"Claude's reply came after {result['num_turns']} turns: it tried to use a tool itself.")
+    text = result["result"]
     try:
         reply = json.loads(text)
     except json.JSONDecodeError:
@@ -100,6 +123,9 @@ def _parse_reply(text: str) -> AIMessage:
         return AIMessage(content=reply["text"])
     if isinstance(reply, dict) and reply.get("kind") == "tool_calls" and isinstance(reply.get("calls"), list) \
             and reply["calls"] and all(_is_call(c) for c in reply["calls"]):
+        schemas = {t["name"]: t["parameters"] for t in tools}
+        for call in reply["calls"]:
+            _check_call(call, schemas)
         return AIMessage(content="", tool_calls=[
             {"name": c["name"], "args": c["args"], "id": f"call_{uuid.uuid4().hex}"} for c in reply["calls"]
         ])
@@ -108,6 +134,42 @@ def _parse_reply(text: str) -> AIMessage:
 
 def _is_call(call) -> bool:
     return isinstance(call, dict) and isinstance(call.get("name"), str) and isinstance(call.get("args"), dict)
+
+
+def _check_call(call: dict, schemas: dict[str, dict]) -> None:
+    if call["name"] not in schemas:
+        raise ClaudeCodeError(f"Claude's reply calls {call['name']!r}, which is not one of the tools.")
+    try:
+        jsonschema.validate(call["args"], schemas[call["name"]])
+    except jsonschema.ValidationError as e:
+        raise ClaudeCodeError(f"Claude's reply calls {call['name']!r} with invalid args: {e.message}") from None
+
+
+def _usage(usage: dict) -> UsageMetadata:
+    """The CLI's token usage in LangChain's shape: input counts the cache reads and writes, as pricing expects.
+
+    The CLI's own cost figures (total_cost_usd, costUSD) are never used; cost comes from the price table."""
+    cache_read = usage.get("cache_read_input_tokens") or 0
+    cache_write = usage.get("cache_creation_input_tokens") or 0
+    input_tokens = (usage.get("input_tokens") or 0) + cache_read + cache_write
+    output_tokens = usage.get("output_tokens") or 0
+    by_ttl = usage.get("cache_creation") or {}
+    ttl = {k: by_ttl.get(k) or 0 for k in ("ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens")}
+    return UsageMetadata(
+        input_tokens=input_tokens, output_tokens=output_tokens, total_tokens=input_tokens + output_tokens,
+        input_token_details={"cache_read": cache_read, "cache_creation": cache_write - sum(ttl.values()), **ttl},
+        output_token_details={"reasoning": (usage.get("output_tokens_details") or {}).get("thinking_tokens") or 0},
+    )
+
+
+def _reported_model(result: dict) -> dict:
+    """{"model_name": the model the CLI reports it ran} (the most used, if several), or {} if none.
+
+    Pricing reads this, never the alias or the configured name: `sonnet` has no price-table row."""
+    model_usage = result.get("modelUsage") or {}
+    if not model_usage:
+        return {}
+    return {"model_name": max(model_usage, key=lambda m: (model_usage[m] or {}).get("outputTokens") or 0)}
 
 
 def _entry(message: BaseMessage) -> dict:
