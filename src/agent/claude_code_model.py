@@ -12,9 +12,12 @@ environment so it can never bill an API key.
 import functools
 import json
 import os
+import re
+import signal
 import subprocess
 import tempfile
 import uuid
+from datetime import datetime
 
 import jsonschema
 from langchain_core.language_models import BaseChatModel
@@ -52,10 +55,20 @@ class ClaudeCodeChatModel(BaseChatModel):
         ]
         env = {k: v for k, v in os.environ.items() if k not in _REMOVED_ENV}
         with tempfile.TemporaryDirectory(prefix="claude-code-call-") as cwd:
-            done = subprocess.run(
-                args, input=stdin, capture_output=True, text=True, env=env, cwd=cwd, timeout=self.timeout_s,
+            # Its own process group, so a timeout kills the CLI and anything it started.
+            process = subprocess.Popen(
+                args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                env=env, cwd=cwd, start_new_session=True,
             )
-        return json.loads(done.stdout)
+            try:
+                stdout, stderr = process.communicate(stdin, timeout=self.timeout_s)
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.communicate()
+                raise ClaudeCodeError(
+                    f"Claude Code did not answer within {self.timeout_s:g} s; the run is saved and can be resumed."
+                ) from None
+        return _checked(_result(process.returncode, stdout, stderr))
 
     def bind_tools(self, tools, **kwargs) -> Runnable:
         """Bind tools as {name, description, parameters}; they go into the prompt, not to the CLI."""
@@ -103,6 +116,48 @@ def _reply_contract(tools: list[dict]) -> str:
         'to run (one or several): {"kind": "tool_calls", "calls": [{"name": "...", "args": {...}}]}. '
         "Each call's args must match that tool's parameters schema.\n\nTools:\n" + json.dumps(tools, indent=1)
     )
+
+
+def _result(exit_code: int, stdout: str, stderr: str) -> dict:
+    """The CLI's JSON result; ClaudeCodeError with the CLI's own message if there is none."""
+    # An unknown model prints a "[claude-code:unrecognized_model] {...}" line before its result.
+    for line in stdout.splitlines():
+        if line.startswith("[claude-code:"):
+            raise ClaudeCodeError(f"Claude Code stopped: {line}")
+    try:
+        result = json.loads(stdout)
+    except json.JSONDecodeError:
+        result = None
+    if isinstance(result, dict) and (exit_code == 0 or result.get("is_error")):
+        return result  # an error result exits non-zero too; _checked gives its message
+    own_message = (stderr.strip() or stdout.strip() or "no output")[:500]
+    if exit_code != 0:
+        raise ClaudeCodeError(f"Claude Code exited with status {exit_code}: {own_message}")
+    raise ClaudeCodeError(f"Claude Code printed no JSON result: {own_message}")
+
+
+def _checked(result: dict) -> dict:
+    """The CLI's result if it is a reply; ClaudeCodeError with an actionable message if not.
+
+    The usage-limit result has not been seen yet (ADR-016). It is recognised from an error result
+    that is a 429 or speaks of a usage limit; pin the real text in the stand-in the first time it happens."""
+    if not result.get("is_error"):
+        return result
+    text = str(result.get("result") or result.get("subtype") or "an error result with no message")
+    if result.get("api_error_status") == 429 or re.search(r"\blimit\b", text, re.IGNORECASE):
+        raise ClaudeCodeError(
+            f"Claude subscription usage limit reached; resets at {_reset_time(text)}. "
+            "The run is saved and can be resumed."
+        )
+    raise ClaudeCodeError(f"Claude Code returned an error: {text}")
+
+
+def _reset_time(text: str) -> str:
+    if epoch := re.search(r"\|(\d{9,})\s*$", text):  # older wording: "Claude AI usage limit reached|<epoch>"
+        return datetime.fromtimestamp(int(epoch[1])).astimezone().strftime("%Y-%m-%d %H:%M %Z")
+    if resets := re.search(r"\bresets?\s+(?:at\s+)?(.+?)\.?\s*$", text, re.IGNORECASE):
+        return resets[1]
+    return "an unknown time"
 
 
 def _re_ask(problem: ClaudeCodeError) -> str:

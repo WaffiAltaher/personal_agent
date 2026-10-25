@@ -9,6 +9,7 @@ scripted result. The wrapper's process, environment and JSON in and out all run 
 
 import json
 import os
+import time
 from datetime import date
 from pathlib import Path
 
@@ -353,3 +354,89 @@ def test_eval_efficiency_prices_a_claude_code_run_by_the_model_the_cli_ran(cli, 
 
     assert list(run.by_model) == ["claude-sonnet-5-5"]
     assert run.cost_usd == pytest.approx(SONNET_CALL_COST)
+
+
+# Nobody has seen the real usage-limit result yet: these are guesses from the known result fields
+# (is_error, api_error_status) and earlier Claude Code wording. Pin the real one here when it happens.
+USAGE_LIMITS = {
+    "resets wording": ({"is_error": True, "api_error_status": 429,
+                        "result": "You've hit your limit · resets 3pm (Europe/Amsterdam)"}, "3pm (Europe/Amsterdam)"),
+    "epoch wording": ({"is_error": True, "result": "Claude AI usage limit reached|1761404400"}, "2025-10-25 15:00 UTC"),
+    "no reset time": ({"is_error": True, "api_error_status": 429, "result": "Usage limit reached."}, "an unknown time"),
+}
+
+
+@pytest.mark.parametrize("reply,resets", USAGE_LIMITS.values(), ids=USAGE_LIMITS.keys())
+def test_a_usage_limit_stops_with_when_it_resets(cli, monkeypatch, reply, resets):
+    monkeypatch.setenv("TZ", "UTC")
+    time.tzset()
+    cli.script([reply, ANSWER])
+
+    with pytest.raises(ClaudeCodeError) as stop:
+        with_tools().invoke("Any mail from Bob?")
+
+    assert str(stop.value) == (
+        f"Claude subscription usage limit reached; resets at {resets}. The run is saved and can be resumed."
+    )
+    assert len(cli.calls()) == 1  # not retried, and no other model asked
+
+
+UNKNOWN_MODEL = '[claude-code:unrecognized_model] {"model":"sonet"}'
+
+CLI_ERRORS = {
+    "an error result": ({"is_error": True, "subtype": "error_during_execution", "result": "Overloaded"}, "Overloaded"),
+    "a non-zero exit": ({"exit_code": 1, "stdout": "", "stderr": "Error: not logged in\n"}, "Error: not logged in"),
+    "unparseable output": ({"stdout": "Segmentation fault"}, "Segmentation fault"),
+    "an unknown model": ({"stdout": f"{UNKNOWN_MODEL}\n" + json.dumps(fake_cli._success(""))}, UNKNOWN_MODEL),
+}
+
+
+@pytest.mark.parametrize("reply,message", CLI_ERRORS.values(), ids=CLI_ERRORS.keys())
+def test_a_cli_error_stops_with_the_cli_s_own_message(cli, reply, message):
+    cli.script([reply, ANSWER])
+
+    with pytest.raises(ClaudeCodeError) as stop:
+        with_tools().invoke("Any mail from Bob?")
+
+    assert message in str(stop.value)
+    assert len(cli.calls()) == 1  # not retried, and no other model asked
+
+
+@pytest.mark.asyncio
+async def test_after_a_usage_limit_stop_the_thread_resumes_from_its_checkpoint(cli):
+    cli.script([USAGE_LIMITS["resets wording"][0], ANSWER])
+    tools = [search_mail]
+    graph = build_graph(checkpointer=InMemorySaver(), tools=tools, model=claude_code())
+    config = {"configurable": {"thread_id": "t-usage-limit"}}
+
+    with pytest.raises(ClaudeCodeError, match="usage limit reached"):
+        await run_conversation(graph, config, tools=tools, user_message="Any mail from Bob?")
+    done = await graph.ainvoke(None, config=config)  # later, once the limit has reset
+
+    assert done["messages"][-1].content == "No mail from Bob."
+    assert [m.content for m in done["messages"] if isinstance(m, HumanMessage)] == ["Any mail from Bob?"]
+    assert sent_messages(cli.calls()[1]) == sent_messages(cli.calls()[0])  # the same turn, asked again
+
+
+def running(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def test_a_timeout_kills_the_cli_and_what_it_started_and_stops(cli, tmp_path):
+    cli.script([{"hang": True}, ANSWER])
+
+    with pytest.raises(ClaudeCodeError) as stop:
+        with_tools(claude_code(claude_code_timeout_s=2)).invoke("Any mail from Bob?")
+
+    assert str(stop.value) == "Claude Code did not answer within 2 s; the run is saved and can be resumed."
+    assert len(cli.calls()) == 1  # not retried, and no other model asked
+    pids = fake_cli.hung_pids(tmp_path / "calls.jsonl")
+    assert len(pids) == 2  # the stand-in and the child it started
+    deadline = time.monotonic() + 5  # an orphan is reaped by init a moment after it dies
+    while any(running(p) for p in pids) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not any(running(p) for p in pids)

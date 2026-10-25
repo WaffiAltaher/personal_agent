@@ -10,6 +10,9 @@ with `recorded_calls()`. It then prints the next scripted reply from the JSON li
 named by FIXTURE_WORLD_CLAUDE_CODE_REPLIES, the n-th call printing the n-th reply. A reply is
 the result text, or a dict of fields laid over the CLI's success object (as Claude Code
 2.1.310 prints it). For `claude auth status` the reply is the status JSON, printed as is.
+A dict reply may instead script a failure: {"hang": true} never answers (see `hung_pids()`), and
+"stdout", "stderr" and "exit_code" print raw output and set the exit status. The usage-limit
+result has not been seen yet; pin its real text in the tests the first time it happens.
 
 Installed as the `fixture-claude-code` script.
 """
@@ -17,7 +20,9 @@ Installed as the `fixture-claude-code` script.
 import json
 import os
 import shutil
+import subprocess
 import sys
+import time
 from pathlib import Path
 
 CALLS_ENV = "FIXTURE_WORLD_CLAUDE_CODE_CALLS"
@@ -37,6 +42,12 @@ def recorded_calls(path: Path) -> list[dict]:
     if not path.exists():
         return []
     return [json.loads(line) for line in path.read_text().splitlines() if line]
+
+
+def hung_pids(calls_path: Path) -> list[int]:
+    """Process IDs of a hung call (the stand-in and the child it started), or [] if none hung."""
+    path = calls_path.with_suffix(".hung")
+    return json.loads(path.read_text()) if path.exists() else []
 
 
 def _success(result: str) -> dict:
@@ -70,7 +81,17 @@ def main() -> None:
         return
     if isinstance(reply, str):
         reply = {"result": reply}
-    print(json.dumps({**_success(""), **reply}))
+    if reply.get("hang"):
+        # Never answers, like a stuck CLI that has started a child of its own; `hung_pids()` reads both.
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"])
+        calls_path.with_suffix(".hung").write_text(json.dumps([os.getpid(), child.pid]))
+        time.sleep(600)
+    # Failures: "stdout" is printed as is instead of a result, "stderr" goes to standard error,
+    # "exit_code" is the exit status.
+    sys.stderr.write(reply.pop("stderr", ""))
+    exit_code = reply.pop("exit_code", 0)
+    print(reply.pop("stdout") if "stdout" in reply else json.dumps({**_success(""), **reply}))
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":
