@@ -91,6 +91,7 @@ async def test_an_identical_repeat_writes_nothing_and_returns_the_existing_path(
 
     result = await _save(tools)
 
+    assert result.startswith("NOT DOWNLOADED: ")  # its own first line, so the owner notices
     assert "already saved as" in result.lower()
     assert str(agent_folder / "outlook" / PDF_NAME) in result
     assert [p.name for p in (agent_folder / "outlook").iterdir()] == [PDF_NAME]

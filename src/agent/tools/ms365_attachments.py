@@ -58,6 +58,9 @@ are refused.
 This tool requires human approval before execution (it is a Write action).
 
 On success returns the full path of the saved file and its size.
+If the same file is already there, returns a first line beginning with
+"NOT DOWNLOADED:"; start your answer with that line, on its own line and
+in capitals, so the owner sees that nothing was downloaded.
 On failure returns a string beginning with "Error:".
 """.strip()
 

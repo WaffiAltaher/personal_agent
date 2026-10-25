@@ -97,6 +97,7 @@ async def test_an_identical_repeat_writes_nothing_and_returns_the_existing_path(
 
     result = await _save(tools)
 
+    assert result.startswith("NOT DOWNLOADED: ")  # its own first line, so the owner notices
     assert "already saved as" in result.lower()
     assert str(agent_folder / "gmail" / PDF_NAME) in result
     assert [p.name for p in (agent_folder / "gmail").iterdir()] == [PDF_NAME]
@@ -128,6 +129,7 @@ async def test_a_copy_already_saved_under_a_numbered_name_is_found(tools, agent_
 
     result = await _save(tools)
 
+    assert result.startswith("NOT DOWNLOADED: ")  # its own first line, so the owner notices
     assert "already saved as" in result.lower()
     assert str(gmail / "energy-bill-2026-10 (1).pdf") in result
     assert {p.name for p in gmail.iterdir()} == {PDF_NAME, "energy-bill-2026-10 (1).pdf"}

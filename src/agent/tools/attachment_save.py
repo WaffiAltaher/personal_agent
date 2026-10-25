@@ -7,7 +7,7 @@ A save goes into one mailbox's subfolder of the agent folder (`gmail/`, `outlook
   - the file is named with the attachment's own name, reduced to a bare name
   - the final path always resolves inside the mailbox's subfolder
   - identical bytes already saved in the same name family (`invoice.pdf`,
-    `invoice (1).pdf`, ...) write nothing: "Already saved as <path>"
+    `invoice (1).pdf`, ...) write nothing: "NOT DOWNLOADED: ..." then "Already saved as <path>"
   - otherwise the first free name in the family is used; nothing is ever overwritten
   - files over 25 MB are refused
 
@@ -142,7 +142,10 @@ def place_file(temporary: Path, file_name: str, mailbox: str) -> str:
             name = bare_name(file_name)
             existing = _identical_in_family(temporary, folder, name)
             if existing is not None:
-                return f"Already saved as {existing} ({size} bytes); nothing was written."
+                return (
+                    "NOT DOWNLOADED: this file was already saved, so nothing new was written.\n"
+                    f"Already saved as {existing} ({size} bytes)."
+                )
             for candidate in _family_names(name):
                 target = folder / candidate
                 if not target.resolve().is_relative_to(folder.resolve()):
