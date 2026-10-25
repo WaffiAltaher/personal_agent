@@ -71,8 +71,12 @@ def _text(message: ToolMessage) -> str:
 
 async def _call(tool: BaseTool, args: dict) -> tuple[bool, str]:
     """Call a server tool; (succeeded, its text)."""
-    message = await tool.ainvoke({"type": "tool_call", "id": f"call-{uuid.uuid4().hex}", "name": tool.name,
-                                  "args": args})
+    message = await tool.ainvoke({
+        "type": "tool_call",
+        "id": f"call-{uuid.uuid4().hex}",
+        "name": tool.name,
+        "args": args,
+    })
     return message.status != "error", _text(message)
 
 
@@ -87,8 +91,13 @@ def _is_file_attachment(attachment: dict) -> bool:
     return "contentBytes" in attachment
 
 
-async def _save(tools: Mapping[str, BaseTool], message_id: str, attachment_id: str, file_name: str,
-                include_inline: bool) -> str:
+async def _save(
+    tools: Mapping[str, BaseTool],
+    message_id: str,
+    attachment_id: str,
+    file_name: str,
+    include_inline: bool,
+) -> str:
     listed_ok, listed = await _call(tools[LIST_TOOL], {"messageId": message_id})
     if not listed_ok:
         return f"Error: could not list the attachments of message {message_id}: {listed}"
@@ -120,8 +129,9 @@ async def _save(tools: Mapping[str, BaseTool], message_id: str, attachment_id: s
 def build_save_attachment(name: str, tools: Mapping[str, BaseTool]) -> BaseTool:
     """The model-facing save tool, over the server's list-mail-attachments and download-bytes-to-file."""
 
-    async def save_attachment(message_id: str, attachment_id: str, file_name: str,
-                              include_inline: bool = False) -> str:
+    async def save_attachment(
+        message_id: str, attachment_id: str, file_name: str, include_inline: bool = False
+    ) -> str:
         try:
             return await _save(tools, message_id, attachment_id, file_name, include_inline)
         except Exception as e:
