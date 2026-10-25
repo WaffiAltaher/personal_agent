@@ -21,7 +21,7 @@ import agent.cli as cli
 
 
 @pytest.fixture
-def run_cli(monkeypatch, scripted_model):
+def run_cli(monkeypatch, scripted_model, startup_login_checks_pass):
     """Run the CLI's main() with the given arguments; returns what the run saw."""
     seen = {"system": [], "env_today_at_tool_load": [], "logged_to_memory": []}
 
@@ -38,8 +38,6 @@ def run_cli(monkeypatch, scripted_model):
         yield InMemorySaver()
 
     monkeypatch.setattr(cli, "create_chat_model", lambda: scripted_model([reply]))
-    monkeypatch.setattr(cli, "check_google_login", lambda: None)
-    monkeypatch.setattr(cli, "check_claude_code_login", lambda binary: None)
     monkeypatch.setattr(cli, "verify_connection", lambda: True)
     monkeypatch.setattr(cli, "get_callback_handler", lambda **kwargs: BaseCallbackHandler())
     monkeypatch.setattr(cli, "load_all_tools", load_all_tools)

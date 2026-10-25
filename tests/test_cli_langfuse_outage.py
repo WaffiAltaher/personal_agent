@@ -37,7 +37,7 @@ def _no_project(*args, **kwargs):
 
 
 @pytest.fixture
-def run_cli_against_langfuse(monkeypatch, scripted_model, langfuse_spans):
+def run_cli_against_langfuse(monkeypatch, scripted_model, langfuse_spans, startup_login_checks_pass):
     """Run the CLI's main() with the real Langfuse wiring; returns (run, what the run saw)."""
     seen = {"logged_to_memory": []}
 
@@ -52,8 +52,6 @@ def run_cli_against_langfuse(monkeypatch, scripted_model, langfuse_spans):
         yield InMemorySaver()
 
     monkeypatch.setattr(cli, "create_chat_model", lambda: scripted_model([reply]))
-    monkeypatch.setattr(cli, "check_google_login", lambda: None)
-    monkeypatch.setattr(cli, "check_claude_code_login", lambda binary: None)
     monkeypatch.setattr(cli, "load_all_tools", load_all_tools)
     monkeypatch.setattr(cli, "get_checkpointer", get_checkpointer)
     monkeypatch.setattr(

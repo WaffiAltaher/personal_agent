@@ -57,6 +57,16 @@ def no_real_claude_code(request, monkeypatch):
 
 
 @pytest.fixture
+def startup_login_checks_pass(monkeypatch):
+    """Every real-mode CLI startup login check passes without running. A test of one check
+    sets that check again after requesting this."""
+    import agent.cli as cli
+
+    monkeypatch.setattr(cli, "check_google_login", lambda: None)
+    monkeypatch.setattr(cli, "check_claude_code_login", lambda binary: None)
+
+
+@pytest.fixture
 def scripted_model():
     """Factory: scripted_model([AIMessage(...), ...]) -> a fake model replying with those messages."""
     return lambda responses: ScriptedChatModel(messages=iter(responses))

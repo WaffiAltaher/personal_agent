@@ -61,7 +61,7 @@ def google_paths(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def run_cli(monkeypatch, scripted_model):
+def run_cli(monkeypatch, scripted_model, startup_login_checks_pass):
     """Minimal CLI harness; real-mode runs bind real Google tools unless load_all_tools is stubbed."""
     seen = {"check_calls": 0}
 
@@ -90,7 +90,6 @@ def run_cli(monkeypatch, scripted_model):
     monkeypatch.setattr(cli, "flush_traces", lambda: None)
     monkeypatch.setattr(google_auth, "check_google_login", check_and_count)
     monkeypatch.setattr(cli, "check_google_login", check_and_count)
-    monkeypatch.setattr(cli, "check_claude_code_login", lambda binary: None)
 
     async def run(*args):
         monkeypatch.setattr(sys, "argv", ["agent.cli", *args])

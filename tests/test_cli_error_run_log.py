@@ -12,7 +12,7 @@ import agent.cli as cli
 
 
 @pytest.mark.asyncio
-async def test_cli_logs_error_outcome_and_flushes_traces(monkeypatch, scripted_model):
+async def test_cli_logs_error_outcome_and_flushes_traces(monkeypatch, scripted_model, startup_login_checks_pass):
     logged = []
     flushed = {"n": 0}
 
@@ -27,8 +27,6 @@ async def test_cli_logs_error_outcome_and_flushes_traces(monkeypatch, scripted_m
         logged.append({"error": kwargs.get("error")})
 
     monkeypatch.setattr(cli, "create_chat_model", lambda: scripted_model([AIMessage(content="x")]))
-    monkeypatch.setattr(cli, "check_google_login", lambda: None)
-    monkeypatch.setattr(cli, "check_claude_code_login", lambda binary: None)
     monkeypatch.setattr(cli, "verify_connection", lambda: False)
     monkeypatch.setattr(cli, "get_checkpointer", get_checkpointer)
     monkeypatch.setattr(cli, "load_all_tools", load_all_tools)
