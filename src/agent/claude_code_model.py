@@ -183,10 +183,7 @@ def _parse_reply(result: dict, tools: list[dict]) -> AIMessage:
     if result.get("num_turns", 1) > 1:
         raise ClaudeCodeError(f"Claude's reply came after {result['num_turns']} turns: it tried to use a tool itself.")
     text = result["result"]
-    try:
-        reply = json.loads(_unfenced(text))
-    except json.JSONDecodeError:
-        reply = None
+    reply = _trailing_object(_unfenced(text))
     if isinstance(reply, dict) and reply.get("kind") == "answer" and isinstance(reply.get("text"), str):
         return AIMessage(content=reply["text"])
     if isinstance(reply, dict) and reply.get("kind") == "tool_calls" and isinstance(reply.get("calls"), list) \
@@ -200,13 +197,29 @@ def _parse_reply(result: dict, tools: list[dict]) -> AIMessage:
     raise ClaudeCodeError(f"Claude's reply is not an answer or tool calls in the agreed JSON shape: {text[:200]!r}")
 
 
-# One whole reply inside one Markdown code fence, ```json or ```; anything around it stays invalid.
-_FENCED = re.compile(r"\A\s*```(?:json)?[ \t]*\n(.*)\n[ \t]*```\s*\Z", re.DOTALL)
+# A reply ending in one Markdown code fence, ```json or ```; text after the fence stays invalid.
+_FENCED = re.compile(r"```(?:json)?[ \t]*\n(.*)\n[ \t]*```\s*\Z", re.DOTALL)
 
 
 def _unfenced(text: str) -> str:
-    """The reply without its code fence, if it is exactly one fenced block (ADR-016 amendment)."""
-    return fenced[1] if (fenced := _FENCED.match(text)) else text
+    """The reply up to and inside its closing code fence, if it ends in one (ADR-016 amendment)."""
+    return text[:fenced.start()] + fenced[1] if (fenced := _FENCED.search(text)) else text
+
+
+def _trailing_object(text: str):
+    """The JSON object that ends the reply, ignoring any text before it (ADR-016 amendment); None if none.
+
+    Sonnet often narrates its step, or writes the call out as markup, before the contract object."""
+    text = text.rstrip()
+    decoder = json.JSONDecoder()
+    for start in (i for i, char in enumerate(text) if char == "{"):
+        try:
+            value, end = decoder.raw_decode(text, start)
+        except json.JSONDecodeError:
+            continue
+        if end == len(text):
+            return value
+    return None
 
 
 def _is_call(call) -> bool:

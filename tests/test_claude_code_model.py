@@ -172,9 +172,9 @@ ANSWER = json.dumps({"kind": "answer", "text": "No mail from Bob."})
 INVALID_REPLIES = {
     "not json": "not json",
     "a json array": "[]",
-    # A fenced object is accepted only on its own: as really seen (2026-10-25), with a stray tag before it.
-    "fenced json after a stray tag": f"<name>search_gmail</name>\n```json\n{ANSWER}\n```",
-    "fenced json after prose": f"Here you go:\n```json\n{ANSWER}\n```",
+    # The contract object must end the reply: text after it is not ignored.
+    "json followed by prose": f"{ANSWER}\nLet me know if you need more.",
+    "fenced json followed by prose": f"```json\n{ANSWER}\n```\nDone.",
     "neither shape": json.dumps({"kind": "shrug"}),
     "an answer without text": json.dumps({"kind": "answer"}),
     "an unknown tool": json.dumps({"kind": "tool_calls", "calls": [{"name": "delete_everything", "args": {}}]}),
@@ -193,6 +193,29 @@ def test_one_object_in_one_code_fence_is_accepted_without_a_re_ask(cli, fence):
     reply = with_tools().invoke("Any mail from Bob?")
 
     assert reply.content == "No mail from Bob."
+    assert len(cli.calls()) == 1
+
+
+# Text before the contract object is ignored, as really seen from Sonnet (2026-10-25).
+TOOL_CALLS = json.dumps({"kind": "tool_calls", "calls": [{"name": "search_mail", "args": {"query": "Bob"}}]})
+REPLIES_ENDING_IN_THE_CONTRACT = {
+    "a stray tag before fenced json": f"<name>search_mail</name>\n```json\n{TOOL_CALLS}\n```",
+    "a written-out tool call before the json": (
+        '<invoke name="search_mail">\n<parameter name="query">Bob</parameter>\n</invoke>\n'
+        f"</function_calls>\n\n{TOOL_CALLS}"
+    ),
+    "prose before the json": f"The latest message is from Bob. I'll search for it.\n\n{TOOL_CALLS}",
+}
+
+
+@pytest.mark.parametrize("reply_text", REPLIES_ENDING_IN_THE_CONTRACT.values(),
+                         ids=REPLIES_ENDING_IN_THE_CONTRACT.keys())
+def test_a_reply_ending_in_the_contract_object_is_accepted_without_a_re_ask(cli, reply_text):
+    cli.script([reply_text])
+
+    reply = with_tools().invoke("Any mail from Bob?")
+
+    assert [(c["name"], c["args"]) for c in reply.tool_calls] == [("search_mail", {"query": "Bob"})]
     assert len(cli.calls()) == 1
 
 

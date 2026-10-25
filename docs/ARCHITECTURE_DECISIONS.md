@@ -356,6 +356,7 @@ Two plain tools were chosen over a hidden check that the Approval step calls bef
 - The wrapper depends on Claude Code's CLI flags and its `--output-format json` shape. Recheck them when Claude Code updates.
 - Embeddings still need `GOOGLE_API_KEY`: neither CLI offers them.
 - Amended 2026-10-25 (ticket 09): a reply that is exactly one JSON object inside one Markdown code fence (```json or ```) is accepted like an unfenced one, because Sonnet fenced most replies and each re-ask doubled the turn's cost; anything else around the object (a stray tag, prose) is still invalid and re-asked.
+- Amended 2026-10-25 (owner's second real run): text before the contract object is ignored too. Sonnet often narrated its step or wrote the call out as markup before the JSON, and each such reply was re-asked. The reply must still end in the object (fenced or not); text after it, or no object, is re-asked. The calls are validated against the bound tools and Write actions still need Approval, so the ignored text has no effect.
 
 ---
 
