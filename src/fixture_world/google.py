@@ -13,6 +13,8 @@ from fixture_world.clock import seed_shift, today
 
 _draft_counter = 0
 _recorded_drafts: list[dict] = []
+_fetch_counter = 0
+_FETCH_SEPARATOR = "~fetch"
 
 
 def load_seed(name: str):
@@ -110,7 +112,8 @@ def _message_matches_query(message: dict, query: str) -> bool:
                         return False
             elif key == "has":
                 if value == "attachment":
-                    return False  # seeded personal mail has no attachments
+                    if not any(part.get("filename") for part in message.get("parts", [])):
+                        return False
             else:
                 hay = " ".join(
                     (
@@ -183,6 +186,38 @@ def get_gmail_message(message_id: str) -> str:
                 lines.append(f"\n[Message truncated at {max_body_chars} characters]")
             return "\n".join(lines)
     return f"Error: message not found (ID: {message_id})"
+
+
+def message_payload(message_id: str) -> dict | None:
+    """The message's attachment parts as a Gmail API payload, or None for an unknown message.
+
+    Seeded `parts` have the Gmail API's shape, so the real tool's part walking runs on them.
+    Like Gmail, every fetch hands out new attachment IDs; only the part IDs stay the same."""
+    global _fetch_counter
+    for msg in _messages():
+        if msg["id"] == message_id:
+            _fetch_counter += 1
+            parts = []
+            for part in msg.get("parts", []):
+                body = {**part.get("body", {})}
+                if "attachmentId" in body:
+                    body["attachmentId"] = f"{body['attachmentId']}{_FETCH_SEPARATOR}{_fetch_counter}"
+                parts.append({**part, "body": body})
+            return {"mimeType": "multipart/mixed", "parts": parts}
+    return None
+
+
+def attachment_data(message_id: str, attachment_id: str) -> str | None:
+    """An attachment's bytes as the attachments endpoint returns them: base64url, unpadded.
+
+    Takes an attachment ID that a fetch of the message handed out."""
+    seeded_id, separator, _ = attachment_id.rpartition(_FETCH_SEPARATOR)
+    if not separator:
+        return None
+    for msg in _messages():
+        if msg["id"] == message_id:
+            return msg.get("attachmentData", {}).get(seeded_id)
+    return None
 
 
 def create_draft_email(to: str, subject: str, body: str, cc: str = "") -> str:

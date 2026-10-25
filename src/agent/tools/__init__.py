@@ -7,8 +7,10 @@ from agent.tools.gmail import (
     create_draft_email,
     fixture_create_draft_email,
     fixture_get_gmail_message,
+    fixture_save_gmail_attachment,
     fixture_search_gmail,
     get_gmail_message,
+    save_gmail_attachment,
     search_gmail,
 )
 from agent.tools.google_calendar import (
@@ -34,6 +36,7 @@ LOCAL_TOOLS = [
     read_tool(search_gmail),
     read_tool(get_gmail_message),
     write_action(create_draft_email),  # saves a draft to Gmail
+    write_action(save_gmail_attachment),  # writes a file into the agent folder
     read_tool(retrieve_memory),
     read_tool(retrieve_episodic_memory),
     write_action(remember),
@@ -47,6 +50,7 @@ _FIXTURE_STAND_INS_BY_NAME = {
     search_gmail.name: fixture_search_gmail,
     get_gmail_message.name: fixture_get_gmail_message,
     create_draft_email.name: fixture_create_draft_email,
+    save_gmail_attachment.name: fixture_save_gmail_attachment,
     list_calendar_events.name: fixture_list_calendar_events,
     get_calendar_event.name: fixture_get_calendar_event,
 }

@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     # `--judge-model` overrides it. Answer relevancy embeds with chroma_embedding_model.
     eval_judge_model: str | None = None
 
+    # The agent's own folder: saved email attachments go into its gmail/ and outlook/ subfolders.
+    # Tests and evals point it at a temporary directory.
+    agent_folder: str = "~/Downloads/personal_agent"
+
     # Context view limits (ADR-013): reduce tool results in the model view only
     context_clear_threshold: int = 100_000
     context_clear_target: int = 50_000
