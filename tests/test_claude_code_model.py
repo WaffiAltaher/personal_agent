@@ -9,9 +9,11 @@ scripted result. The wrapper's process, environment and JSON in and out all run 
 
 import json
 import os
+from datetime import date
 from pathlib import Path
 
 import pytest
+from langchain_core.callbacks import UsageMetadataCallbackHandler
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import tool
 from langgraph.checkpoint.memory import InMemorySaver
@@ -21,8 +23,10 @@ from agent.chat_model import create_chat_model
 from agent.claude_code_model import ClaudeCodeError
 from agent.config import settings
 from agent.conversation import run_conversation
+from agent.evals.efficiency import efficiency
 from agent.evals.generation import ChatModelJudge
 from agent.graph import build_graph
+from agent.memory.run_log import build_run_record
 from agent.model_binding import bind_agent_tools
 from agent.tools.classification import write_action
 from fixture_world import claude_code as fake_cli
@@ -224,3 +228,73 @@ def test_system_prompt_goes_to_the_flag_and_the_rest_of_the_view_to_stdin_as_jso
          "tool_calls": [{"name": "search_mail", "args": {"q": "Bob"}, "id": "c1"}]},
         {"role": "tool", "content": injection, "tool_call_id": "c1", "name": "search_mail"},
     ]
+
+
+# One call's usage as the CLI reports it: 1,000 uncached input tokens, a 4,000-token cache read, a
+# 2,000-token cache write (1,500 for 5 minutes, 500 for 1 hour) and 300 output tokens (100 thinking).
+# At Claude Sonnet 5.5 rates ($2 in / $10 out / $0.20 cache read / $2.50 5-minute and $4 1-hour
+# cache write per 1M): 1000×2 + 4000×0.2 + 1500×2.5 + 500×4 + 300×10 = 11,550 per 1M = $0.01155.
+SONNET_CALL_COST = 0.01155
+
+
+def cli_result(model_id="claude-sonnet-5-5"):
+    return {
+        "result": "Hello.",
+        "usage": {
+            "input_tokens": 1_000, "output_tokens": 300,
+            "cache_creation_input_tokens": 2_000, "cache_read_input_tokens": 4_000,
+            "output_tokens_details": {"thinking_tokens": 100},
+            "cache_creation": {"ephemeral_5m_input_tokens": 1_500, "ephemeral_1h_input_tokens": 500},
+        },
+        # The CLI's own cost figures are deliberately wrong: they must never be used.
+        "total_cost_usd": 99.0,
+        "modelUsage": {model_id: {"inputTokens": 1_000, "outputTokens": 300, "cacheReadInputTokens": 4_000,
+                                  "cacheCreationInputTokens": 2_000, "costUSD": 99.0}},
+    }
+
+
+def test_each_ai_message_carries_the_cli_usage_and_the_model_it_ran(cli):
+    cli.script([cli_result()])
+
+    reply = claude_code().invoke("hi")
+
+    assert reply.usage_metadata == {
+        "input_tokens": 7_000,  # includes the cache read and write, as pricing expects
+        "output_tokens": 300,
+        "total_tokens": 7_300,
+        "input_token_details": {"cache_read": 4_000, "cache_creation": 0,
+                                "ephemeral_5m_input_tokens": 1_500, "ephemeral_1h_input_tokens": 500},
+        "output_token_details": {"reasoning": 100},
+    }
+    assert reply.response_metadata["model_name"] == "claude-sonnet-5-5"
+
+
+@pytest.mark.parametrize("name", ["claude_code:sonnet", "claude_code:claude-sonnet-5-5"])
+def test_run_log_prices_a_claude_code_run_by_the_model_the_cli_ran(cli, name):
+    cli.script([cli_result(), cli_result()])
+    replies = [claude_code(name).invoke("hi"), claude_code(name).invoke("again")]
+
+    record = build_run_record({"messages": replies}, "hi", model_name=name, run_date=date(2026, 10, 25))
+
+    assert record.cost_usd == pytest.approx(2 * SONNET_CALL_COST)
+
+
+def test_a_reported_model_without_a_price_has_no_cost(cli):
+    cli.script([cli_result(model_id="claude-unpriced-9")])
+    reply = claude_code().invoke("hi")
+
+    record = build_run_record({"messages": [reply]}, "hi", model_name="claude_code:sonnet", run_date=date(2026, 10, 25))
+
+    assert record.cost_usd is None
+
+
+@pytest.mark.parametrize("name", ["claude_code:sonnet", "claude_code:claude-sonnet-5-5"])
+def test_eval_efficiency_prices_a_claude_code_run_by_the_model_the_cli_ran(cli, name):
+    cli.script([cli_result()])
+    usage = UsageMetadataCallbackHandler()  # what the eval harness collects usage with
+    claude_code(name).invoke("hi", config={"callbacks": [usage]})
+
+    run = efficiency(usage.usage_metadata, latency_s=1.0, on=date(2026, 10, 25))
+
+    assert list(run.by_model) == ["claude-sonnet-5-5"]
+    assert run.cost_usd == pytest.approx(SONNET_CALL_COST)

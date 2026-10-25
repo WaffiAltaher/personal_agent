@@ -17,6 +17,7 @@ import uuid
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
+from langchain_core.messages.ai import UsageMetadata
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import Runnable
 from langchain_core.utils.function_calling import convert_to_openai_tool
@@ -70,6 +71,8 @@ class ClaudeCodeChatModel(BaseChatModel):
         rules = _CONVERSATION_RULES + (_reply_contract(tools) if tools else "")
         result = self._run("\n\n".join(filter(None, [system, rules])), json.dumps(conversation))
         message = _parse_reply(result["result"]) if tools else AIMessage(content=result["result"])
+        message.usage_metadata = _usage(result.get("usage") or {})
+        message.response_metadata = _reported_model(result)
         return ChatResult(generations=[ChatGeneration(message=message)])
 
 
@@ -108,6 +111,33 @@ def _parse_reply(text: str) -> AIMessage:
 
 def _is_call(call) -> bool:
     return isinstance(call, dict) and isinstance(call.get("name"), str) and isinstance(call.get("args"), dict)
+
+
+def _usage(usage: dict) -> UsageMetadata:
+    """The CLI's token usage in LangChain's shape: input counts the cache reads and writes, as pricing expects.
+
+    The CLI's own cost figures (total_cost_usd, costUSD) are never used; cost comes from the price table."""
+    cache_read = usage.get("cache_read_input_tokens") or 0
+    cache_write = usage.get("cache_creation_input_tokens") or 0
+    input_tokens = (usage.get("input_tokens") or 0) + cache_read + cache_write
+    output_tokens = usage.get("output_tokens") or 0
+    by_ttl = usage.get("cache_creation") or {}
+    ttl = {k: by_ttl.get(k) or 0 for k in ("ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens")}
+    return UsageMetadata(
+        input_tokens=input_tokens, output_tokens=output_tokens, total_tokens=input_tokens + output_tokens,
+        input_token_details={"cache_read": cache_read, "cache_creation": cache_write - sum(ttl.values()), **ttl},
+        output_token_details={"reasoning": (usage.get("output_tokens_details") or {}).get("thinking_tokens") or 0},
+    )
+
+
+def _reported_model(result: dict) -> dict:
+    """{"model_name": the model the CLI reports it ran} (the most used, if several), or {} if none.
+
+    Pricing reads this, never the alias or the configured name: `sonnet` has no price-table row."""
+    model_usage = result.get("modelUsage") or {}
+    if not model_usage:
+        return {}
+    return {"model_name": max(model_usage, key=lambda m: (model_usage[m] or {}).get("outputTokens") or 0)}
 
 
 def _entry(message: BaseMessage) -> dict:
