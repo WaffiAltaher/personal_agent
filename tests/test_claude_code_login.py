@@ -5,7 +5,10 @@ Seam: the CLI driver. The real CLI is never called: CLAUDE_CODE_BINARY points at
 world's stand-in, which records the call and prints a scripted `claude auth status` JSON.
 """
 
+import contextlib
 import json
+import os
+import signal
 import sys
 from contextlib import asynccontextmanager
 
@@ -14,6 +17,7 @@ from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
+import agent.auth.claude_code as claude_code_auth
 import agent.cli as cli
 from agent.config import settings
 from fixture_world import claude_code as fake_cli
@@ -101,6 +105,25 @@ async def test_missing_binary_stops_startup_with_not_found_on_path(run_cli, monk
 
     assert exc.value.code == 1
     assert "Claude Code not found on PATH" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_a_hung_status_call_stops_startup_with_a_message_not_a_traceback(run_cli, monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(claude_code_auth, "LOGIN_CHECK_TIMEOUT_S", 1)
+    run_cli.status({"hang": True})
+
+    try:
+        with pytest.raises(SystemExit) as exc:
+            await run_cli.start("What is in my inbox?")
+    finally:
+        for pid in fake_cli.hung_pids(tmp_path / "calls.jsonl"):
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
+
+    assert exc.value.code == 1
+    out, err = capsys.readouterr()
+    assert "Claude Code did not answer `claude auth status` within 1 s" in out
+    assert "Traceback" not in out + err
 
 
 @pytest.mark.asyncio

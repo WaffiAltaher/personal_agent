@@ -10,7 +10,8 @@ with `recorded_calls()`. It then prints the next scripted reply from the JSON li
 named by FIXTURE_WORLD_CLAUDE_CODE_REPLIES, the n-th call printing the n-th reply. A reply is
 the result text, or a dict of fields laid over the CLI's success object (as Claude Code
 2.1.310 prints it). For `claude auth status` the reply is the status JSON, printed as is.
-A dict reply may instead script a failure: {"hang": true} never answers (see `hung_pids()`), and
+A dict reply may instead script a failure: {"hang": true} never answers, `auth status` included
+(see `hung_pids()`), and
 "stdout", "stderr" and "exit_code" print raw output and set the exit status. SESSION_LIMIT is
 the real subscription-limit result.
 
@@ -83,9 +84,6 @@ def main() -> None:
         }) + "\n")
 
     reply = json.loads(Path(os.environ[REPLIES_ENV]).read_text())[index]
-    if sys.argv[1:3] == ["auth", "status"]:
-        print(json.dumps(reply))
-        return
     if isinstance(reply, str):
         reply = {"result": reply}
     if reply.get("hang"):
@@ -93,6 +91,9 @@ def main() -> None:
         child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"])
         calls_path.with_suffix(".hung").write_text(json.dumps([os.getpid(), child.pid]))
         time.sleep(600)
+    if sys.argv[1:3] == ["auth", "status"]:
+        print(json.dumps(reply))
+        return
     # Failures: "stdout" is printed as is instead of a result, "stderr" goes to standard error,
     # "exit_code" is the exit status.
     sys.stderr.write(reply.pop("stderr", ""))

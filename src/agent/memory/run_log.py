@@ -7,7 +7,8 @@ from datetime import date
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 
 from agent.memory.episodic import RunRecord
-from agent.pricing import cost_usd
+from agent.chat_model import is_claude_code_model
+from agent.pricing import cost_by_model_usd, cost_usd
 
 
 def _final_output(messages: list[BaseMessage]) -> str:
@@ -90,11 +91,7 @@ def _claude_code_cost(messages: list[BaseMessage], *, on: date) -> float | None:
             by_model.setdefault(msg.response_metadata.get("model_name"), []).append(msg)
     if not by_model:
         return None
-    costs = [
-        cost_usd(name, _sum_usage_metadata(msgs)[1], on=on) if name else None
-        for name, msgs in by_model.items()
-    ]
-    return None if None in costs else sum(costs)
+    return cost_by_model_usd({name: _sum_usage_metadata(msgs)[1] for name, msgs in by_model.items()}, on=on)
 
 
 def _is_step_limit_answer(message: BaseMessage | None) -> bool:
@@ -133,7 +130,7 @@ def build_run_record(
 ) -> RunRecord:
     messages: list[BaseMessage] = result.get("messages", [])
     token_usage, priced_usage = _sum_usage_metadata(messages)
-    if model_name.startswith("claude_code:"):
+    if is_claude_code_model(model_name):
         run_cost = _claude_code_cost(messages, on=run_date)
     else:
         run_cost = (

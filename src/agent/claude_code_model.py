@@ -35,6 +35,11 @@ class ClaudeCodeError(RuntimeError):
 _REMOVED_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL")
 
 
+def claude_code_env() -> dict[str, str]:
+    """The environment for a Claude Code process: this one's, without the API-key variables."""
+    return {k: v for k, v in os.environ.items() if k not in _REMOVED_ENV}
+
+
 class ClaudeCodeChatModel(BaseChatModel):
     """A chat model whose every call is one `claude -p` process."""
 
@@ -52,7 +57,7 @@ class ClaudeCodeChatModel(BaseChatModel):
             "--tools", "", "--no-session-persistence", "--output-format", "json",
             "--model", self.model, "--system-prompt", system_prompt,
         ]
-        env = {k: v for k, v in os.environ.items() if k not in _REMOVED_ENV}
+        env = claude_code_env()
         with tempfile.TemporaryDirectory(prefix="claude-code-call-") as cwd:
             # Its own process group, so a timeout kills the CLI and anything it started.
             process = subprocess.Popen(

@@ -53,6 +53,13 @@ def price_on(model_name: str, on: date) -> Price | None:
     return max(in_force, key=lambda p: p.valid_from) if in_force else None
 
 
+def cost_by_model_usd(usage_by_model: dict[str | None, dict], *, on: date) -> float | None:
+    """The total cost of usage keyed by the model that reported it; None if any model is
+    unnamed (None) or has no cost."""
+    costs = [cost_usd(name, usage, on=on) if name else None for name, usage in usage_by_model.items()]
+    return None if None in costs else sum(costs)
+
+
 def cost_usd(model_name: str, usage: dict, *, on: date) -> float | None:
     """The cost of `usage` (a LangChain UsageMetadata dict) for `model_name` on date `on`.
 
