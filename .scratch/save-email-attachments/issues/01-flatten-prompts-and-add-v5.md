@@ -4,14 +4,14 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] V3 and V4 are written out as complete strings; neither references another prompt constant
-- [ ] V3 and V4 are byte-for-byte unchanged: their existing lines in the released-prompt hash test pass untouched (never edit an existing hash line)
-- [ ] `v5` is V4's full text with exactly one change: the default data folder line names `/Users/waffi/Downloads/personal_agent` instead of `/Users/waffi/Downloads/Personal`
-- [ ] `v5` is in the prompt registry and has its own new hash line in the released-prompt test
-- [ ] The default prompt version setting is `v5`
-- [ ] The whole test suite passes
+- [x] V3 and V4 are written out as complete strings; neither references another prompt constant
+- [x] V3 and V4 are byte-for-byte unchanged: their existing lines in the released-prompt hash test pass untouched (never edit an existing hash line)
+- [x] `v5` is V4's full text with exactly one change: the default data folder line names `/Users/waffi/Downloads/personal_agent` instead of `/Users/waffi/Downloads/Personal`
+- [x] `v5` is in the prompt registry and has its own new hash line in the released-prompt test
+- [x] The default prompt version setting is `v5`
+- [x] The whole test suite passes
 
 Traps:
 - V4 is currently V2 plus extra text, **not** V3 plus extra text. Flatten what the code actually does; if you change V4's content to include V3's rules, its hash test fails, which is the point of that test.

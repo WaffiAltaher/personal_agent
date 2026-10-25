@@ -4,17 +4,17 @@
 
 **Blocked by:** 02, 03
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] The eval harness points the agent folder at the run's working directory, as it already does for the eval Downloads folder
-- [ ] Outcome grading can check files in the agent folder: their presence, location (`gmail/` or `outlook/`) and exact bytes, next to the existing upload log
-- [ ] Scenario: save the Gmail attachment, approved. The file is in `gmail/` with the seeded bytes.
-- [ ] Scenario: save the Outlook attachment, rejected. Nothing is written anywhere in the agent folder.
-- [ ] Scenario: Outlook email → save → Informer upload, both approved. The file is in `outlook/`, and the fake Informer recorded exactly one upload, with that file's bytes. The run gets two Approvals.
-- [ ] The Informer upload in the chain scenario accepts the saved path. The eval's Informer Downloads folder must contain the agent folder; adjust the harness if it doesn't.
-- [ ] A unit test covers the new outcome scoring (prior art: the upload-outcome scenario tests)
-- [ ] The dataset validation tests pass with the new scenarios
-- [ ] The whole suite passes
+- [x] The eval harness points the agent folder at the run's working directory, as it already does for the eval Downloads folder
+- [x] Outcome grading can check files in the agent folder: their presence, location (`gmail/` or `outlook/`) and exact bytes, next to the existing upload log
+- [x] Scenario: save the Gmail attachment, approved. The file is in `gmail/` with the seeded bytes.
+- [x] Scenario: save the Outlook attachment, rejected. Nothing is written anywhere in the agent folder.
+- [x] Scenario: Outlook email → save → Informer upload, both approved. The file is in `outlook/`, and the fake Informer recorded exactly one upload, with that file's bytes. The run gets two Approvals.
+- [x] The Informer upload in the chain scenario accepts the saved path. The eval's Informer Downloads folder must contain the agent folder; adjust the harness if it doesn't.
+- [x] A unit test covers the new outcome scoring (prior art: the upload-outcome scenario tests)
+- [x] The dataset validation tests pass with the new scenarios
+- [x] The whole suite passes
 
 Traps:
 - The prompt names the real `~/Downloads/personal_agent`, but in evals the files go to a temporary folder. Grade on the paths the tools actually returned or wrote, not the prompt's path.

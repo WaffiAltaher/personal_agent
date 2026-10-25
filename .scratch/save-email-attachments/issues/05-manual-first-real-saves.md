@@ -13,3 +13,8 @@
 - [ ] The results are recorded under a `## Record` heading in this file
 
 Spec: `../spec.md` (Further Notes).
+
+Also confirm, from the build (only a real save can tell):
+- [ ] Gmail: the attachment ID shown by `get_gmail_message` (the MIME part ID) still saves after a fresh fetch, and a normal attachment sent from Gmail (which carries a `Content-ID`) is listed, not hidden as inline
+- [ ] Outlook: real file attachments carry `contentBytes` in the `list-mail-attachments` response, including large ones; an attached email is refused
+- [ ] Outlook: real Graph message IDs pass the server's plain-path check for `target`
