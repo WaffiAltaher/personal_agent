@@ -52,6 +52,10 @@ _Avoid_: mutation, side effect
 The owner's single approve-or-reject answer covering every Write action the agent proposes at once; reads proposed alongside them are not part of it. Sending a new request instead of answering counts as a rejection.
 _Avoid_: confirmation, consent
 
+**Agent folder**:
+The folder on the owner's computer that is the agent's own (`~/Downloads/personal_agent`), with one subfolder per mailbox for saved attachments.
+_Avoid_: data folder, download folder
+
 **Fixture world**:
 The seeded fake mailbox, calendar and Informer administration used for tests and evals in place of real ITtopia data.
 _Avoid_: mock data, test data
