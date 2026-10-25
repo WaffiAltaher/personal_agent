@@ -17,7 +17,7 @@ from agent.tools.mcp_environment import SYSTEM_VARIABLES
 from agent.tools.mcp_loader import McpServer, load_mcp_tools
 from agent.tools.informer import informer_fixture_server, informer_server
 from fixture_world.informer_api import FakeInformerApi
-from agent.tools.ms365_mcp import ms365_fixture_server, ms365_server
+from agent.tools.ms365_mcp import EXPOSED_TOOLS, READ_TOOLS, ms365_fixture_server, ms365_server
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -135,18 +135,29 @@ def test_real_ms365_server_is_pinned_and_offers_drafts_but_no_other_writes(monke
     assert "--read-only" not in args and "--preset" not in args
     # The server tests each tool name against the pattern case-insensitively, without anchoring.
     pattern = re.compile(args[args.index("--enabled-tools") + 1], re.IGNORECASE)
-    for allowed in ("create-draft-email", "create-reply-draft", "list-mail-messages", "get-calendar-view"):
+    # download-bytes-to-file is enabled for the agent's own ms365_save_attachment (ADR-015); it is a
+    # GET, so it asks for no new Graph scope.
+    for allowed in ("create-draft-email", "create-reply-draft", "list-mail-messages", "get-calendar-view",
+                    "list-mail-attachments", "download-bytes-to-file"):
         assert pattern.search(allowed)
     for forbidden in ("send-mail", "send-draft-message", "reply-mail-message", "create-reply-all-draft",
                       "create-forward-draft", "delete-mail-message", "move-mail-message", "update-mail-message",
                       "create-calendar-event", "create-mail-rule", "create-mail-folder",
-                      "update-my-calendar-permission", "download-bytes-to-file", "login", "list-accounts"):
+                      "update-my-calendar-permission", "add-mail-attachment", "delete-mail-attachment",
+                      "login", "list-accounts"):
         assert not pattern.search(forbidden), forbidden
 
     env = connection["env"]
     assert env["MS365_MCP_EXPECTED_USERNAME"] == "jendo@example.com"
     assert "ENABLED_TOOLS" not in env
     assert "MS365_MCP_USE_KEYTAR" not in env  # the macOS keychain token cache stays enabled
+
+
+def test_download_bytes_to_file_is_never_exposed_or_read_classified():
+    # The server annotates it readOnlyHint although it writes a local file: only the allowlist counts.
+    assert "download-bytes-to-file" not in READ_TOOLS
+    assert "download-bytes-to-file" not in EXPOSED_TOOLS
+    assert "list-mail-attachments" in READ_TOOLS
 
 
 def test_expected_ms365_username_is_optional(monkeypatch):

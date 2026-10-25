@@ -10,6 +10,9 @@ write (delete, move, update, calendar changes, rules, folders, permissions) is u
 The set is enforced twice: by the server's `--enabled-tools` (which also keeps the Graph
 scopes it asks for to these tools: no Mail.Send) and by the loader, by name, whatever
 annotations the server sets.
+
+The loader also binds `ms365_save_attachment`, the agent's own Write action over the server's
+`download-bytes-to-file` (ADR-015), in place of that raw tool.
 """
 
 import sys
@@ -18,6 +21,7 @@ import tempfile
 from agent.config import Settings, settings as default_settings
 from agent.tools.mcp_environment import fixture_environment, system_environment
 from agent.tools.mcp_loader import LoginCheck, McpServer
+from agent.tools.ms365_attachments import DOWNLOAD_TOOL, SAVE_ATTACHMENT
 
 NAME = "ms365"
 PACKAGE = "@softeria/ms-365-mcp-server@0.159.1"  # exact pin; review the release diff before bumping (ADR-005)
@@ -69,6 +73,10 @@ DRAFT_TOOLS = frozenset({"create-draft-email", "create-reply-draft"})
 
 EXPOSED_TOOLS = READ_TOOLS | DRAFT_TOOLS
 
+# What the server enables: the exposed tools, plus download-bytes-to-file, which only the
+# agent's own ms365_save_attachment calls (it is a GET: no new Graph scope). Never bound.
+ENABLED_TOOLS = EXPOSED_TOOLS | {DOWNLOAD_TOOL}
+
 # Login and account management (login, logout, verify-login, list-/select-/remove-account)
 # are not in EXPOSED_TOOLS, so they stay out of the model's reach. The real server serves
 # them whatever --enabled-tools says (in stdio mode it registers its auth tools separately
@@ -101,6 +109,7 @@ _TOOL_POLICY = dict(
     read_allowlist=READ_TOOLS,
     login=LOGIN,
     transient_errors=TRANSIENT_ERRORS,
+    wrappers=(SAVE_ATTACHMENT,),  # bound in place of download-bytes-to-file
 )
 
 
@@ -144,8 +153,8 @@ def ms365_server(settings: Settings = default_settings) -> McpServer:
 
 
 def enabled_tools_pattern() -> str:
-    """The server's --enabled-tools regex: exactly EXPOSED_TOOLS (it is matched case-insensitively, unanchored)."""
-    return "^(?:" + "|".join(sorted(EXPOSED_TOOLS)) + ")$"  # names are [a-z-] only: nothing to escape
+    """The server's --enabled-tools regex: exactly ENABLED_TOOLS (it is matched case-insensitively, unanchored)."""
+    return "^(?:" + "|".join(sorted(ENABLED_TOOLS)) + ")$"  # names are [a-z-] only: nothing to escape
 
 
 def ms365_fixture_server() -> McpServer:

@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     # `--judge-model` overrides it. Answer relevancy embeds with chroma_embedding_model.
     eval_judge_model: str | None = None
 
+    # The agent's own folder: saved email attachments go into its gmail/ and outlook/ subfolders.
+    # Tests and evals point it at a temporary directory.
+    agent_folder: str = "~/Downloads/personal_agent"
+
     # Context view limits (ADR-013): reduce tool results in the model view only
     context_clear_threshold: int = 100_000
     context_clear_target: int = 50_000
@@ -43,7 +47,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
     )
 
-    prompt_version: str = "v4"  # see agent/prompts.py; tagged on each Langfuse trace
+    prompt_version: str = "v5"  # see agent/prompts.py; tagged on each Langfuse trace
     # Optional: without them the agent starts without MS365 tools, with a notice.
     ms365_mcp_client_id: str | None = None
     ms365_mcp_tenant_id: str | None = None

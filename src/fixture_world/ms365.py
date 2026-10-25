@@ -21,12 +21,17 @@ tools fail with a Graph 503 instead, creating nothing. The other write tools the
 offers (send, delete, move, update, calendar, rules, folders, permissions) are served too, but
 not emulated, so that the agent's refusal to bind them is testable.
 
+Attachments: `list-mail-attachments` serves the seeded attachments (`data/ms365/attachments.json`),
+and `download-bytes-to-file` writes a seeded attachment's bytes to a local file, refusing a
+relative path and an existing file as the real server does.
+
 Run over stdio with `python -m fixture_world.ms365`.
 
 The server can be switched into a failure mode (down, logged out, tool error, transient
 error, throttled (429), crash) from outside its process; see "failure injection" below.
 """
 
+import base64
 import fcntl
 import functools
 import json
@@ -341,6 +346,9 @@ class Ms365World:
             reverse=True,  # Graph lists mail newest first
         )
         self.contacts = load_seed("contacts")
+        # Attachments by message ID, as the real server lists them: Graph's `@odata.type` is
+        # stripped from its responses, so a file attachment is told apart by its `contentBytes`.
+        self.attachments = load_seed("attachments")
 
 
 # --- failure injection -------------------------------------------------------------------
@@ -427,6 +435,9 @@ def _server_error(message: str) -> CallToolResult:
 
 NO_TOKEN = "No valid token found"  # the real server's error when nobody is logged in
 
+# A mail attachment's raw bytes, the one kind of target the stand-in's download-bytes-to-file serves.
+_ATTACHMENT_VALUE = re.compile(r"/me/messages/(?P<message>[^/]+)/attachments/(?P<attachment>[^/]+)/\$value")
+
 
 def _failing_as_switched(fn):
     """Wrap a Graph tool so it fails as the switched-on Failure mode says."""
@@ -504,6 +515,15 @@ def create_server(world: Ms365World | None = None) -> FastMCP:
     def get_mail_message(messageId: str, select: str | None = None) -> CallToolResult:
         return _get(world.messages, messageId, select)
 
+    @graph_tool("list-mail-attachments", "Retrieve a list of attachment objects.")
+    def list_mail_attachments(messageId: str, top: int | None = None, skip: int | None = None,
+                              search: str | None = None, filter: str | None = None, orderby: str | None = None,
+                              select: str | None = None) -> CallToolResult:
+        if not any(m["id"] == messageId for m in world.messages):
+            return _graph_error("ErrorItemNotFound", "The specified object was not found in the store.")
+        return _list(world.attachments.get(messageId, []),
+                     filter=filter, search=search, orderby=orderby, select=select, top=top, skip=skip)
+
     # --- contacts ---
 
     @graph_tool("list-outlook-contacts", "Get a contact collection from the default contacts folder of the signed-in user.")
@@ -579,11 +599,34 @@ def create_server(world: Ms365World | None = None) -> FastMCP:
     for name in UNEMULATED_WRITE_TOOLS:
         graph_tool(name, f"{name} (not emulated by the Fixture world)", read_only=False)(unemulated(name))
 
-    # A local-file write that the real server annotates readOnlyHint (its method is GET).
-    mcp.tool(name="download-bytes-to-file", structured_output=False,
-             description="Write authenticated Microsoft Graph byte content to a local file on the server.",
-             annotations=ToolAnnotations(title="download-bytes-to-file", readOnlyHint=True, openWorldHint=True),
-             )(unemulated("download-bytes-to-file"))
+    # A local-file write that the real server annotates readOnlyHint (its method is GET). Emulated
+    # for mail attachments only, with the real server's rules: outputPath must be absolute, and an
+    # existing file is never overwritten.
+    @mcp.tool(name="download-bytes-to-file", structured_output=False,
+              description="Write authenticated Microsoft Graph byte content to a local file on the server.",
+              annotations=ToolAnnotations(title="download-bytes-to-file", readOnlyHint=True, openWorldHint=True))
+    @_failing_as_switched
+    def download_bytes_to_file(target: str, outputPath: str) -> CallToolResult:
+        if not target.startswith("/"):
+            return _server_error('target must be a relative Microsoft Graph path starting with "/".')
+        if not os.path.isabs(outputPath):
+            return _server_error(f"outputPath must be an absolute path, e.g. /Users/me/downloads/file.ext. "
+                                 f"Received: {outputPath}")
+        if os.path.lexists(outputPath):
+            return _server_error(f"file already exists at {outputPath}")
+        match = _ATTACHMENT_VALUE.fullmatch(target)
+        attachment = match and next((a for a in world.attachments.get(match["message"], [])
+                                     if a["id"] == match["attachment"]), None)
+        if not attachment or "contentBytes" not in attachment:
+            return _server_error('Microsoft Graph API error: 404 Not Found - {"error":{"code":"ErrorItemNotFound",'
+                                 '"message":"The specified object was not found in the store."}}')
+        data = base64.b64decode(attachment["contentBytes"])
+        try:
+            with open(outputPath, "xb") as f:
+                f.write(data)
+        except OSError as exc:
+            return _server_error(str(exc))
+        return _ok({"path": outputPath, "contentType": attachment["contentType"], "bytesWritten": len(data)})
 
     # --- account tools: present like on the real server, so the agent's hiding of them is testable ---
 

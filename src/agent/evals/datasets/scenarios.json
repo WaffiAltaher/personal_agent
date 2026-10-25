@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "dataset_version": "2026-10-22.4",
+  "dataset_version": "2026-10-25.1",
   "scenarios": [
     {
       "id": "inbox-reply-jan",
@@ -148,6 +148,44 @@
       "expected_facts": ["-375.00"],
       "require_facts": true,
       "expected_outcome": {"upload_count": 0}
+    },
+    {
+      "id": "attachment-gmail-save-approved",
+      "workflow": "attachments",
+      "input": "Save the PDF of my October energy bill from Gmail to my computer.",
+      "approval": "approve",
+      "required_tools": ["get_gmail_message", "save_gmail_attachment"],
+      "ordering": [{"before": "get_gmail_message", "after": "save_gmail_attachment"}],
+      "forbidden_tools": ["ms365_save_attachment", "informer_upload_purchase_invoice", "create_draft_email", "ms365_send-mail"],
+      "expected_outcome": {"upload_count": 0, "saved_files": ["gmail/energy-bill-2026-10.pdf"], "approvals": 1}
+    },
+    {
+      "id": "attachment-outlook-save-rejected",
+      "workflow": "attachments",
+      "input": "Save the PDF invoice attached to CloudHost's October invoice email in Outlook to my computer.",
+      "approval": "reject",
+      "required_tools": ["ms365_list-mail-attachments", "ms365_save_attachment"],
+      "ordering": [{"before": "ms365_list-mail-attachments", "after": "ms365_save_attachment"}],
+      "forbidden_tools": ["save_gmail_attachment", "informer_upload_purchase_invoice", "ms365_send-mail"],
+      "expected_outcome": {"upload_count": 0, "saved_files": []}
+    },
+    {
+      "id": "attachment-outlook-to-informer-approved",
+      "workflow": "attachments",
+      "input": "Take the PDF invoice from CloudHost's October invoice email in Outlook, save it and upload it to Informer as a Purchase invoice for the accountant to book.",
+      "approval": "approve",
+      "required_tools": ["ms365_list-mail-attachments", "ms365_save_attachment", "informer_upload_purchase_invoice"],
+      "ordering": [
+        {"before": "ms365_list-mail-attachments", "after": "ms365_save_attachment"},
+        {"before": "ms365_save_attachment", "after": "informer_upload_purchase_invoice"}
+      ],
+      "forbidden_tools": ["save_gmail_attachment", "create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
+      "expected_outcome": {
+        "upload_count": 1,
+        "upload_file": "CH-2026-1044.pdf",
+        "saved_files": ["outlook/CH-2026-1044.pdf"],
+        "approvals": 2
+      }
     },
     {
       "id": "research-route-planning",

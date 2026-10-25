@@ -45,12 +45,16 @@ _Avoid_: email (when unsent), message
 ## Agent actions
 
 **Write action**:
-Any tool call that changes data in an external system; it always needs the owner's approval first and is never retried automatically.
+Any tool call that changes data in an external system or on the owner's computer; it always needs the owner's approval first and is never retried automatically.
 _Avoid_: mutation, side effect
 
 **Approval**:
 The owner's single approve-or-reject answer covering every Write action the agent proposes at once; reads proposed alongside them are not part of it. Sending a new request instead of answering counts as a rejection.
 _Avoid_: confirmation, consent
+
+**Agent folder**:
+The folder on the owner's computer that is the agent's own (`~/Downloads/personal_agent`), with one subfolder per mailbox for saved attachments.
+_Avoid_: data folder, download folder
 
 **Fixture world**:
 The seeded fake mailbox, calendar and Informer administration used for tests and evals in place of real ITtopia data.
