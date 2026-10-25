@@ -111,6 +111,9 @@ def _extract_header(headers: list[dict], name: str) -> str:
 
 # Attachments are parts with a file name and an attachment ID. Their bytes are not in the
 # message: they come from the attachments endpoint, base64url-encoded like message bodies.
+# Gmail hands out a new attachment ID on every fetch of the message, so the ID listed to
+# the model is the MIME part ID, which stays the same; a save looks the part up in a fresh
+# fetch and uses that fetch's attachment ID.
 # The Fixture world's stand-ins call these same functions on seeded Gmail API payloads.
 
 def _decode_attachment_data(data: str) -> bytes:
@@ -119,10 +122,16 @@ def _decode_attachment_data(data: str) -> bytes:
 
 
 def _is_inline(part: dict) -> bool:
-    """A part with a Content-ID or Content-Disposition: inline (logos, tracking pixels, pasted images)."""
+    """
+    An inline part (logos, tracking pixels, pasted images): Content-Disposition: inline, or no
+    Content-Disposition and a Content-ID. Content-Disposition: attachment always wins, since
+    Gmail's own client gives ordinary attachments a Content-ID too.
+    """
     headers = part.get("headers", [])
     disposition = _extract_header(headers, "Content-Disposition").strip().lower()
-    return bool(_extract_header(headers, "Content-ID")) or disposition.startswith("inline")
+    if disposition:
+        return disposition.startswith("inline")
+    return bool(_extract_header(headers, "Content-ID"))
 
 
 def _list_attachments(payload: dict) -> list[dict]:
@@ -138,7 +147,8 @@ def _list_attachments(payload: dict) -> list[dict]:
         if part.get("filename") and body.get("attachmentId"):
             found.append({
                 "file_name": part["filename"],
-                "attachment_id": body["attachmentId"],
+                "attachment_id": part.get("partId", ""),  # the ID listed to the model
+                "gmail_attachment_id": body["attachmentId"],  # valid for this fetch only
                 "size": body.get("size", 0),
                 "mime_type": part.get("mimeType", ""),
                 "inline": _is_inline(part),
@@ -196,7 +206,7 @@ def _save_attachment(
     refusal = attachment_save.check_listed_size(real_name, attachment["size"])
     if refusal:
         return refusal
-    data = fetch_data(attachment_id)
+    data = fetch_data(attachment["gmail_attachment_id"])
     if not data:
         return f"Error: Gmail returned no data for {real_name!r}."
     try:
@@ -458,7 +468,7 @@ def get_gmail_message(message_id: str, include_inline: bool = False) -> str:
 
 class SaveGmailAttachmentInput(BaseModel):
     message_id: str = Field(description="The ID of the Gmail message, from search_gmail.")
-    attachment_id: str = Field(description="The attachment ID that get_gmail_message lists.")
+    attachment_id: str = Field(description="The attachment ID exactly as get_gmail_message lists it.")
     file_name: str = Field(
         description=(
             "The attachment's file name, exactly as get_gmail_message lists it. "
@@ -496,12 +506,12 @@ def save_gmail_attachment(
             .execute()
         )
 
-        def fetch_data(attachment_id: str) -> str | None:
+        def fetch_data(gmail_attachment_id: str) -> str | None:
             attachment = (
                 service.users()
                 .messages()
                 .attachments()
-                .get(userId="me", messageId=message_id, id=attachment_id)
+                .get(userId="me", messageId=message_id, id=gmail_attachment_id)
                 .execute()
             )
             return attachment.get("data")
@@ -535,7 +545,7 @@ def _fixture_save_gmail_attachment(
         attachment_id,
         file_name,
         include_inline,
-        lambda attachment_id: fixture_google.attachment_data(message_id, attachment_id),
+        lambda gmail_attachment_id: fixture_google.attachment_data(message_id, gmail_attachment_id),
     )
 
 

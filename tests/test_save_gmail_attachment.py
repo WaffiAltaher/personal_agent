@@ -19,18 +19,32 @@ from agent.config import settings
 from agent.graph import build_graph
 from agent.tools import load_all_tools
 from fixture_world.clock import SEED_TODAY
+from fixture_world import google as fixture_google
 from fixture_world.google import load_seed
 
-MESSAGE_ID = "gmsg004"  # the energy bill: a PDF attachment and an inline logo
-PDF_ID = "ANGjdJ8fixturePdf004"
-LOGO_ID = "ANGjdJ8fixtureLogo004"
+MESSAGE_ID = "gmsg004"  # the energy bill: a PDF, a CSV that carries a Content-ID, an inline logo
+# The listed attachment ID is the MIME part ID: Gmail's own attachment IDs change per fetch.
+PDF_ID = "1"
+LOGO_ID = "2"
+CSV_ID = "3"
 PDF_NAME = "energy-bill-2026-10.pdf"
 LOGO_NAME = "logo.png"
+CSV_NAME = "meter-readings.csv"
 
 
-def _seeded_bytes(attachment_id: str) -> bytes:
+def _seeded_message() -> dict:
     [message] = [m for m in load_seed("messages") if m["id"] == MESSAGE_ID]
-    data = message["attachmentData"][attachment_id]
+    return message
+
+
+def _seeded_data(part_id: str) -> str:
+    message = _seeded_message()
+    [part] = [p for p in message["parts"] if p["partId"] == part_id]
+    return message["attachmentData"][part["body"]["attachmentId"]]
+
+
+def _seeded_bytes(part_id: str) -> bytes:
+    data = _seeded_data(part_id)
     return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
 
 
@@ -185,15 +199,53 @@ async def test_reading_the_message_lists_the_pdf_and_hides_the_logo_by_default(t
     text = await tools["get_gmail_message"].ainvoke({"message_id": MESSAGE_ID})
 
     assert PDF_NAME in text
-    assert PDF_ID in text
+    assert f"attachment ID: {PDF_ID}" in text
     assert str(len(_seeded_bytes(PDF_ID))) in text
     assert LOGO_NAME not in text
-    assert LOGO_ID not in text
+    assert f"attachment ID: {LOGO_ID}" not in text
 
     with_inline = await tools["get_gmail_message"].ainvoke({"message_id": MESSAGE_ID, "include_inline": True})
 
     assert LOGO_NAME in with_inline
-    assert LOGO_ID in with_inline
+    assert f"attachment ID: {LOGO_ID}" in with_inline
+
+
+@pytest.mark.asyncio
+async def test_the_listed_attachment_id_stays_put_while_gmails_own_ids_change_per_fetch(tools, agent_folder):
+    first = fixture_google.message_payload(MESSAGE_ID)["parts"][0]["body"]["attachmentId"]
+    second = fixture_google.message_payload(MESSAGE_ID)["parts"][0]["body"]["attachmentId"]
+    assert first != second  # the stand-in behaves like Gmail
+
+    listed = await tools["get_gmail_message"].ainvoke({"message_id": MESSAGE_ID})
+    assert listed == await tools["get_gmail_message"].ainvoke({"message_id": MESSAGE_ID})
+
+    result = await _save(tools)
+
+    assert (agent_folder / "gmail" / PDF_NAME).read_bytes() == _seeded_bytes(PDF_ID)
+    assert not result.startswith("Error:")
+
+
+@pytest.mark.asyncio
+async def test_a_gmail_attachment_id_is_not_accepted_in_place_of_the_listed_one(tools, agent_folder):
+    gmail_id = fixture_google.message_payload(MESSAGE_ID)["parts"][0]["body"]["attachmentId"]
+
+    result = await _save(tools, attachment_id=gmail_id)
+
+    assert result.startswith("Error:")
+    assert not (agent_folder / "gmail" / PDF_NAME).exists()
+
+
+@pytest.mark.asyncio
+async def test_an_attachment_with_a_content_id_is_still_a_file_attachment(tools, agent_folder):
+    # Gmail's own client gives ordinary attachments a Content-ID; Content-Disposition decides.
+    text = await tools["get_gmail_message"].ainvoke({"message_id": MESSAGE_ID})
+    assert f"{CSV_NAME} (" in text
+    assert "inline" not in text.split(CSV_NAME, 1)[1].splitlines()[0]
+
+    result = await _save(tools, attachment_id=CSV_ID, file_name=CSV_NAME)
+
+    assert (agent_folder / "gmail" / CSV_NAME).read_bytes() == _seeded_bytes(CSV_ID)
+    assert not result.startswith("Error:")
 
 
 @pytest.mark.asyncio
@@ -205,8 +257,7 @@ async def test_has_attachment_finds_the_seeded_message_only(tools):
 
 
 def test_seeded_attachment_data_is_base64url_not_standard_base64():
-    [message] = [m for m in load_seed("messages") if m["id"] == MESSAGE_ID]
-    data = message["attachmentData"][PDF_ID]
+    data = _seeded_data(PDF_ID)
 
     assert "-" in data or "_" in data
     assert "+" not in data and "/" not in data
