@@ -19,6 +19,7 @@ from langgraph.errors import GraphRecursionError
 from agent.auth.claude_code import ClaudeCodeLoginRequired, check_claude_code_login
 from agent.auth.google import GoogleLoginRequired, check_google_login
 from agent.chat_model import ModelConfigError, create_chat_model
+from agent.claude_code_model import ClaudeCodeError
 from agent.conversation import run_conversation
 from agent.graph import build_graph, get_checkpointer, log_run_to_memory
 from agent.memory import fixtures_semantic_memory
@@ -249,6 +250,10 @@ async def main():
                 model_name=settings.model_name,
                 error=run_error,
             )
+        # A Claude Code call that couldn't produce a turn already says what to do (ADR-016).
+        if isinstance(exc, ClaudeCodeError):
+            print(f"Stopped: {exc}")
+            sys.exit(1)
         raise
     finally:
         flush_traces()
