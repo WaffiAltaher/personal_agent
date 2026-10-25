@@ -1,4 +1,4 @@
-# 03: Usage limit, timeout and CLI errors stop the run, which can be resumed
+# 03: Usage limit, timeout and CLI errors stop the run with a message
 
 **What to build:** When a Claude Code call can't produce a turn, the owner's run stops with a message they can act on, and the run can be resumed later. Nothing is retried, nothing falls back to an API key or another model, and nothing waits.
 
@@ -6,8 +6,8 @@
 
 **Status:** resolved
 
-- [x] Usage limit: the run stops with "Claude subscription usage limit reached; resets at <time>. The run is saved and can be resumed."
-- [x] Timeout (`CLAUDE_CODE_TIMEOUT_S`): the CLI process and anything it started are killed, and the run stops with "Claude Code did not answer within <n> s; the run is saved and can be resumed."
+- [x] Usage limit: the run stops with "Claude subscription usage limit reached; resets at <time>. Ask again after the reset."
+- [x] Timeout (`CLAUDE_CODE_TIMEOUT_S`): the CLI process and anything it started are killed, and the run stops with "Claude Code did not answer within <n> s. Ask again."
 - [x] A non-zero exit, an error result, unparseable output and an unknown model each stop with the CLI's own message
 - [x] If ticket 02 has landed, a reply still invalid after the re-ask uses this same stop path
 - [x] None of these is retried, and none falls back to another model

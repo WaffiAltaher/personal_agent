@@ -349,7 +349,7 @@ Two plain tools were chosen over a hidden check that the Approval step calls bef
 - **Cursor deferred:** `cursor-agent -p` cannot turn its tools off (the closest is `--mode ask`, sandbox and an empty workspace), so injected text could make it read files. It also has no system-prompt or schema flag.
 
 **Consequences:**
-- The owner's subscription limits now bound agent and eval runs. Hitting the usage limit stops the run with the reset time; there is no fallback to an API key and no waiting. Timeouts (180 s, `CLAUDE_CODE_TIMEOUT_S`), CLI crashes and a reply still invalid after the re-ask also stop the run, with the checkpoint kept. None of these is retried.
+- The owner's subscription limits now bound agent and eval runs. Hitting the usage limit stops the run with the reset time; there is no fallback to an API key and no waiting. Timeouts (180 s, `CLAUDE_CODE_TIMEOUT_S`), CLI crashes and a reply still invalid after the re-ask also stop the run, with the checkpoint kept. None of these is retried. The CLI doesn't offer a resume, so after a stop the owner asks again (a CLI `--resume` is a later idea).
 - Cost is the API-equivalent price from `pricing.py`, looked up with the model the CLI reports (so `sonnet` and `claude-sonnet-5-5` price the same). A model without a table row shows no cost.
 - Effort stays at Claude Code's default. There is no setting until evals show it matters.
 - Tests drive a stand-in `claude` executable at the subprocess boundary (ADR-011), selected with `CLAUDE_CODE_BINARY`. One `live` test calls the real CLI and guards the isolated context size, since a Claude Code update could start loading the owner's setup again.

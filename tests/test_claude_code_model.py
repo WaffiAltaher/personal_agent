@@ -376,7 +376,7 @@ def test_a_usage_limit_stops_with_when_it_resets(cli, reply, resets):
         with_tools().invoke("Any mail from Bob?")
 
     assert str(stop.value) == (
-        f"Claude subscription usage limit reached; resets at {resets}. The run is saved and can be resumed."
+        f"Claude subscription usage limit reached; resets at {resets}. Ask again after the reset."
     )
     assert len(cli.calls()) == 1  # not retried, and no other model asked
 
@@ -438,7 +438,7 @@ def test_a_timeout_kills_the_cli_and_what_it_started_and_stops(cli, tmp_path):
     with pytest.raises(ClaudeCodeError) as stop:
         with_tools(claude_code(claude_code_timeout_s=2)).invoke("Any mail from Bob?")
 
-    assert str(stop.value) == "Claude Code did not answer within 2 s; the run is saved and can be resumed."
+    assert str(stop.value) == "Claude Code did not answer within 2 s. Ask again."
     assert len(cli.calls()) == 1  # not retried, and no other model asked
     pids = fake_cli.hung_pids(tmp_path / "calls.jsonl")
     assert len(pids) == 2  # the stand-in and the child it started

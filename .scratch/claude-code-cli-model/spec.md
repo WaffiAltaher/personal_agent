@@ -32,21 +32,20 @@ The owner selects `claude_code:<model>` (for example `claude_code:claude-sonnet-
 16. As the owner, I want a malformed reply from Claude corrected automatically once, so that a single slip doesn't end my run.
 17. As the owner, I want a reply that is still malformed after that to stop the run with a clear message, so that a broken turn never turns into a made-up answer.
 18. As the owner, I want a run that hits my usage limit to stop with the reset time, so that I know when I can continue.
-19. As the owner, I want a run stopped by the usage limit to be resumable, so that I can continue after the reset without starting over.
-20. As the owner, I want the agent never to fall back to an API key when my subscription is unavailable, so that nothing is billed without my asking.
-21. As the owner, I want a call that hangs to stop after 180 seconds with a clear message, so that the CLI never sits there silently.
-22. As the owner, I want to change that time limit in `.env`, so that a slow day doesn't need a code change.
-23. As the owner, I want CLI errors shown as a message, not a traceback, so that I can act on them.
-24. As the owner, I want the run log to show token usage and the API-equivalent cost, so that I can see what the subscription saves me.
-25. As the owner, I want the setup wizard to set up the subscription model without asking for chat API keys, so that a fresh setup works without paying per token.
-26. As the owner, I want the wizard to keep asking for the Google key and say it is for embeddings, so that I know why it's still needed.
-27. As the maintainer, I want evals to run with `claude_code:` models, so that I can compare them like any other model.
-28. As the maintainer, I want the RAGAS judge to work with a `claude_code:` model, so that judging also runs on the subscription.
-29. As the maintainer, I want the same run priced the same whether the model is spelled `sonnet` or `claude-sonnet-5-5`, so that cost comparisons are truthful.
-30. As the maintainer, I want a model without a price-table row to show no cost rather than a guess, so that reports never invent numbers.
-31. As the maintainer, I want Langfuse traces of `claude_code:` runs to look like any other run's, so that tracing needs no change.
-32. As the maintainer, I want the wrapper tested without the real CLI, so that tests stay free, offline and repeatable.
-33. As the maintainer, I want one opt-in live test against the real CLI, so that a Claude Code update that breaks the flags, the reply format or the isolation gets noticed.
+19. As the owner, I want the agent never to fall back to an API key when my subscription is unavailable, so that nothing is billed without my asking.
+20. As the owner, I want a call that hangs to stop after 180 seconds with a clear message, so that the CLI never sits there silently.
+21. As the owner, I want to change that time limit in `.env`, so that a slow day doesn't need a code change.
+22. As the owner, I want CLI errors shown as a message, not a traceback, so that I can act on them.
+23. As the owner, I want the run log to show token usage and the API-equivalent cost, so that I can see what the subscription saves me.
+24. As the owner, I want the setup wizard to set up the subscription model without asking for chat API keys, so that a fresh setup works without paying per token.
+25. As the owner, I want the wizard to keep asking for the Google key and say it is for embeddings, so that I know why it's still needed.
+26. As the maintainer, I want evals to run with `claude_code:` models, so that I can compare them like any other model.
+27. As the maintainer, I want the RAGAS judge to work with a `claude_code:` model, so that judging also runs on the subscription.
+28. As the maintainer, I want the same run priced the same whether the model is spelled `sonnet` or `claude-sonnet-5-5`, so that cost comparisons are truthful.
+29. As the maintainer, I want a model without a price-table row to show no cost rather than a guess, so that reports never invent numbers.
+30. As the maintainer, I want Langfuse traces of `claude_code:` runs to look like any other run's, so that tracing needs no change.
+31. As the maintainer, I want the wrapper tested without the real CLI, so that tests stay free, offline and repeatable.
+32. As the maintainer, I want one opt-in live test against the real CLI, so that a Claude Code update that breaks the flags, the reply format or the isolation gets noticed.
 
 ## Implementation Decisions
 
@@ -103,8 +102,8 @@ With tools bound, Claude replies with exactly one JSON object, of one of two sha
 
 None of these is retried, and none falls back to another model. That matches how a model error ends a run today. The checkpoint keeps everything up to the last completed step.
 
-- **Usage limit:** the run stops with "Claude subscription usage limit reached; resets at <time>. The run is saved and can be resumed."
-- **Timeout:** the CLI process (and anything it started) is killed, and the run stops with "Claude Code did not answer within <n> s; the run is saved and can be resumed."
+- **Usage limit:** the run stops with "Claude subscription usage limit reached; resets at <time>. Ask again after the reset."
+- **Timeout:** the CLI process (and anything it started) is killed, and the run stops with "Claude Code did not answer within <n> s. Ask again."
 - **Other errors:** a non-zero exit, an error result, unparseable output, an unknown model, or a reply still invalid after the re-ask. Each stops the run with the CLI's own message, or the validation error.
 
 ### Startup check

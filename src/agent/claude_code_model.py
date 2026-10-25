@@ -65,7 +65,7 @@ class ClaudeCodeChatModel(BaseChatModel):
                 os.killpg(process.pid, signal.SIGKILL)
                 process.communicate()
                 raise ClaudeCodeError(
-                    f"Claude Code did not answer within {self.timeout_s:g} s; the run is saved and can be resumed."
+                    f"Claude Code did not answer within {self.timeout_s:g} s. Ask again."
                 ) from None
         return _reply_or_stop(_parse_result(process.returncode, stdout, stderr))
 
@@ -147,7 +147,7 @@ def _reply_or_stop(result: dict) -> dict:
     if _SUBSCRIPTION_LIMIT.search(text):
         raise ClaudeCodeError(
             f"Claude subscription usage limit reached; resets at {_reset_time(text)}. "
-            "The run is saved and can be resumed."
+            "Ask again after the reset."
         )
     raise ClaudeCodeError(f"Claude Code returned an error: {text}")
 

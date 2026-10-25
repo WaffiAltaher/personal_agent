@@ -4,7 +4,7 @@ from _cli_harness import cli_run  # noqa: F401
 
 from agent.claude_code_model import ClaudeCodeError
 
-STOP = "Claude subscription usage limit reached; resets at 3pm. The run is saved and can be resumed."
+STOP = "Claude subscription usage limit reached; resets at 3pm. Ask again after the reset."
 
 
 @pytest.mark.asyncio
