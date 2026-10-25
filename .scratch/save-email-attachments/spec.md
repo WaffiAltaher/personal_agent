@@ -86,7 +86,7 @@ Each save tool takes `message_id`, `attachment_id` and `file_name`, plus an opti
 
 ### Gmail
 
-- `get_gmail_message` additionally lists the message's attachments (file name, size, attachment ID), walking the same MIME parts it already walks for the body. Inline parts (those with a `Content-ID` or `Content-Disposition: inline`) are left out unless an optional `include_inline` argument is true.
+- `get_gmail_message` additionally lists the message's attachments (file name, size, attachment ID), walking the same MIME parts it already walks for the body. The attachment ID the model sees is the MIME part ID, because Gmail's own attachment ID changes on every fetch; the save finds the part again and uses that fetch's attachment ID. A part is inline when its `Content-Disposition` is `inline`, or when it has no `Content-Disposition` and has a `Content-ID`; `Content-Disposition: attachment` is never inline (Gmail gives normal attachments a `Content-ID` too). Inline parts are left out unless an optional `include_inline` argument is true.
 - A new local tool, `save_gmail_attachment`, fetches the bytes through the Gmail API's attachments endpoint using the library already in use, decodes them and applies the save rules into `gmail/`. The current OAuth scope (`gmail.modify`) already covers this, so no new login is needed.
 - It is wrapped in `write_action(...)`, and it has a Fixture world stand-in with the same name and arguments, registered like the other Google stand-ins.
 

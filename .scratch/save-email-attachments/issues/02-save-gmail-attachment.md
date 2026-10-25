@@ -23,7 +23,7 @@ Shared save rules (one module, written to be reused by the Outlook save):
 - [ ] The result is a plain string: success names the full path and the size; every refusal or failure starts with `Error:` and nothing raises
 
 Gmail:
-- [ ] `get_gmail_message` additionally lists the message's attachments (file name, size, attachment ID). Inline parts (those with a `Content-ID` or `Content-Disposition: inline`) are hidden unless an optional `include_inline` argument is true.
+- [ ] `get_gmail_message` additionally lists the message's attachments (file name, size, attachment ID). The listed ID is the MIME part ID, since Gmail's attachment ID changes on every fetch. A part is inline when its `Content-Disposition` is `inline`, or when it has none and has a `Content-ID`; `Content-Disposition: attachment` is never inline. Inline parts are hidden unless an optional `include_inline` argument is true.
 - [ ] `save_gmail_attachment(message_id, attachment_id, file_name, include_inline=False)` fetches the bytes through the Gmail API's attachments endpoint and applies the save rules into `gmail/`
 - [ ] The save is refused when `file_name` doesn't exactly equal the attachment's real file name, when the attachment is inline and `include_inline` is false, or when it's an attached email (`message/rfc822`)
 - [ ] `save_gmail_attachment` is wrapped in `write_action(...)` and is never `read_tool(...)`
