@@ -81,6 +81,22 @@ def _sum_usage_metadata(messages: list[BaseMessage]) -> tuple[dict | None, dict 
     return episodic_usage, priced
 
 
+def _claude_code_cost(messages: list[BaseMessage], *, on: date) -> float | None:
+    """A `claude_code:` run priced by the model the CLI reports it ran, never the alias or
+    configured name (ADR-016); None if any call has no reported model or no price."""
+    by_model: dict[str | None, list[BaseMessage]] = {}
+    for msg in messages:
+        if isinstance(msg, AIMessage) and getattr(msg, "usage_metadata", None):
+            by_model.setdefault(msg.response_metadata.get("model_name"), []).append(msg)
+    if not by_model:
+        return None
+    costs = [
+        cost_usd(name, _sum_usage_metadata(msgs)[1], on=on) if name else None
+        for name, msgs in by_model.items()
+    ]
+    return None if None in costs else sum(costs)
+
+
 def _is_step_limit_answer(message: BaseMessage | None) -> bool:
     # Keep in sync with agent.graph.STEP_LIMIT_ANSWER (avoid importing graph here).
     step_limit_answer = (
@@ -117,9 +133,12 @@ def build_run_record(
 ) -> RunRecord:
     messages: list[BaseMessage] = result.get("messages", [])
     token_usage, priced_usage = _sum_usage_metadata(messages)
-    run_cost = (
-        cost_usd(model_name, priced_usage, on=run_date) if priced_usage is not None else None
-    )
+    if model_name.startswith("claude_code:"):
+        run_cost = _claude_code_cost(messages, on=run_date)
+    else:
+        run_cost = (
+            cost_usd(model_name, priced_usage, on=run_date) if priced_usage is not None else None
+        )
     return RunRecord(
         user_input=user_input,
         final_output=_final_output(messages),
