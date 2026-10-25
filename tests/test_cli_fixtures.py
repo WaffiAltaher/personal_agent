@@ -39,6 +39,7 @@ def run_cli(monkeypatch, scripted_model):
 
     monkeypatch.setattr(cli, "create_chat_model", lambda: scripted_model([reply]))
     monkeypatch.setattr(cli, "check_google_login", lambda: None)
+    monkeypatch.setattr(cli, "check_claude_code_login", lambda binary: None)
     monkeypatch.setattr(cli, "verify_connection", lambda: True)
     monkeypatch.setattr(cli, "get_callback_handler", lambda **kwargs: BaseCallbackHandler())
     monkeypatch.setattr(cli, "load_all_tools", load_all_tools)
