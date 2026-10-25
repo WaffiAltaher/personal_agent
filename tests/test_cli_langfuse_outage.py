@@ -53,6 +53,7 @@ def run_cli_against_langfuse(monkeypatch, scripted_model, langfuse_spans):
 
     monkeypatch.setattr(cli, "create_chat_model", lambda: scripted_model([reply]))
     monkeypatch.setattr(cli, "check_google_login", lambda: None)
+    monkeypatch.setattr(cli, "check_claude_code_login", lambda binary: None)
     monkeypatch.setattr(cli, "load_all_tools", load_all_tools)
     monkeypatch.setattr(cli, "get_checkpointer", get_checkpointer)
     monkeypatch.setattr(

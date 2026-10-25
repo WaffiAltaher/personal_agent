@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     langfuse_base_url: str = "http://localhost:3000"
 
     # Agent behaviour (sensible defaults for now)
-    model_name: str = "google_genai:gemini-3.8-flash"  # provider:model, see agent/chat_model.py
+    model_name: str = "claude_code:claude-sonnet-5-5"  # provider:model, see agent/chat_model.py
     max_iterations: int = 10
     # claude_code: models (agent/claude_code_model.py): the Claude Code CLI, and how long one call may take
     claude_code_binary: str = "claude"
