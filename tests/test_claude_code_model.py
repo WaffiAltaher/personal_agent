@@ -150,12 +150,62 @@ def test_a_tool_calls_reply_may_hold_several_calls_with_generated_ids(cli):
     assert all(ids) and len(set(ids)) == 2
 
 
-@pytest.mark.parametrize("result", ["not json", "[]", json.dumps({"kind": "shrug"}), json.dumps({"kind": "answer"})])
-def test_a_malformed_reply_raises_a_clear_error(cli, result):
-    cli.script([result])
+ANSWER = json.dumps({"kind": "answer", "text": "No mail from Bob."})
+
+INVALID_REPLIES = {
+    "not json": "not json",
+    "a json array": "[]",
+    "fenced json": f"```json\n{ANSWER}\n```",  # the contract asks for the object and nothing else
+    "neither shape": json.dumps({"kind": "shrug"}),
+    "an answer without text": json.dumps({"kind": "answer"}),
+    "an unknown tool": json.dumps({"kind": "tool_calls", "calls": [{"name": "delete_everything", "args": {}}]}),
+    "args missing a required field": json.dumps({"kind": "tool_calls", "calls": [{"name": "search_mail", "args": {}}]}),
+    "args of the wrong type": json.dumps(
+        {"kind": "tool_calls", "calls": [{"name": "search_mail", "args": {"query": "Bob", "max_results": "five"}}]}),
+    # Claude tried a tool of its own: the CLI took more than one turn, even though the final text parses.
+    "a native tool attempt": {"result": ANSWER, "num_turns": 3},
+}
+
+
+@pytest.mark.parametrize("invalid", INVALID_REPLIES.values(), ids=INVALID_REPLIES.keys())
+def test_an_invalid_reply_is_re_asked_once_and_a_valid_second_reply_is_used(cli, invalid):
+    cli.script([invalid, ANSWER])
+
+    reply = with_tools().invoke("Any mail from Bob?")
+
+    assert reply.content == "No mail from Bob."
+    assert len(cli.calls()) == 2
+
+
+@pytest.mark.parametrize("invalid", INVALID_REPLIES.values(), ids=INVALID_REPLIES.keys())
+def test_a_second_invalid_reply_stops_with_the_validation_error(cli, invalid):
+    cli.script([invalid, invalid])
 
     with pytest.raises(ClaudeCodeError, match="reply"):
-        with_tools().invoke("hi")
+        with_tools().invoke("Any mail from Bob?")
+    assert len(cli.calls()) == 2
+
+
+def test_the_re_ask_tells_claude_what_was_wrong(cli):
+    cli.script([INVALID_REPLIES["an unknown tool"], ANSWER])
+
+    with_tools().invoke("Any mail from Bob?")
+
+    first, second = cli.calls()
+    assert "delete_everything" not in system_prompt(first)
+    assert "delete_everything" in system_prompt(second)
+    assert sent_messages(second) == sent_messages(first)  # the owner's conversation itself is unchanged
+
+
+def test_a_re_asked_turn_reports_both_cli_results_so_its_usage_counts(cli):
+    cli.script([
+        {"result": "not json", "usage": {"input_tokens": 100, "output_tokens": 7}},
+        {"result": ANSWER, "usage": {"input_tokens": 120, "output_tokens": 9}},
+    ])
+
+    reply = with_tools().invoke("Any mail from Bob?")
+
+    assert [r["usage"]["input_tokens"] for r in reply.response_metadata["claude_code_results"]] == [100, 120]
 
 
 @pytest.mark.asyncio

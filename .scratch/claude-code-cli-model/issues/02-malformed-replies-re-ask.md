@@ -4,14 +4,14 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Invalid replies: not JSON, neither spec shape, an unknown tool name, args that don't validate against that tool's schema, and a reply where Claude tried to use a tool itself (more than one CLI turn)
-- [ ] An invalid reply triggers exactly one re-ask that carries the validation error
-- [ ] A valid second reply is used as normal
-- [ ] A second invalid reply stops the run with the validation error (if ticket 03 has landed, it uses 03's stop path; otherwise it raises a clear error that 03 will turn into a clean stop)
-- [ ] The re-ask's call is visible in the usage the next model call reports (ticket 04 counts it)
-- [ ] The whole test suite passes
+- [x] Invalid replies: not JSON, neither spec shape, an unknown tool name, args that don't validate against that tool's schema, and a reply where Claude tried to use a tool itself (more than one CLI turn)
+- [x] An invalid reply triggers exactly one re-ask that carries the validation error
+- [x] A valid second reply is used as normal
+- [x] A second invalid reply stops the run with the validation error (if ticket 03 has landed, it uses 03's stop path; otherwise it raises a clear error that 03 will turn into a clean stop)
+- [x] The re-ask's call is visible in the usage the next model call reports (ticket 04 counts it)
+- [x] The whole test suite passes
 
 Traps:
 - Claude Code reports more than one turn when the model tried a tool of its own. That's the silent failure ADR-016 describes, so treat it as invalid even if the final text parses.
