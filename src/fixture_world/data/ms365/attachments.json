@@ -1,0 +1,26 @@
+{
+  "AAMkAGZpeHR1cmUAMESSAGE01": [
+    {
+      "id": "AAMkAGZpeHR1cmUAATTACH01",
+      "lastModifiedDateTime": "2026-10-01T05:59:58Z",
+      "name": "CH-2026-1044.pdf",
+      "contentType": "application/pdf",
+      "size": 277,
+      "isInline": false,
+      "contentId": null,
+      "contentLocation": null,
+      "contentBytes": "JVBERi0xLjQKJeLjz9MKMSAwIG9iajw8L1R5cGUvQ2F0YWxvZy9QYWdlcyAyIDAgUj4+ZW5kb2JqCjIgMCBvYmo8PC9UeXBlL1BhZ2VzL0tpZHNbMyAwIFJdL0NvdW50IDE+PmVuZG9iagozIDAgb2JqPDwvVHlwZS9QYWdlL1BhcmVudCAyIDAgUi9NZWRpYUJveFswIDAgNTk1IDg0Ml0+PmVuZG9iagolIENsb3VkSG9zdCBOZWRlcmxhbmQgQi5WLiAtIGludm9pY2UgQ0gtMjAyNi0xMDQ0IC0gT2N0b2JlciAyMDI2IC0gRVVSIDEyMS4wMAp0cmFpbGVyPDwvUm9vdCAxIDAgUj4+CiUlRU9GCg=="
+    },
+    {
+      "id": "AAMkAGZpeHR1cmUAATTACH02",
+      "lastModifiedDateTime": "2026-10-01T05:59:58Z",
+      "name": "cloudhost-logo.png",
+      "contentType": "image/png",
+      "size": 69,
+      "isInline": true,
+      "contentId": "logo@cloudhost.example",
+      "contentLocation": null,
+      "contentBytes": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4P5MBAAQzAZncH4SNAAAAAElFTkSuQmCC"
+    }
+  ]
+}

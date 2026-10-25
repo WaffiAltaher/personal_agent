@@ -8,7 +8,8 @@ and isolated: one that isn't configured, or fails to start, is skipped with a no
 naming it and why, and the agent starts with the rest.
 
 Each server's tools are classified (read or Write action, failing closed) here, at
-load time, with that server's own trust settings.
+load time, with that server's own trust settings. A server's ToolWrappers are bound
+as Write actions in place of the server tools they replace, which are never bound.
 
 Failures at the boundary never take the agent down:
 - at startup, a server that fails to start, or whose login is missing or expired
@@ -24,6 +25,7 @@ import asyncio
 import json
 import logging
 import re
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 from langchain_core.tools import BaseTool
@@ -36,7 +38,7 @@ from mcp.shared.exceptions import McpError
 from mcp.types import CONNECTION_CLOSED, CallToolResult, TextContent
 from mcp.types import Tool as MCPTool
 
-from agent.tools.classification import classify_mcp_tools
+from agent.tools.classification import classify_mcp_tools, write_action
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +62,16 @@ class LoginCheck:
 
 
 @dataclass(frozen=True)
+class ToolWrapper:
+    """An agent-side Write action over server tools, bound in place of a server tool the model never sees."""
+
+    name: str  # unprefixed; bound as "<server>_<name>"
+    replaces: str  # server tool name (unprefixed): never bound, whatever exposed_tools says
+    # Builds the tool from its bound name and every tool the server lists (unprefixed names, exposed or not).
+    build: Callable[[str, Mapping[str, BaseTool]], BaseTool]
+
+
+@dataclass(frozen=True)
 class McpServer:
     """How to reach one MCP server, and which of its tools the model may see."""
 
@@ -71,6 +83,7 @@ class McpServer:
     read_allowlist: frozenset[str] = frozenset()  # server tool names (unprefixed) classified read
     login: LoginCheck | None = None  # checked at startup; None when the server needs no login
     transient_errors: tuple[str, ...] = ()  # regexes: a tool error matching one is transient (retryable)
+    wrappers: tuple[ToolWrapper, ...] = ()  # bound in place of the server tools they replace
 
 
 def _text(result: CallToolResult) -> str:
@@ -171,10 +184,18 @@ async def _load_server(server: McpServer) -> list[BaseTool]:
         for tool in listed
     ]
     exposed = None if server.exposed_tools is None else {f"{server.name}_{name}" for name in server.exposed_tools}
-    return classify_mcp_tools(
-        [tool for tool in tools if exposed is None or tool.name in exposed],
+    replaced = {f"{server.name}_{wrapper.replaces}" for wrapper in server.wrappers}
+    classified = classify_mcp_tools(
+        [tool for tool in tools if (exposed is None or tool.name in exposed) and tool.name not in replaced],
         read_allowlist={f"{server.name}_{name}" for name in server.read_allowlist},
     )
+    by_name = {tool.name.removeprefix(f"{server.name}_"): tool for tool in tools}
+    for wrapper in server.wrappers:
+        if wrapper.replaces not in by_name:
+            logger.warning("MCP server %s has no %s tool; %s not bound", server.name, wrapper.replaces, wrapper.name)
+            continue
+        classified.append(write_action(wrapper.build(f"{server.name}_{wrapper.name}", by_name)))
+    return classified
 
 
 async def load_mcp_tools(servers: list[McpServer]) -> tuple[list[BaseTool], list[str]]:

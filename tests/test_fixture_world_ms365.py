@@ -10,10 +10,12 @@ import json
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from mcp.types import CallToolResult
 
 from agent.graph import build_graph
 from agent.tools import load_all_tools
 from agent.tools.classification import is_read
+from fixture_world.ms365 import create_server
 
 # The Fixture world's seeded week runs Monday 2026-10-05 to Sunday 2026-10-11.
 SEEDED_TODAY = "2026-10-07"
@@ -146,10 +148,11 @@ async def test_unread_mail_filter_and_an_unsupported_filter(fixture_tools, scrip
 
 
 @pytest.mark.asyncio
-async def test_model_sees_ms365_read_tools_and_the_two_draft_tools_only(fixture_tools):
+async def test_model_sees_ms365_read_tools_the_two_draft_tools_and_the_attachment_save_only(fixture_tools):
     """The stand-in also serves send, delete, move, update, calendar, rule, folder and permission
     writes, the account tools, and download-bytes-to-file (a local-file write the real server
-    annotates readOnlyHint): none of them is bound, whatever its annotations say."""
+    annotates readOnlyHint): none of them is bound, whatever its annotations say. The agent's
+    own ms365_save_attachment is bound in place of download-bytes-to-file."""
     tools = await fixture_tools()
 
     assert sorted(t.name for t in tools if t.name.startswith("ms365_")) == [
@@ -160,8 +163,56 @@ async def test_model_sees_ms365_read_tools_and_the_two_draft_tools_only(fixture_
         "ms365_get-mail-message",
         "ms365_get-outlook-contact",
         "ms365_list-calendar-events",
+        "ms365_list-mail-attachments",
         "ms365_list-mail-messages",
         "ms365_list-outlook-contacts",
+        "ms365_save_attachment",
     ]
     writes = sorted(t.name for t in tools if t.name.startswith("ms365_") and not is_read(t))
-    assert writes == ["ms365_create-draft-email", "ms365_create-reply-draft"]
+    assert writes == ["ms365_create-draft-email", "ms365_create-reply-draft", "ms365_save_attachment"]
+
+
+_SEEDED_PDF = "/me/messages/AAMkAGZpeHR1cmUAMESSAGE01/attachments/AAMkAGZpeHR1cmUAATTACH01/$value"
+
+
+async def _download_to_file(target: str, output_path: str) -> CallToolResult:
+    """The stand-in's download-bytes-to-file, called directly: the agent never binds it."""
+    return await create_server().call_tool("download-bytes-to-file", {"target": target, "outputPath": output_path})
+
+
+def _result_text(result: CallToolResult) -> str:
+    return "".join(block.text for block in result.content)
+
+
+@pytest.mark.asyncio
+async def test_download_bytes_to_file_writes_the_seeded_attachment(tmp_path):
+    output = tmp_path / "invoice.pdf"
+
+    result = await _download_to_file(_SEEDED_PDF, str(output))
+
+    assert not result.isError
+    assert output.read_bytes().startswith(b"%PDF-")
+    assert json.loads(_result_text(result))["bytesWritten"] == output.stat().st_size
+
+
+@pytest.mark.asyncio
+async def test_download_bytes_to_file_refuses_a_relative_path(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    result = await _download_to_file(_SEEDED_PDF, "invoice.pdf")
+
+    assert result.isError
+    assert "must be an absolute path" in _result_text(result)
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_download_bytes_to_file_never_overwrites_an_existing_file(tmp_path):
+    output = tmp_path / "invoice.pdf"
+    output.write_bytes(b"already here")
+
+    result = await _download_to_file(_SEEDED_PDF, str(output))
+
+    assert result.isError
+    assert f"file already exists at {output}" in _result_text(result)
+    assert output.read_bytes() == b"already here"
