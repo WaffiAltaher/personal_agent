@@ -64,6 +64,7 @@ class OutcomeScore(BaseModel):
     passed: bool
     upload_count: int = 0
     uploads: list[str] = []
+    saved_files: list[str] = []  # files in the agent folder after the run, relative to it
     detail: str = ""
 
 

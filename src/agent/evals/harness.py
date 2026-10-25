@@ -8,9 +8,10 @@ every approval prompt is answered with the scenario's approval policy through
 `run_conversation`, as the CLI does with the owner's answer.
 
 Only tools that stay inside the Fixture world are bound: the Fixture world's MCP tools plus
-the local tools in EVAL_LOCAL_TOOLS (the seeded web search). The other local tools reach the
-owner's real Gmail, Google Calendar, memory store or files, and an auto-approved Write action
-there would be real.
+the local tools in EVAL_LOCAL_TOOLS (the seeded web search and Gmail stand-ins). The other local
+tools reach the owner's real Gmail, Google Calendar, memory store or files, and an auto-approved
+Write action there would be real. The agent folder, where attachments are saved, is the run's own
+`Downloads/personal_agent`, inside the Downloads folder the Informer upload accepts.
 """
 
 import json
@@ -38,7 +39,7 @@ from agent.evals.generation import GenerationScorer, generation_means, generatio
 from agent.evals.records import EvalResults, InterruptRecord, RunResult, ToolCallRecord
 from agent.evals.report import render_report
 from agent.evals.scenarios import Dataset, Scenario
-from agent.evals.outcome import read_upload_log, run_passed, score_outcome
+from agent.evals.outcome import read_agent_folder, read_upload_log, run_passed, score_outcome
 from agent.evals.trajectory import score_facts, score_trajectory, summarise
 from fixture_world.purchase_handover import HANDOVER_FAIL_ENV, UPLOAD_LOG_ENV
 from agent.conversation import run_conversation
@@ -46,6 +47,7 @@ from agent.graph import build_graph, is_step_limit_answer
 from agent.tracing import TraceAttributes
 from agent.tools import LOCAL_TOOLS, load_all_tools
 from agent.tools.classification import is_read
+from agent.tools.gmail import get_gmail_message, save_gmail_attachment, search_gmail
 from agent.tools.memory import retrieve_episodic_memory
 from agent.tools.web import web_search
 from fixture_world import clock, informer as fixture_informer, ms365 as fixture_ms365
@@ -91,8 +93,15 @@ def _isolated_eval_episodic(workdir: Path, scenario: Scenario) -> Iterator[None]
         memory_module._episodic = prev
 
 # Local tools that touch nothing real in Fixture-world mode: safe to bind in an eval. (The web
-# search is the Fixture world's seeded one there, under the real tool's name.)
-EVAL_LOCAL_TOOLS = frozenset({web_search.name, retrieve_episodic_memory.name})
+# search and the Gmail tools are the Fixture world's seeded ones there, under the real tools'
+# names; the Gmail save writes into the run's agent folder.)
+EVAL_LOCAL_TOOLS = frozenset({
+    web_search.name,
+    retrieve_episodic_memory.name,
+    search_gmail.name,
+    get_gmail_message.name,
+    save_gmail_attachment.name,
+})
 
 ModelFactory = Callable[[Scenario], BaseChatModel]
 ToolLoader = Callable[[], Awaitable[tuple[list[BaseTool], list[str]]]]
@@ -140,6 +149,17 @@ def _environment(values: dict[str, str | None]) -> Iterator[None]:
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
+
+
+@contextmanager
+def _agent_folder(folder: Path) -> Iterator[None]:
+    """Point the agent folder setting at `folder` for the block, then restore it."""
+    saved = settings.agent_folder
+    settings.agent_folder = str(folder)
+    try:
+        yield
+    finally:
+        settings.agent_folder = saved
 
 
 def _text(content) -> str:
@@ -203,12 +223,14 @@ async def run_scenario(
     recorded_uploads: list[tuple[str, bytes]] = []
     upload_log_path_str: str | None = None
     expected_bytes: dict[str, bytes] | None = None
+    saved: dict[str, bytes] = {}
     with tempfile.TemporaryDirectory(prefix="eval-") as workdir:
         work = Path(workdir)
         drafts_path = work / "drafts.jsonl"
         upload_log_path = work / "purchase-uploads.jsonl"
         downloads_path = work / "Downloads"
         _seed_eval_downloads(downloads_path)
+        agent_folder = downloads_path / "personal_agent"
         switch = fixture_ms365.FailureSwitch(Path(workdir) / "ms365-failure")
         env = {
             clock.TODAY_ENV: clock.SEED_TODAY.isoformat(),
@@ -228,7 +250,7 @@ async def run_scenario(
                 else os.environ.get(HANDOVER_FAIL_ENV)
             ),
         }
-        with _isolated_eval_episodic(work, scenario), _environment(env):
+        with _isolated_eval_episodic(work, scenario), _environment(env), _agent_folder(agent_folder):
             tools, notices = await load_tools()
             if failure and failure.server == "ms365":
                 switch.set(failure.mode, failure.times)  # after loading: it hits the run, not startup
@@ -280,9 +302,13 @@ async def run_scenario(
             drafts = fixture_ms365.recorded_drafts(drafts_path)
             recorded_uploads = read_upload_log(upload_log_path)
             upload_log_path_str = str(upload_log_path)
+            saved = read_agent_folder(agent_folder)
             if scenario.expected_outcome and scenario.expected_outcome.upload_file:
                 upload_name = scenario.expected_outcome.upload_file
-                candidate = downloads_path / upload_name
+                # A file the run saved into the agent folder is uploaded from there, wherever the
+                # prompt says that folder is.
+                saved_as = [p for p in (scenario.expected_outcome.saved_files or []) if Path(p).name == upload_name]
+                candidate = agent_folder / saved_as[0] if saved_as else downloads_path / upload_name
                 expected_bytes = (
                     {upload_name: candidate.read_bytes()} if candidate.is_file() else {upload_name: None}
                 )
@@ -298,6 +324,8 @@ async def run_scenario(
         recorded_uploads,
         final_answer=final_answer,
         expected_bytes=expected_bytes,
+        saved=saved,
+        approvals=len(interrupts),
     )
     run = RunResult(
         scenario_id=scenario.id,

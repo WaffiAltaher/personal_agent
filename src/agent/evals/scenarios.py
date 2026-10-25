@@ -78,6 +78,10 @@ class ExpectedOutcome(_Strict):
     upload_count: int
     upload_file: str | None = None  # when upload_count is 1: required file name and byte-for-byte content
     require_failure_reported: bool = False  # answer must contain every expected_fact (case-insensitive)
+    # Paths relative to the agent folder (`gmail/<name>`, `outlook/<name>`): when set, the run must
+    # leave exactly these files there, each with its seeded attachment's bytes ([] = nothing written).
+    saved_files: list[str] | None = None
+    approvals: int | None = None  # when set, the number of Approval prompts the run must get
 
 
 class Scenario(_Strict):

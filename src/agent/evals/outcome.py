@@ -1,5 +1,5 @@
 # src/agent/evals/outcome.py
-"""Outcome metrics: what actually happened (uploads recorded, failure reported), not just tool calls."""
+"""Outcome metrics: what actually happened (uploads recorded, files saved, failure reported), not just tool calls."""
 
 import base64
 import json
@@ -8,6 +8,7 @@ from pathlib import Path
 from agent.evals.records import OutcomeScore, TrajectoryScore
 from agent.evals.scenarios import Scenario
 from agent.evals.trajectory import score_facts
+from fixture_world import google as fixture_google, ms365 as fixture_ms365
 
 
 def read_upload_log(path: Path | None) -> list[tuple[str, bytes]]:
@@ -23,14 +24,46 @@ def read_upload_log(path: Path | None) -> list[tuple[str, bytes]]:
     return uploads
 
 
+def read_agent_folder(folder: Path | None) -> dict[str, bytes]:
+    """Every file in the agent folder after a run, by path relative to it (hidden ones included)."""
+    if folder is None or not folder.is_dir():
+        return {}
+    return {
+        path.relative_to(folder).as_posix(): path.read_bytes()
+        for path in sorted(folder.rglob("*"))
+        if path.is_file()
+    }
+
+
+def seeded_attachment(saved_path: str) -> bytes | None:
+    """The Fixture world's bytes for an attachment saved as `gmail/<name>` or `outlook/<name>`."""
+    mailbox, _, name = saved_path.partition("/")
+    if mailbox == "gmail":
+        for message in fixture_google.load_seed("messages"):
+            for part in message.get("parts", []):
+                attachment_id = part.get("body", {}).get("attachmentId")
+                if part.get("filename") == name and attachment_id in message.get("attachmentData", {}):
+                    data = message["attachmentData"][attachment_id]
+                    return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+    elif mailbox == "outlook":
+        for attachments in fixture_ms365.load_seed("attachments").values():
+            for attachment in attachments:
+                if attachment.get("name") == name and "contentBytes" in attachment:
+                    return base64.b64decode(attachment["contentBytes"])
+    return None
+
+
 def score_outcome(
     scenario: Scenario,
     uploads: list[tuple[str, bytes]],
     *,
     final_answer: str,
     expected_bytes: dict[str, bytes] | None = None,
+    saved: dict[str, bytes] | None = None,
+    approvals: int | None = None,
 ) -> OutcomeScore:
-    """Grade uploads and, when required, whether the answer reports a hand-over failure."""
+    """Grade uploads, the files in the agent folder (`saved`, by relative path), the number of
+    Approval prompts and, when required, whether the answer reports a hand-over failure."""
     expected = scenario.expected_outcome
     if expected is None:
         return OutcomeScore(applicable=False, passed=True)
@@ -54,6 +87,21 @@ def score_outcome(
                 passed = False
                 detail_parts.append("upload bytes do not match the expected file")
 
+    saved = saved or {}
+    if expected.saved_files is not None:
+        if sorted(saved) != sorted(expected.saved_files):
+            passed = False
+            detail_parts.append(f"expected saved file(s) {sorted(expected.saved_files)}, got {sorted(saved)}")
+        else:
+            for path in expected.saved_files:
+                if saved[path] != seeded_attachment(path):
+                    passed = False
+                    detail_parts.append(f"saved {path} does not hold the seeded attachment's bytes")
+
+    if expected.approvals is not None and approvals != expected.approvals:
+        passed = False
+        detail_parts.append(f"expected {expected.approvals} Approval(s), got {approvals}")
+
     if expected.require_failure_reported:
         answer = final_answer.lower()
         if not any(fragment.lower() in answer for fragment in scenario.expected_facts):
@@ -65,6 +113,7 @@ def score_outcome(
         passed=passed,
         upload_count=len(uploads),
         uploads=[name for name, _ in uploads],
+        saved_files=sorted(saved),
         detail="; ".join(detail_parts),
     )
 
