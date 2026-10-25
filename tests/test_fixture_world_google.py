@@ -10,7 +10,7 @@ import pytest_asyncio
 
 from agent.tools import LOCAL_TOOLS, load_all_tools
 from agent.tools.classification import is_read
-from agent.tools.gmail import create_draft_email, get_gmail_message, search_gmail
+from agent.tools.gmail import create_draft_email, get_gmail_message, save_gmail_attachment, search_gmail
 from agent.tools.google_calendar import get_calendar_event, list_calendar_events
 from fixture_world.clock import SEED_TODAY
 
@@ -18,6 +18,7 @@ REAL_GOOGLE_TOOLS = (
     search_gmail,
     get_gmail_message,
     create_draft_email,
+    save_gmail_attachment,
     list_calendar_events,
     get_calendar_event,
 )
@@ -54,6 +55,11 @@ async def test_fixture_world_google_reads_are_classified_read(fixture_google_too
 @pytest.mark.asyncio
 async def test_fixture_world_gmail_draft_is_a_write_action(fixture_google_tools):
     assert not is_read(fixture_google_tools["create_draft_email"])
+
+
+@pytest.mark.asyncio
+async def test_fixture_world_gmail_attachment_save_is_a_write_action(fixture_google_tools):
+    assert not is_read(fixture_google_tools["save_gmail_attachment"])
 
 
 @pytest.mark.asyncio

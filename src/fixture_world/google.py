@@ -110,7 +110,8 @@ def _message_matches_query(message: dict, query: str) -> bool:
                         return False
             elif key == "has":
                 if value == "attachment":
-                    return False  # seeded personal mail has no attachments
+                    if not any(part.get("filename") for part in message.get("parts", [])):
+                        return False
             else:
                 hay = " ".join(
                     (
@@ -183,6 +184,24 @@ def get_gmail_message(message_id: str) -> str:
                 lines.append(f"\n[Message truncated at {max_body_chars} characters]")
             return "\n".join(lines)
     return f"Error: message not found (ID: {message_id})"
+
+
+def message_payload(message_id: str) -> dict | None:
+    """The message's attachment parts as a Gmail API payload, or None for an unknown message.
+
+    Seeded `parts` have the Gmail API's shape, so the real tool's part walking runs on them."""
+    for msg in _messages():
+        if msg["id"] == message_id:
+            return {"mimeType": "multipart/mixed", "parts": msg.get("parts", [])}
+    return None
+
+
+def attachment_data(message_id: str, attachment_id: str) -> str | None:
+    """An attachment's bytes as the attachments endpoint returns them: base64url, unpadded."""
+    for msg in _messages():
+        if msg["id"] == message_id:
+            return msg.get("attachmentData", {}).get(attachment_id)
+    return None
 
 
 def create_draft_email(to: str, subject: str, body: str, cc: str = "") -> str:

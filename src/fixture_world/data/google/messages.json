@@ -34,5 +34,65 @@
     "body": "Hi Jen,\n\nFancy a walk in the Veluwe on Saturday if the weather holds? I'll bring coffee.\n\nMaria",
     "isRead": true,
     "cc": ""
+  },
+  {
+    "id": "gmsg004",
+    "from": "billing@energiedirect.example",
+    "fromName": "Energie Direct",
+    "to": "jen.personal@gmail.example",
+    "date": "2026-10-06T08:30:00Z",
+    "subject": "Your energy bill for October",
+    "snippet": "Your October energy bill of EUR 87.40 is attached as a PDF.",
+    "body": "Dear Jen,\n\nYour energy bill for October is attached. The amount of EUR 87.40 will be collected on 20 October.\n\nEnergie Direct",
+    "isRead": true,
+    "cc": "",
+    "parts": [
+      {
+        "partId": "1",
+        "mimeType": "application/pdf",
+        "filename": "energy-bill-2026-10.pdf",
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": "application/pdf; name=\"energy-bill-2026-10.pdf\""
+          },
+          {
+            "name": "Content-Disposition",
+            "value": "attachment; filename=\"energy-bill-2026-10.pdf\""
+          }
+        ],
+        "body": {
+          "attachmentId": "ANGjdJ8fixturePdf004",
+          "size": 255
+        }
+      },
+      {
+        "partId": "2",
+        "mimeType": "image/png",
+        "filename": "logo.png",
+        "headers": [
+          {
+            "name": "Content-Type",
+            "value": "image/png; name=\"logo.png\""
+          },
+          {
+            "name": "Content-Disposition",
+            "value": "inline; filename=\"logo.png\""
+          },
+          {
+            "name": "Content-ID",
+            "value": "<logo@energiedirect.example>"
+          }
+        ],
+        "body": {
+          "attachmentId": "ANGjdJ8fixtureLogo004",
+          "size": 69
+        }
+      }
+    ],
+    "attachmentData": {
+      "ANGjdJ8fixturePdf004": "JVBERi0xLjQKJeLjz9MKMSAwIG9iajw8L1R5cGUvQ2F0YWxvZy9QYWdlcyAyIDAgUj4-ZW5kb2JqCjIgMCBvYmo8PC9UeXBlL1BhZ2VzL0tpZHNbMyAwIFJdL0NvdW50IDE-PmVuZG9iagozIDAgb2JqPDwvVHlwZS9QYWdlL1BhcmVudCAyIDAgUi9NZWRpYUJveFswIDAgNTk1IDg0Ml0-PmVuZG9iagolIEVuZXJnaWUgRGlyZWN0IC0gZW5lcmd5IGJpbGwgT2N0b2JlciAyMDI2IC0gRVVSIDg3LjQwCnRyYWlsZXI8PC9Sb290IDEgMCBSPj4KJSVFT0YK",
+      "ANGjdJ8fixtureLogo004": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4P5MBAAQzAZncH4SNAAAAAElFTkSuQmCC"
+    }
   }
 ]
