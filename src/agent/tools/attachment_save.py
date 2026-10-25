@@ -21,6 +21,7 @@ import filecmp
 import itertools
 import os
 import re
+import unicodedata
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,9 +33,17 @@ FALLBACK_NAME = "attachment"
 _TEMPORARY_PREFIX = ".saving-"
 
 
+def typeable_name(file_name: str) -> str:
+    """
+    The name in Unicode compatibility form (NFKC) with every whitespace run one plain space: a
+    non-breaking space, which looks like a space in the Approval prompt, becomes a space.
+    """
+    return " ".join(unicodedata.normalize("NFKC", file_name).split())
+
+
 def bare_name(file_name: str) -> str:
-    """The attachment's name with directory parts and path separators stripped."""
-    name = file_name.replace("\x00", "").replace("\\", "/").split("/")[-1].strip()
+    """The attachment's typeable name with directory parts and path separators stripped."""
+    name = typeable_name(file_name).replace("\x00", "").replace("\\", "/").split("/")[-1].strip()
     if not name.strip("."):
         return FALLBACK_NAME
     return name
@@ -85,7 +94,7 @@ def check_request(
     if attachment is None:
         return f"Error: the message has no attachment with ID {attachment_id}."
     real_name = attachment.name
-    if file_name != real_name:
+    if typeable_name(file_name) != typeable_name(real_name):
         return (
             f"Error: file_name {file_name!r} does not match the attachment's real name {real_name!r}. "
             f"Use the exact name {listed_by} lists."

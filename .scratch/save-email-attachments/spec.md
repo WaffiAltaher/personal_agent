@@ -67,7 +67,7 @@ The system prompt names `~/Downloads/personal_agent` as the agent's folder. Whil
 
 One shared module owns the rules, so both mailboxes behave identically:
 
-- **Name:** the attachment's own file name, reduced to a bare name (any directory parts or path separators stripped; an empty or dot-only name gets a neutral fallback such as `attachment`). The model never supplies a path.
+- **Name:** the attachment's own file name in a typeable form (Unicode NFKC, every whitespace run one plain space, so a non-breaking space becomes a space), reduced to a bare name. The `file_name` check compares the same typeable forms (any directory parts or path separators stripped; an empty or dot-only name gets a neutral fallback such as `attachment`). The model never supplies a path.
 - **Confinement:** the final path must resolve inside that mailbox's subfolder; anything else is refused.
 - **Duplicates:** before writing, compare the bytes with every existing file in the subfolder of the same name family (`invoice.pdf`, `invoice (1).pdf`, `invoice (2).pdf`, …). On a match, write nothing and return "already saved as <path>".
 - **Clash:** otherwise use the first free name in the family: `invoice.pdf`, then `invoice (1).pdf`, `invoice (2).pdf`.

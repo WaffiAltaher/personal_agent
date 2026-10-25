@@ -147,6 +147,41 @@ def test_a_name_that_tries_to_escape_the_subfolder_still_lands_inside_it(agent_f
     assert [p.name for p in (agent_folder / "outlook").iterdir()] == ["x.pdf"]
 
 
+# Found in the first real save (ticket 05): Centraal Beheer names its PDFs with non-breaking
+# spaces, which look like spaces in the Approval prompt but which the model sends as spaces.
+REAL_NAME_WITH_NBSP = "Nota periode 25 oktober 2026 tot 25 november 2026.pdf"
+PLAIN_NAME = "Nota periode 25 oktober 2026 tot 25 november 2026.pdf"
+
+
+def test_a_file_name_typed_with_plain_spaces_matches_a_real_name_with_non_breaking_spaces():
+    listed = attachment_save.ListedAttachment(name=REAL_NAME_WITH_NBSP, inline=False, size=140_000)
+
+    assert attachment_save.check_request(listed, "id", PLAIN_NAME, False, "list-mail-attachments") is None
+    assert attachment_save.check_request(
+        listed, "id", "Nota periode 25 september 2026.pdf", False, "list-mail-attachments"
+    ).startswith("Error:")
+
+
+def test_a_real_name_with_non_breaking_spaces_is_saved_with_plain_spaces(agent_folder):
+    # The saved path is what a follow-up (an Informer upload) types back, so it must be typeable.
+    temporary = attachment_save.temporary_path("outlook")
+    temporary.write_bytes(b"nota")
+
+    result = attachment_save.place_file(temporary, REAL_NAME_WITH_NBSP, "outlook")
+
+    assert (agent_folder / "outlook" / PLAIN_NAME).read_bytes() == b"nota"
+    assert str(agent_folder / "outlook" / PLAIN_NAME) in result
+
+
+def test_a_full_width_slash_in_a_name_still_lands_inside_the_subfolder(agent_folder):
+    temporary = attachment_save.temporary_path("outlook")
+    temporary.write_bytes(b"hostile")
+
+    attachment_save.place_file(temporary, "..／x.pdf", "outlook")
+
+    assert [p.name for p in (agent_folder / "outlook").iterdir()] == ["x.pdf"]
+
+
 @pytest.mark.asyncio
 async def test_the_size_cap_refuses_an_oversized_attachment_before_downloading(tools, agent_folder, monkeypatch):
     monkeypatch.setattr(attachment_save, "MAX_ATTACHMENT_BYTES", 100)
