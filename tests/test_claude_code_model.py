@@ -356,20 +356,20 @@ def test_eval_efficiency_prices_a_claude_code_run_by_the_model_the_cli_ran(cli, 
     assert run.cost_usd == pytest.approx(SONNET_CALL_COST)
 
 
-# Nobody has seen the real usage-limit result yet: these are guesses from the known result fields
-# (is_error, api_error_status) and earlier Claude Code wording. Pin the real one here when it happens.
+# The real subscription limit (seen 2026-10-25) is pinned in the stand-in; the others are the same
+# "hit your ... limit" phrasing for the other subscription limits.
 USAGE_LIMITS = {
-    "resets wording": ({"is_error": True, "api_error_status": 429,
-                        "result": "You've hit your limit · resets 3pm (Europe/Amsterdam)"}, "3pm (Europe/Amsterdam)"),
-    "epoch wording": ({"is_error": True, "result": "Claude AI usage limit reached|1761404400"}, "2025-10-25 15:00 UTC"),
-    "no reset time": ({"is_error": True, "api_error_status": 429, "result": "Usage limit reached."}, "an unknown time"),
+    "real session limit": (fake_cli.SESSION_LIMIT, "9:50pm (Europe/Amsterdam)"),
+    "weekly limit": ({**fake_cli.SESSION_LIMIT, "result": "You've hit your weekly limit · resets Oct 28, 9am"},
+                     "Oct 28, 9am"),
+    "plain limit": ({**fake_cli.SESSION_LIMIT, "result": "You've hit your limit · resets 3pm (Europe/Amsterdam)"},
+                    "3pm (Europe/Amsterdam)"),
+    "no reset time": ({**fake_cli.SESSION_LIMIT, "result": "You've hit your usage limit"}, "an unknown time"),
 }
 
 
 @pytest.mark.parametrize("reply,resets", USAGE_LIMITS.values(), ids=USAGE_LIMITS.keys())
-def test_a_usage_limit_stops_with_when_it_resets(cli, monkeypatch, reply, resets):
-    monkeypatch.setenv("TZ", "UTC")
-    time.tzset()
+def test_a_usage_limit_stops_with_when_it_resets(cli, reply, resets):
     cli.script([reply, ANSWER])
 
     with pytest.raises(ClaudeCodeError) as stop:
@@ -388,6 +388,12 @@ CLI_ERRORS = {
     "a non-zero exit": ({"exit_code": 1, "stdout": "", "stderr": "Error: not logged in\n"}, "Error: not logged in"),
     "unparseable output": ({"stdout": "Segmentation fault"}, "Segmentation fault"),
     "an unknown model": ({"stdout": f"{UNKNOWN_MODEL}\n" + json.dumps(fake_cli._success(""))}, UNKNOWN_MODEL),
+    # Other limits and 429s are not the subscription limit: they keep the CLI's own message.
+    "a context limit": ({"is_error": True, "result": "Prompt is too long: 210000 tokens > 200000 context limit"},
+                        "Prompt is too long: 210000 tokens > 200000 context limit"),
+    "an API rate limit": ({"is_error": True, "api_error_status": 429,
+                           "result": "API Error: 429 This request would exceed your rate limit; retry shortly"},
+                          "API Error: 429 This request would exceed your rate limit; retry shortly"),
 }
 
 
@@ -404,7 +410,7 @@ def test_a_cli_error_stops_with_the_cli_s_own_message(cli, reply, message):
 
 @pytest.mark.asyncio
 async def test_after_a_usage_limit_stop_the_thread_resumes_from_its_checkpoint(cli):
-    cli.script([USAGE_LIMITS["resets wording"][0], ANSWER])
+    cli.script([USAGE_LIMITS["real session limit"][0], ANSWER])
     tools = [search_mail]
     graph = build_graph(checkpointer=InMemorySaver(), tools=tools, model=claude_code())
     config = {"configurable": {"thread_id": "t-usage-limit"}}

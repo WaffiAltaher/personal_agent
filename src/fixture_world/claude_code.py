@@ -11,8 +11,8 @@ named by FIXTURE_WORLD_CLAUDE_CODE_REPLIES, the n-th call printing the n-th repl
 the result text, or a dict of fields laid over the CLI's success object (as Claude Code
 2.1.310 prints it). For `claude auth status` the reply is the status JSON, printed as is.
 A dict reply may instead script a failure: {"hang": true} never answers (see `hung_pids()`), and
-"stdout", "stderr" and "exit_code" print raw output and set the exit status. The usage-limit
-result has not been seen yet; pin its real text in the tests the first time it happens.
+"stdout", "stderr" and "exit_code" print raw output and set the exit status. SESSION_LIMIT is
+the real subscription-limit result.
 
 Installed as the `fixture-claude-code` script.
 """
@@ -27,6 +27,13 @@ from pathlib import Path
 
 CALLS_ENV = "FIXTURE_WORLD_CLAUDE_CODE_CALLS"
 REPLIES_ENV = "FIXTURE_WORLD_CLAUDE_CODE_REPLIES"
+
+# A Claude Code subscription limit as it really happened on 2026-10-25 (HTTP 429, error type rate_limit).
+SESSION_LIMIT = {
+    "is_error": True,
+    "api_error_status": 429,
+    "result": "You've hit your session limit · resets 9:50pm (Europe/Amsterdam)",
+}
 
 
 def binary() -> str:
