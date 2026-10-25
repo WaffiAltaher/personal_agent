@@ -187,6 +187,7 @@ Record of technical decisions made during the Personal Data Agent project. Each 
 - Switching model is a `.env` change; the eval harness injects the model under test the same way.
 - The module-level `agent_graph` is gone; callers use `build_graph(...)`.
 - Learning lesson 0003 still patches `agent.graph.ChatGoogleGenerativeAI`, which no longer exists there.
+- Amended 2026-10-25 (ADR-016): a third prefix, `claude_code:`, runs the chat model through the Claude Code CLI on the owner's subscription and needs no key. The built-in default becomes `claude_code:claude-sonnet-5-5`; `GOOGLE_API_KEY` stays required for embeddings.
 
 ---
 
@@ -327,6 +328,33 @@ Two plain tools were chosen over a hidden check that the Approval step calls bef
 - The MS365 server's enabled tools now include `download-bytes-to-file`, and the loader must keep it unbound by name. A test pins this.
 - The save costs one extra Graph call (the attachment lookup) and a rename on disk.
 - If the server changes `download-bytes-to-file`'s contract, the wrapper is the one place to fix. Review it when bumping the pin.
+
+---
+
+## ADR-016: Chat model through the Claude Code CLI on the owner's subscription
+**Date:** 2026-10-25
+**Status:** Accepted (amends ADR-009)
+
+**Context:** Every model the agent can use is billed per token through an API key, on top of the owner's Claude subscription. The Google project's prepaid credit is depleted (chat and embeddings both return `402 RESOURCE_EXHAUSTED`). The agent only ever runs on the owner's laptop, where Claude Code (`claude`, logged in to a claude.ai Pro subscription) and Cursor (`cursor-agent`) are installed. Both CLIs are agents in their own right: they run their own tool loop and return a final answer, never tool calls for a caller to run. The graph depends on `bind_tools` and structured `tool_calls`, so that the Approval step, the retry policy, checkpoints and trajectory evals see every tool call. Options: (a) the CLI as the model only, behind a `BaseChatModel`; (b) the CLI as the agent, with the agent's tools exposed to it as an MCP server.
+
+**Decision:** (a). `MODEL_NAME=claude_code:<model>` builds a chat model that makes each turn one stateless call: `claude -p --safe-mode --strict-mcp-config --disable-slash-commands --no-chrome --tools "" --no-session-persistence --output-format json --model <model>`, from a neutral working directory, with `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_BASE_URL` removed from its environment. The system prompt goes in `--system-prompt`. The model view and the bound tools' schemas go on stdin as a JSON array of messages. The prompt asks for a JSON reply, either an answer or tool calls, and the wrapper validates it against the bound tools and re-asks once on an invalid reply. Real-mode startup requires `claude auth status` to report a claude.ai login. Claude Code comes first; Cursor waits for a spike.
+
+**Reasoning:**
+- **The CLI as the agent** would hand tool execution to Claude Code: Write actions would depend on its permission prompts instead of ADR-010, and checkpoints and trajectory evals would see nothing.
+- **`--safe-mode` and the other isolation flags:** `--system-prompt` and `--tools ""` alone still loaded the owner's global CLAUDE.md, auto-memory, skills and plugins: about 55k tokens per call, which also let personal instructions steer the agent. With the flags, the same call was about 1k tokens. `--bare` also isolates, but never reads OAuth, so it can't use a subscription.
+- **Removing the API-key variables:** Claude Code bills an API key when one is in its environment. Today none reaches the child (pydantic-settings doesn't export `.env`), but only by luck.
+- **The prompt plus wrapper validation, not `--json-schema`:** Claude Code enforces a schema by giving the model a tool. In a test, Haiku then tried to call the agent's tool natively, was refused, and answered "I couldn't get the weather": a believable wrong answer. With no tools in sight, Haiku returned valid tool calls. A failure of the prompt route is a parse error the wrapper catches. Cursor has no schema flag either.
+- **Stateless calls, not `--resume`:** LangGraph stays the only record of the conversation, ADR-013's model view keeps working, and a checkpoint resumed days later needs no CLI session.
+- **JSON messages, not a plain transcript:** a tool result (an email body) can't forge a new user turn when every content is a JSON-escaped string. That keeps the boundary the API's message slots gave.
+- **Cursor deferred:** `cursor-agent -p` cannot turn its tools off (the closest is `--mode ask`, sandbox and an empty workspace), so injected text could make it read files. It also has no system-prompt or schema flag.
+
+**Consequences:**
+- The owner's subscription limits now bound agent and eval runs. Hitting the usage limit stops the run with the reset time; there is no fallback to an API key and no waiting. Timeouts (180 s, `CLAUDE_CODE_TIMEOUT_S`), CLI crashes and a reply still invalid after the re-ask also stop the run, with the checkpoint kept. None of these is retried.
+- Cost is the API-equivalent price from `pricing.py`, looked up with the model the CLI reports (so `sonnet` and `claude-sonnet-5-5` price the same). A model without a table row shows no cost.
+- Effort stays at Claude Code's default. There is no setting until evals show it matters.
+- Tests drive a stand-in `claude` executable at the subprocess boundary (ADR-011), selected with `CLAUDE_CODE_BINARY`. One `live` test calls the real CLI and guards the isolated context size, since a Claude Code update could start loading the owner's setup again.
+- The wrapper depends on Claude Code's CLI flags and its `--output-format json` shape. Recheck them when Claude Code updates.
+- Embeddings still need `GOOGLE_API_KEY`: neither CLI offers them.
 
 ---
 
