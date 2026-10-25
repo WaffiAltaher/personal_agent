@@ -9,7 +9,7 @@ directory) as a JSON line to the file named by FIXTURE_WORLD_CLAUDE_CODE_CALLS; 
 with `recorded_calls()`. It then prints the next scripted reply from the JSON list in the file
 named by FIXTURE_WORLD_CLAUDE_CODE_REPLIES, the n-th call printing the n-th reply. A reply is
 the result text, or a dict of fields laid over the CLI's success object (as Claude Code
-2.1.310 prints it).
+2.1.310 prints it). For `claude auth status` the reply is the status JSON, printed as is.
 
 Installed as the `fixture-claude-code` script.
 """
@@ -65,6 +65,9 @@ def main() -> None:
         }) + "\n")
 
     reply = json.loads(Path(os.environ[REPLIES_ENV]).read_text())[index]
+    if sys.argv[1:3] == ["auth", "status"]:
+        print(json.dumps(reply))
+        return
     if isinstance(reply, str):
         reply = {"result": reply}
     print(json.dumps({**_success(""), **reply}))
