@@ -41,6 +41,31 @@ class ScriptedChatModel(GenericFakeChatModel):
         return ChatResult(generations=[ChatGeneration(message=message)])
 
 
+# The real Claude Code CLI spends the owner's subscription: outside `live` tests, a claude_code:
+# model or login check that a test didn't point at the stand-in fails with "not found" instead.
+NO_REAL_CLAUDE = "/nonexistent/the-real-claude-is-not-called-in-tests"
+
+
+@pytest.fixture(autouse=True)
+def no_real_claude_code(request, monkeypatch):
+    if request.node.get_closest_marker("live"):
+        return
+    from agent.config import settings
+
+    monkeypatch.setenv("CLAUDE_CODE_BINARY", NO_REAL_CLAUDE)
+    monkeypatch.setattr(settings, "claude_code_binary", NO_REAL_CLAUDE)
+
+
+@pytest.fixture
+def startup_login_checks_pass(monkeypatch):
+    """Every real-mode CLI startup login check passes without running. A test of one check
+    sets that check again after requesting this."""
+    import agent.cli as cli
+
+    monkeypatch.setattr(cli, "check_google_login", lambda: None)
+    monkeypatch.setattr(cli, "check_claude_code_login", lambda binary: None)
+
+
 @pytest.fixture
 def scripted_model():
     """Factory: scripted_model([AIMessage(...), ...]) -> a fake model replying with those messages."""

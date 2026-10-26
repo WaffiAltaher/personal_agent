@@ -241,29 +241,39 @@ note "MS365 server: $MS365_PACKAGE"
 pause
 
 # ── 2 ────────────────────────────────────────────────────────────────────────
-stage "Gemini: switch to gemini-3.8-flash"
-say "Your .env still pins the old Flash model. Switching to the new default and testing the key."
-write_env MODEL_NAME "google_genai:gemini-3.8-flash"
-until ping_model "google_genai:gemini-3.8-flash"; do
-  warn "the Gemini call failed (see the error above)"
-  confirm "Paste a new Gemini API key and retry?" || { SKIPPED+=("Gemini key test failed: fix GOOGLE_API_KEY"); break; }
-  open_url "https://aistudio.google.com/apikey"
-  step "Create API key (or copy an existing one) for the project you use."
-  ask_secret GOOGLE_API_KEY "Paste the Gemini API key:"
-  write_env GOOGLE_API_KEY "$GOOGLE_API_KEY"
+stage "Models: your Claude subscription, and a Google key for embeddings"
+say "The agent's chat model runs on your Claude subscription through Claude Code: no chat API key."
+CLAUDE_BIN=$(envval CLAUDE_CODE_BINARY); CLAUDE_BIN=${CLAUDE_BIN:-claude}
+until uv run python -c "import sys; from agent.auth.claude_code import check_claude_code_login; check_claude_code_login(sys.argv[1])" "$CLAUDE_BIN"; do
+  warn "Claude Code is missing or not logged in with your Claude subscription (see above)"
+  step "Install Claude Code if needed, then run 'claude auth login' in another terminal."
+  confirm "Logged in? Check again?" || { SKIPPED+=("Claude Code login: run 'claude auth login'"); break; }
 done
+write_env MODEL_NAME "claude_code:claude-sonnet-5-5"
+write_env EVAL_JUDGE_MODEL "claude_code:claude-opus-5-5"
+say "GOOGLE_API_KEY is still required: the memory layer embeds with it."
+note "Use a key from a Google project with billing turned off, so it can never be charged."
+open_url "https://aistudio.google.com/apikey"
+GOOGLE_API_KEY=""
+until [[ -n "$GOOGLE_API_KEY" ]]; do ask_secret GOOGLE_API_KEY "Paste the Google API key:"; done
+write_env GOOGLE_API_KEY "$GOOGLE_API_KEY"
+if confirm "Test Gemini as a chat model too? (skip if you use your Claude subscription)"; then
+  ping_model "google_genai:gemini-3.8-flash" \
+    || { warn "the Gemini call failed (see above)"; SKIPPED+=("Gemini chat test failed: check GOOGLE_API_KEY"); }
+fi
 pause
 
 # ── 3 ────────────────────────────────────────────────────────────────────────
-stage "Anthropic: API key for the Claude comparison"
-say "Ticket 17 compares Gemini with Claude Sonnet 5.5 and uses Claude Opus 5.5 as the judge."
-open_url "https://console.anthropic.com/settings/keys"
-step "Settings → API keys → Create key; name it e.g. 'ittopia-agent'; copy it (shown once)."
-ask_secret ANTHROPIC_API_KEY "Paste the Anthropic API key:"
-write_env ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY"
-write_env EVAL_JUDGE_MODEL "anthropic:claude-opus-5-5"
-ping_model "anthropic:claude-sonnet-5-5" \
-  || { warn "the Claude call failed (see above)"; SKIPPED+=("Anthropic key test failed: check ANTHROPIC_API_KEY and billing"); }
+stage "Anthropic: API key for the Claude comparison (optional)"
+say "Only for anthropic: models, e.g. comparing against the Claude API."
+if confirm "Set up an Anthropic API key? (skip if you use your Claude subscription)"; then
+  open_url "https://console.anthropic.com/settings/keys"
+  step "Settings → API keys → Create key; name it e.g. 'ittopia-agent'; copy it (shown once)."
+  ask_secret ANTHROPIC_API_KEY "Paste the Anthropic API key:"
+  write_env ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY"
+  ping_model "anthropic:claude-sonnet-5-5" \
+    || { warn "the Claude call failed (see above)"; SKIPPED+=("Anthropic key test failed: check ANTHROPIC_API_KEY and billing"); }
+fi
 pause
 
 # ── 4 ────────────────────────────────────────────────────────────────────────

@@ -10,6 +10,7 @@ from langchain_anthropic import ChatAnthropic
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from agent.chat_model import MissingApiKeyError, create_chat_model
+from agent.claude_code_model import ClaudeCodeChatModel
 from agent.config import Settings, settings
 
 
@@ -17,11 +18,11 @@ def with_settings(**overrides) -> Settings:
     return settings.model_copy(update=overrides)
 
 
-def test_default_model_is_gemini_3_8_flash():
+def test_default_model_is_claude_sonnet_5_5_on_the_claude_subscription():
     model = create_chat_model(settings=with_settings(model_name=Settings.model_fields["model_name"].default))
 
-    assert isinstance(model, ChatGoogleGenerativeAI)
-    assert model.model.endswith("gemini-3.8-flash")
+    assert isinstance(model, ClaudeCodeChatModel)
+    assert model.model == "claude-sonnet-5-5"
 
 
 def test_anthropic_model_is_selected_by_provider_prefix():

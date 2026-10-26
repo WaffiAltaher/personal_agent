@@ -563,7 +563,10 @@ def build_graph(
         update: dict = {
             "messages": [response],
             "model_call_count": count + 1,
-            "last_model_input_tokens": usage.get("input_tokens"),
+            # A model whose usage sums several calls (claude_code: re-ask) reports the final prompt size apart.
+            "last_model_input_tokens": (getattr(response, "response_metadata", None) or {}).get(
+                "prompt_input_tokens", usage.get("input_tokens")
+            ),
             "message_count_at_last_model_call": messages_before_call,
             "stubbed_tool_call_ids": sorted(stubbed_ids),
         }

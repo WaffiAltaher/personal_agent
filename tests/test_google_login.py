@@ -61,7 +61,7 @@ def google_paths(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def run_cli(monkeypatch, scripted_model):
+def run_cli(monkeypatch, scripted_model, startup_login_checks_pass):
     """Minimal CLI harness; real-mode runs bind real Google tools unless load_all_tools is stubbed."""
     seen = {"check_calls": 0}
 

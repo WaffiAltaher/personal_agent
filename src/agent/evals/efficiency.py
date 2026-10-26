@@ -10,7 +10,7 @@ not counted.
 from datetime import date
 from statistics import mean
 
-from agent.pricing import cost_usd
+from agent.pricing import cost_by_model_usd, cost_usd
 from agent.evals.records import Efficiency, ModelUsage, RunResult
 
 
@@ -26,13 +26,12 @@ def efficiency(usage_by_model: dict[str, dict], *, latency_s: float, on: date) -
         )
         for name, usage in usage_by_model.items()
     }
-    costs = [m.cost_usd for m in by_model.values()]
     return Efficiency(
         latency_s=latency_s,
         input_tokens=sum(m.input_tokens for m in by_model.values()),
         output_tokens=sum(m.output_tokens for m in by_model.values()),
         total_tokens=sum(m.total_tokens for m in by_model.values()),
-        cost_usd=None if None in costs else sum(costs),
+        cost_usd=cost_by_model_usd(usage_by_model, on=on),
         by_model=by_model,
     )
 

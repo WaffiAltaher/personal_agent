@@ -3,6 +3,8 @@ cli.py — Entry point with Langfuse tracing wired in.
 
 Real-mode runs check the Google login before the agent starts. If Gmail or Calendar
 would need a new browser login, startup stops and names ``python -m agent.auth.google``.
+With a ``claude_code:`` agent or judge model they also check the Claude Code login, and stop
+naming ``claude auth login`` unless it is a claude.ai login.
 Use ``--fixtures`` for the seeded Fixture world (no Google login check).
 """
 
@@ -14,8 +16,10 @@ from contextlib import nullcontext
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langfuse import propagate_attributes
 from langgraph.errors import GraphRecursionError
+from agent.auth.claude_code import ClaudeCodeLoginCheckTimeout, ClaudeCodeLoginRequired, check_claude_code_login
 from agent.auth.google import GoogleLoginRequired, check_google_login
-from agent.chat_model import ModelConfigError, create_chat_model
+from agent.chat_model import ModelConfigError, create_chat_model, is_claude_code_model
+from agent.claude_code_model import ClaudeCodeError
 from agent.conversation import run_conversation
 from agent.graph import build_graph, get_checkpointer, log_run_to_memory
 from agent.memory import fixtures_semantic_memory
@@ -155,6 +159,13 @@ async def main():
         except FileNotFoundError as exc:
             print(f"Cannot start: {exc}")
             sys.exit(1)
+        # A claude_code: agent or judge model runs on the Claude Code login; check it the same way.
+        if any(is_claude_code_model(m) for m in (settings.model_name, settings.eval_judge_model)):
+            try:
+                check_claude_code_login(settings.claude_code_binary)
+            except (ClaudeCodeLoginRequired, ClaudeCodeLoginCheckTimeout, FileNotFoundError) as exc:
+                print(f"Cannot start: {exc}")
+                sys.exit(1)
 
     # Each CLI run gets a fresh thread_id so runs are independent.
     # The checkpointer uses this to namespace the checkpoint.
@@ -239,6 +250,10 @@ async def main():
                 model_name=settings.model_name,
                 error=run_error,
             )
+        # A Claude Code call that couldn't produce a turn already says what to do (ADR-016).
+        if isinstance(exc, ClaudeCodeError):
+            print(f"Stopped: {exc}")
+            sys.exit(1)
         raise
     finally:
         flush_traces()

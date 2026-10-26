@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     # LLM
-    google_api_key: str
+    google_api_key: str  # always required, whatever model_name is: the memory layer embeds with it
     anthropic_api_key: str | None = None  # required only when an anthropic: model is selected
 
     # Tools
@@ -15,8 +15,11 @@ class Settings(BaseSettings):
     langfuse_base_url: str = "http://localhost:3000"
 
     # Agent behaviour (sensible defaults for now)
-    model_name: str = "google_genai:gemini-3.8-flash"  # provider:model, see agent/chat_model.py
+    model_name: str = "claude_code:claude-sonnet-5-5"  # provider:model, see agent/chat_model.py
     max_iterations: int = 10
+    # claude_code: models (agent/claude_code_model.py): the Claude Code CLI, and how long one call may take
+    claude_code_binary: str = "claude"
+    claude_code_timeout_s: float = 180
 
     # Memory layer
     sqlite_path: str = "data/episodic.db"

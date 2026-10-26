@@ -29,10 +29,12 @@ dependencies = [
     "ragas>=0.4.3",
     # ragas 0.4.3 imports langchain_community.chat_models.vertexai, which 0.4.2 removed.
     "langchain-community>=0.4.1,<0.4.2",
+    "jsonschema>=4.26.0",
 ]
 
 [project.scripts]
 informer-mcp = "informer_mcp.server:main"
+fixture-claude-code = "fixture_world.claude_code:main"
 
 [dependency-groups]
 dev = [
@@ -55,5 +57,5 @@ packages = ["src/agent", "src/informer_mcp", "src/fixture_world"]
 [tool.pytest.ini_options]
 addopts = ["-m", "not live"]
 markers = [
-    "live: read-only check against real MS365 and Informer; run with pytest -m live",
+    "live: read-only check against real MS365 and Informer, and one real Claude Code CLI call on the owner's subscription; run with pytest -m live",
 ]

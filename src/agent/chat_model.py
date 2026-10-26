@@ -5,6 +5,7 @@ chat_model.py — Build the agent's chat model from a `provider:model` setting.
 The provider prefix picks the LangChain integration via init_chat_model, e.g.
   google_genai:gemini-3.8-flash   → ChatGoogleGenerativeAI (Gemini API)
   anthropic:claude-sonnet-5-5     → ChatAnthropic
+  claude_code:sonnet              → ClaudeCodeChatModel (the owner's Claude subscription; no key)
 A bare Gemini name (e.g. an older .env's "gemini-2.5-flash") is treated as
 google_genai: init_chat_model would otherwise infer Vertex AI for it. A bare
 Claude name is treated as anthropic. Any other bare name, or a provider we hold
@@ -17,6 +18,7 @@ fails here with a clear message instead of deep inside the provider SDK.
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models import BaseChatModel
 
+from agent.claude_code_model import ClaudeCodeChatModel
 from agent.config import Settings
 from agent.config import settings as default_settings
 
@@ -46,6 +48,11 @@ _BARE_NAME_PROVIDERS: dict[str, str] = {
 }
 
 
+def is_claude_code_model(model: str | None) -> bool:
+    """Whether `model` (`provider:model`) runs through the Claude Code CLI."""
+    return (model or "").startswith("claude_code:")
+
+
 def create_chat_model(model: str | None = None, *, settings: Settings = default_settings) -> BaseChatModel:
     """Return a chat model for `model` (`provider:model`), defaulting to settings.model_name."""
     spec = model or settings.model_name
@@ -53,10 +60,14 @@ def create_chat_model(model: str | None = None, *, settings: Settings = default_
     if not sep:
         provider = next((p for prefix, p in _BARE_NAME_PROVIDERS.items() if spec.lower().startswith(prefix)), "")
         name = spec
+    if is_claude_code_model(spec):
+        return ClaudeCodeChatModel(
+            model=name, binary=settings.claude_code_binary, timeout_s=settings.claude_code_timeout_s,
+        )
     if provider not in _PROVIDER_KEYS:
         raise UnsupportedModelError(
             f"Model '{spec}' has no supported provider. Use provider:model with one of "
-            f"{', '.join(sorted(_PROVIDER_KEYS))}, e.g. anthropic:claude-sonnet-5-5."
+            f"{', '.join(sorted([*_PROVIDER_KEYS, 'claude_code']))}, e.g. anthropic:claude-sonnet-5-5."
         )
 
     field, kwarg = _PROVIDER_KEYS[provider]
