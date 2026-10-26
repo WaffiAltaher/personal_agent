@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     # LLM
-    google_api_key: str
+    google_api_key: str  # always required, whatever model_name is: the memory layer embeds with it
     anthropic_api_key: str | None = None  # required only when an anthropic: model is selected
 
     # Tools
