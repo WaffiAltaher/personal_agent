@@ -9,7 +9,10 @@ directory) as a JSON line to the file named by FIXTURE_WORLD_CLAUDE_CODE_CALLS; 
 with `recorded_calls()`. It then prints the next scripted reply from the JSON list in the file
 named by FIXTURE_WORLD_CLAUDE_CODE_REPLIES, the n-th call printing the n-th reply. A reply is
 the result text, or a dict of fields laid over the CLI's success object (as Claude Code
-2.1.310 prints it). For `claude auth status` the reply is the status JSON, printed as is.
+2.1.310 prints it). With `--json-schema`, a result text that is a JSON object also becomes
+`structured_output`, and a clean reply takes 2 turns (the StructuredOutput call and its
+acknowledgement), as Claude Code 2.1.312 does. For `claude auth status` the reply is the status
+JSON, printed as is.
 A dict reply may instead script a failure: {"hang": true} never answers, `auth status` included
 (see `hung_pids()`), and
 "stdout", "stderr" and "exit_code" print raw output and set the exit status. SESSION_LIMIT is
@@ -98,8 +101,21 @@ def main() -> None:
     # "exit_code" is the exit status.
     sys.stderr.write(reply.pop("stderr", ""))
     exit_code = reply.pop("exit_code", 0)
-    print(reply.pop("stdout") if "stdout" in reply else json.dumps({**_success(""), **reply}))
+    if "stdout" in reply:
+        print(reply.pop("stdout"))
+    else:
+        result = {**_success(""), **(_structured(reply.get("result", "")) if "--json-schema" in sys.argv else {}), **reply}
+        print(json.dumps(result))
     sys.exit(exit_code)
+
+
+def _structured(result: str) -> dict:
+    """The fields --json-schema adds: the result text as an object, if it is one, and 2 turns."""
+    try:
+        value = json.loads(result)
+    except json.JSONDecodeError:
+        value = None
+    return {"structured_output": value if isinstance(value, dict) else None, "num_turns": 2}
 
 
 if __name__ == "__main__":
