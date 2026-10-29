@@ -143,6 +143,19 @@ def test_bound_tools_go_in_as_compact_json(cli):
     assert listing == json.dumps(tools, separators=(",", ":"))  # no whitespace between tokens
 
 
+def test_with_tools_bound_the_reply_contract_goes_in_as_a_json_schema_naming_only_the_bound_tools(cli):
+    # Without a real tool, Sonnet wrote native tool-call markup as text and could loop on it for
+    # minutes (2026-10-28). --json-schema gives it one real tool, StructuredOutput.
+    cli.script([json.dumps({"kind": "answer", "text": "ok"})])
+
+    with_tools().invoke("hi")
+
+    args = cli.calls()[0]["args"]
+    schema = json.loads(args[args.index("--json-schema") + 1])
+    assert schema["properties"]["kind"]["enum"] == ["answer", "tool_calls"]
+    assert schema["properties"]["calls"]["items"]["properties"]["name"]["enum"] == ["search_mail", "send_mail"]
+
+
 def test_an_answer_reply_becomes_an_ai_message(cli):
     cli.script([json.dumps({"kind": "answer", "text": "No mail from Bob."})])
 
@@ -170,48 +183,35 @@ def test_a_tool_calls_reply_may_hold_several_calls_with_generated_ids(cli):
 ANSWER = json.dumps({"kind": "answer", "text": "No mail from Bob."})
 
 INVALID_REPLIES = {
-    "not json": "not json",
+    "no structured output": "not json",
     "a json array": "[]",
-    # The contract object must end the reply: text after it is not ignored.
-    "json followed by prose": f"{ANSWER}\nLet me know if you need more.",
-    "fenced json followed by prose": f"```json\n{ANSWER}\n```\nDone.",
     "neither shape": json.dumps({"kind": "shrug"}),
     "an answer without text": json.dumps({"kind": "answer"}),
     "an unknown tool": json.dumps({"kind": "tool_calls", "calls": [{"name": "delete_everything", "args": {}}]}),
     "args missing a required field": json.dumps({"kind": "tool_calls", "calls": [{"name": "search_mail", "args": {}}]}),
     "args of the wrong type": json.dumps(
         {"kind": "tool_calls", "calls": [{"name": "search_mail", "args": {"query": "Bob", "max_results": "five"}}]}),
-    # Claude tried a tool of its own: the CLI took more than one turn, even though the final text parses.
-    "a native tool attempt": {"result": ANSWER, "num_turns": 3},
+    # Claude tried one of the agent's tools natively, was refused, then answered: a believable
+    # wrong answer such as "I couldn't search" (ADR-016). A clean structured reply takes 2 turns.
+    "an answer after a native tool attempt": {"result": ANSWER, "num_turns": 3},
 }
 
 
-@pytest.mark.parametrize("fence", ["```json", "```"])
-def test_one_object_in_one_code_fence_is_accepted_without_a_re_ask(cli, fence):
-    cli.script([f"{fence}\n{ANSWER}\n```"])
+TOOL_CALLS = {"kind": "tool_calls", "calls": [{"name": "search_mail", "args": {"query": "Bob"}}]}
+
+
+def test_the_reply_is_read_from_the_structured_output_whatever_the_result_text_says(cli):
+    cli.script([{"result": '<invoke name="search_mail">\n</invoke>', "structured_output": TOOL_CALLS}])
 
     reply = with_tools().invoke("Any mail from Bob?")
 
-    assert reply.content == "No mail from Bob."
+    assert [(c["name"], c["args"]) for c in reply.tool_calls] == [("search_mail", {"query": "Bob"})]
     assert len(cli.calls()) == 1
 
 
-# Text before the contract object is ignored, as really seen from Sonnet (2026-10-25).
-TOOL_CALLS = json.dumps({"kind": "tool_calls", "calls": [{"name": "search_mail", "args": {"query": "Bob"}}]})
-REPLIES_ENDING_IN_THE_CONTRACT = {
-    "a stray tag before fenced json": f"<name>search_mail</name>\n```json\n{TOOL_CALLS}\n```",
-    "a written-out tool call before the json": (
-        '<invoke name="search_mail">\n<parameter name="query">Bob</parameter>\n</invoke>\n'
-        f"</function_calls>\n\n{TOOL_CALLS}"
-    ),
-    "prose before the json": f"The latest message is from Bob. I'll search for it.\n\n{TOOL_CALLS}",
-}
-
-
-@pytest.mark.parametrize("reply_text", REPLIES_ENDING_IN_THE_CONTRACT.values(),
-                         ids=REPLIES_ENDING_IN_THE_CONTRACT.keys())
-def test_a_reply_ending_in_the_contract_object_is_accepted_without_a_re_ask(cli, reply_text):
-    cli.script([reply_text])
+def test_tool_calls_after_refused_native_attempts_are_accepted_without_a_re_ask(cli):
+    # As really seen from Sonnet (2026-10-28): two refused native calls, then StructuredOutput, 4 turns.
+    cli.script([{"result": json.dumps(TOOL_CALLS), "num_turns": 4}])
 
     reply = with_tools().invoke("Any mail from Bob?")
 
@@ -283,6 +283,23 @@ async def test_the_context_check_after_a_re_asked_turn_sees_the_final_call_s_pro
     # The run log and cost still count both calls of the re-asked turn.
     first_turn = next(m for m in done["messages"] if isinstance(m, AIMessage))
     assert first_turn.usage_metadata["input_tokens"] == 120_000
+
+
+def test_the_prompt_size_is_the_last_request_s_when_one_cli_call_made_several(cli):
+    # As really seen (2026-10-29): a refused native call, then StructuredOutput. The usage sums both
+    # requests; iterations holds only the last.
+    cli.script([{
+        "result": json.dumps(TOOL_CALLS), "num_turns": 3,
+        "usage": {"input_tokens": 4, "output_tokens": 297, "cache_read_input_tokens": 2_185,
+                  "cache_creation_input_tokens": 1_185,
+                  "iterations": [{"input_tokens": 2, "output_tokens": 245, "cache_read_input_tokens": 1_628,
+                                  "cache_creation_input_tokens": 114}]},
+    }])
+
+    reply = with_tools().invoke("Any mail from Bob?")
+
+    assert reply.response_metadata["prompt_input_tokens"] == 1_744  # the last request's prompt
+    assert reply.usage_metadata["input_tokens"] == 3_374  # cost still counts both requests
 
 
 def test_a_re_asked_turn_counts_the_usage_of_both_cli_calls(cli):

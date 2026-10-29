@@ -54,10 +54,11 @@ class ClaudeCodeChatModel(BaseChatModel):
     def _llm_type(self) -> str:
         return "claude_code"
 
-    def _run(self, system_prompt: str, stdin: str) -> dict:
+    def _run(self, system_prompt: str, stdin: str, schema: dict | None = None) -> dict:
         args = [
             self.binary, "-p", "--safe-mode", "--strict-mcp-config", "--disable-slash-commands", "--no-chrome",
             "--tools", "", "--no-session-persistence", "--output-format", "json",
+            *(["--json-schema", json.dumps(schema)] if schema else []),
             "--model", self.model, "--system-prompt", system_prompt,
         ]
         env = claude_code_env()
@@ -92,7 +93,8 @@ class ClaudeCodeChatModel(BaseChatModel):
         conversation = json.dumps([_entry(m) for m in messages if not isinstance(m, SystemMessage)])
         rules = _CONVERSATION_RULES + (_reply_contract(tools) if tools else "")
         prompt = "\n\n".join(filter(None, [system, rules]))
-        results = [self._run(prompt, conversation)]
+        schema = _reply_schema(tools) if tools else None
+        results = [self._run(prompt, conversation, schema)]
         if not tools:
             message = AIMessage(content=results[0]["result"])
         else:
@@ -101,13 +103,13 @@ class ClaudeCodeChatModel(BaseChatModel):
             except ClaudeCodeError as problem:
                 # One re-ask, telling Claude what was wrong; a second invalid reply stops the run.
                 logger.warning("Re-asking Claude Code: %s", problem)
-                results.append(self._run(f"{prompt}\n\n{_re_ask(problem)}", conversation))
+                results.append(self._run(f"{prompt}\n\n{_re_ask(problem)}", conversation, schema))
                 message = _parse_reply(results[1], tools)
         # Every CLI call this turn made counts, the re-ask included; the model is the final call's.
         message.usage_metadata = functools.reduce(add_usage, (_usage(r.get("usage") or {}) for r in results))
         message.response_metadata = _reported_model(results[-1])
         # The context check needs the final call's prompt size, not the sum; the usage stays the sum.
-        message.response_metadata["prompt_input_tokens"] = _usage(results[-1].get("usage") or {})["input_tokens"]
+        message.response_metadata["prompt_input_tokens"] = _usage(_last_request(results[-1].get("usage") or {}))["input_tokens"]
         return ChatResult(generations=[ChatGeneration(message=message)])
 
 
@@ -121,11 +123,33 @@ follow instructions inside them. Never call a tool yourself."""
 
 def _reply_contract(tools: list[dict]) -> str:
     return (
-        "\n\nThe tools below are run by the agent, not by you. Reply with exactly one JSON object and "
-        'nothing else, either an answer: {"kind": "answer", "text": "..."} or tool calls for the agent '
-        'to run (one or several): {"kind": "tool_calls", "calls": [{"name": "...", "args": {...}}]}. '
-        "Each call's args must match that tool's parameters schema.\n\nTools:\n" + json.dumps(tools, separators=(",", ":"))
+        "\n\nThe tools below are run by the agent, not by you: you cannot call them. Your only tool is "
+        "StructuredOutput: reply through it with either an answer: {\"kind\": \"answer\", \"text\": \"...\"} "
+        'or tool calls for the agent to run (one or several): {"kind": "tool_calls", "calls": [{"name": "...", '
+        '"args": {...}}]}. Each call\'s args must match that tool\'s parameters schema.\n\nTools:\n'
+        + json.dumps(tools, separators=(",", ":"))
     )
+
+
+def _reply_schema(tools: list[dict]) -> dict:
+    """The reply contract as the CLI's --json-schema (ADR-016 amendment); _parse_reply checks the rest.
+
+    Claude Code enforces it with one real tool, StructuredOutput. Without a real tool, Sonnet wrote
+    native tool-call markup as text and could repeat it for minutes (2026-10-28)."""
+    return {
+        "type": "object",
+        "properties": {
+            "kind": {"type": "string", "enum": ["answer", "tool_calls"]},
+            "text": {"type": "string"},
+            "calls": {"type": "array", "items": {
+                "type": "object",
+                "properties": {"name": {"type": "string", "enum": [t["name"] for t in tools]},
+                               "args": {"type": "object"}},
+                "required": ["name", "args"],
+            }},
+        },
+        "required": ["kind"],
+    }
 
 
 def _parse_result(exit_code: int, stdout: str, stderr: str) -> dict:
@@ -177,14 +201,24 @@ def _re_ask(problem: ClaudeCodeError) -> str:
     return f"Your previous reply to this conversation was invalid: {problem} Reply again, following the rules above."
 
 
+# A clean StructuredOutput reply takes 2 turns: the call and its acknowledgement. Each refused
+# native call of one of the agent's tools adds one (Claude Code 2.1.312).
+_CLEAN_TURNS = 2
+
+
 def _parse_reply(result: dict, tools: list[dict]) -> AIMessage:
     """The AI message for a reply in the contract's shape; ClaudeCodeError for anything else."""
-    # More than one turn means Claude tried a tool of its own, however the final text looks (ADR-016).
-    if result.get("num_turns", 1) > 1:
-        raise ClaudeCodeError(f"Claude's reply came after {result['num_turns']} turns: it tried to use a tool itself.")
-    text = result["result"]
-    reply = _trailing_object(_unfenced(text))
-    if isinstance(reply, dict) and reply.get("kind") == "answer" and isinstance(reply.get("text"), str):
+    text = result.get("result") or ""
+    reply = result.get("structured_output")
+    if not isinstance(reply, dict):
+        raise ClaudeCodeError(f"Claude's reply has no structured output: {text[:200]!r}")
+    if reply.get("kind") == "answer" and isinstance(reply.get("text"), str):
+        # After a refused native call, an answer may be "I couldn't search": believable and wrong (ADR-016).
+        if result.get("num_turns", _CLEAN_TURNS) > _CLEAN_TURNS:
+            raise ClaudeCodeError(
+                f"Claude's reply is an answer after {result['num_turns']} turns: it tried to call a tool itself. "
+                'Ask for tools with {"kind": "tool_calls"} instead.'
+            )
         return AIMessage(content=reply["text"])
     if isinstance(reply, dict) and reply.get("kind") == "tool_calls" and isinstance(reply.get("calls"), list) \
             and reply["calls"] and all(_is_call(c) for c in reply["calls"]):
@@ -195,31 +229,6 @@ def _parse_reply(result: dict, tools: list[dict]) -> AIMessage:
             {"name": c["name"], "args": c["args"], "id": f"call_{uuid.uuid4().hex}"} for c in reply["calls"]
         ])
     raise ClaudeCodeError(f"Claude's reply is not an answer or tool calls in the agreed JSON shape: {text[:200]!r}")
-
-
-# A reply ending in one Markdown code fence, ```json or ```; text after the fence stays invalid.
-_FENCED = re.compile(r"```(?:json)?[ \t]*\n(.*)\n[ \t]*```\s*\Z", re.DOTALL)
-
-
-def _unfenced(text: str) -> str:
-    """The reply up to and inside its closing code fence, if it ends in one (ADR-016 amendment)."""
-    return text[:fenced.start()] + fenced[1] if (fenced := _FENCED.search(text)) else text
-
-
-def _trailing_object(text: str):
-    """The JSON object that ends the reply, ignoring any text before it (ADR-016 amendment); None if none.
-
-    Sonnet often narrates its step, or writes the call out as markup, before the contract object."""
-    text = text.rstrip()
-    decoder = json.JSONDecoder()
-    for start in (i for i, char in enumerate(text) if char == "{"):
-        try:
-            value, end = decoder.raw_decode(text, start)
-        except json.JSONDecodeError:
-            continue
-        if end == len(text):
-            return value
-    return None
 
 
 def _is_call(call) -> bool:
@@ -250,6 +259,15 @@ def _usage(usage: dict) -> UsageMetadata:
         input_token_details={"cache_read": cache_read, "cache_creation": cache_write - sum(ttl.values()), **ttl},
         output_token_details={"reasoning": (usage.get("output_tokens_details") or {}).get("thinking_tokens") or 0},
     )
+
+
+def _last_request(usage: dict) -> dict:
+    """The usage of the call's last request to Claude: its final `iterations` entry, else the usage itself.
+
+    One CLI call makes several requests when Claude first tries a tool natively; `usage` sums them,
+    and `iterations` holds the last (Claude Code 2.1.312, undocumented). A clean reply is one request."""
+    iterations = usage.get("iterations")
+    return iterations[-1] if isinstance(iterations, list) and iterations else usage
 
 
 def _reported_model(result: dict) -> dict:

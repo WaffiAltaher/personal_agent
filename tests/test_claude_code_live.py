@@ -49,7 +49,8 @@ def test_real_claude_code_asks_for_both_tool_calls_in_one_turn_with_a_small_cont
 
     raw = [json.loads(line) for line in results.read_text().splitlines() if line.strip()]
     assert len(raw) == 1, raw  # no re-ask
-    assert raw[0]["num_turns"] == 1, raw
+    # The reply came through --json-schema; refused native attempts before it are allowed.
+    assert raw[0]["structured_output"]["kind"] == "tool_calls", raw
     assert raw[0]["is_error"] is False, raw
     assert sorted(c["name"] for c in reply.tool_calls) == ["get_weather", "get_weather"]
     assert sorted(c["args"]["city"] for c in reply.tool_calls) == ["Amsterdam", "Utrecht"]
