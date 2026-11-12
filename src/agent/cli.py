@@ -43,11 +43,18 @@ def _parse_args(argv: list[str]) -> tuple[bool, bool, str]:
         fixtures = True
         args.remove("--fixtures")
 
+    usage = "Usage: python -m agent.cli [--debug] [--fixtures] '<your question>'"
+    # A mistyped flag (--fixture) must not become the question: it would run against real data.
+    unknown = [a for a in args if a.startswith("--")]
+    if unknown:
+        print(f"Unknown option: {' '.join(unknown)}\n{usage}")
+        sys.exit(1)
     if not args:
-        print("Usage: python -m agent.cli [--debug] [--fixtures] '<your question>'")
+        print(usage)
         sys.exit(1)
 
-    return debug, fixtures, args[0]
+    # An unquoted question arrives as several words: it is the whole line, not its first word.
+    return debug, fixtures, " ".join(args)
 
 
 def _stringify_content(content) -> str:
