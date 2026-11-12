@@ -38,6 +38,7 @@ from pydantic import BaseModel, Field
 
 from agent.auth.google import get_google_credentials
 from agent.tools import attachment_save
+from agent.tools.transient import is_transient
 from fixture_world import google as fixture_google
 
 GMAIL_FOLDER = "gmail"  # this mailbox's subfolder of the agent folder
@@ -291,8 +292,12 @@ def search_gmail(query: str, max_results: int = 10) -> str:
         return "\n".join(lines).rstrip()
 
     except HttpError as e:
+        if is_transient(e):
+            raise  # 429 or 5xx: the graph retries it
         return f"Error: Gmail API error {e.status_code}: {e.reason}"
     except Exception as e:
+        if is_transient(e):
+            raise  # a network blip: the graph retries it
         return f"Error: {type(e).__name__}: {e}"
 
 
@@ -362,8 +367,12 @@ def create_draft_email(to: str, subject: str, body: str, cc: str = "") -> str:
         )
 
     except HttpError as e:
+        if is_transient(e):
+            raise  # 429 or 5xx: the graph retries it
         return f"Error: Gmail API error {e.status_code}: {e.reason}"
     except Exception as e:
+        if is_transient(e):
+            raise  # a network blip: the graph retries it
         return f"Error: {type(e).__name__}: {e}"
 
 
@@ -445,10 +454,14 @@ def get_gmail_message(message_id: str, include_inline: bool = False) -> str:
         return "\n".join(lines)
 
     except HttpError as e:
+        if is_transient(e):
+            raise  # 429 or 5xx: the graph retries it
         if e.status_code == 404:
             return f"Error: message not found (ID: {message_id})"
         return f"Error: Gmail API error {e.status_code}: {e.reason}"
     except Exception as e:
+        if is_transient(e):
+            raise  # a network blip: the graph retries it
         return f"Error: {type(e).__name__}: {e}"
 
 
@@ -514,10 +527,14 @@ def save_gmail_attachment(
         return _save_attachment(msg.get("payload", {}), attachment_id, file_name, include_inline, fetch_data)
 
     except HttpError as e:
+        if is_transient(e):
+            raise  # 429 or 5xx: the graph retries it
         if e.status_code == 404:
             return f"Error: message or attachment not found (message ID: {message_id})"
         return f"Error: Gmail API error {e.status_code}: {e.reason}"
     except Exception as e:
+        if is_transient(e):
+            raise  # a network blip: the graph retries it
         return f"Error: {type(e).__name__}: {e}"
 
 

@@ -163,3 +163,97 @@ async def test_write_tool_transient_error_is_not_retried(scripted_model):
     assert calls["n"] == 1
     assert msg.status == "error"
     assert "not retried" in msg.content
+
+
+# --- The local tools themselves: a transient failure must reach the retry, not come back as "Error: ..." ---
+
+class _FlakyGmail:
+    """A Gmail service whose messages().list() fails `failures` times with `status`, then finds nothing."""
+
+    def __init__(self, status: int, failures: int):
+        self.status, self.failures, self.calls = status, failures, 0
+
+    def users(self): return self
+    def messages(self): return self
+    def list(self, **kwargs): return self
+
+    def execute(self):
+        self.calls += 1
+        if self.calls <= self.failures:
+            raise HttpError(httplib2.Response({"status": str(self.status)}), b"backend error")
+        return {"messages": []}
+
+
+@pytest.mark.asyncio
+async def test_a_gmail_503_is_retried_until_it_succeeds(run_with_tool_calls, monkeypatch):
+    from agent.tools import gmail
+
+    service = _FlakyGmail(status=503, failures=2)
+    monkeypatch.setattr(gmail, "_get_gmail_service", lambda: service)
+
+    result = await run_with_tool_calls(
+        [read_tool(gmail.search_gmail)], [{"id": "c1", "name": "search_gmail", "args": {"query": "is:unread"}}]
+    )
+
+    assert service.calls == 3
+    assert tool_messages(result)["c1"].content == "No messages found for query: 'is:unread'"
+
+
+@pytest.mark.asyncio
+async def test_a_gmail_403_is_still_an_error_string_for_the_model_and_not_retried(run_with_tool_calls, monkeypatch):
+    from agent.tools import gmail
+
+    service = _FlakyGmail(status=403, failures=5)
+    monkeypatch.setattr(gmail, "_get_gmail_service", lambda: service)
+
+    result = await run_with_tool_calls(
+        [read_tool(gmail.search_gmail)], [{"id": "c1", "name": "search_gmail", "args": {"query": "is:unread"}}]
+    )
+
+    assert service.calls == 1
+    assert tool_messages(result)["c1"].content.startswith("Error: Gmail API error 403")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [Exception("Error 503: Service Unavailable"), TimeoutError("timed out")])
+async def test_a_transient_web_search_failure_is_retried(run_with_tool_calls, monkeypatch, failure):
+    from langchain_tavily import TavilySearch
+
+    from agent.tools.web import web_search
+
+    attempts = {"n": 0}
+
+    async def flaky_arun(self, *args, **kwargs):  # TavilySearch returns its failures, it does not raise them
+        attempts["n"] += 1
+        return {"error": failure} if attempts["n"] < 3 else {"query": "q", "results": []}
+
+    monkeypatch.setattr(TavilySearch, "_arun", flaky_arun)
+
+    result = await run_with_tool_calls(
+        [read_tool(web_search)], [{"id": "c1", "name": web_search.name, "args": {"query": "q"}}]
+    )
+
+    assert attempts["n"] == 3
+    assert tool_messages(result)["c1"].status != "error"
+
+
+@pytest.mark.asyncio
+async def test_a_permanent_web_search_failure_is_returned_as_before(run_with_tool_calls, monkeypatch):
+    from langchain_tavily import TavilySearch
+
+    from agent.tools.web import web_search
+
+    attempts = {"n": 0}
+
+    async def failing_arun(self, *args, **kwargs):
+        attempts["n"] += 1
+        return {"error": Exception("Error 401: Unauthorized")}
+
+    monkeypatch.setattr(TavilySearch, "_arun", failing_arun)
+
+    result = await run_with_tool_calls(
+        [read_tool(web_search)], [{"id": "c1", "name": web_search.name, "args": {"query": "q"}}]
+    )
+
+    assert attempts["n"] == 1
+    assert "401" in str(tool_messages(result)["c1"].content)
