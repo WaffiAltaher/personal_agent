@@ -270,3 +270,27 @@ def test_memory_retrieval_stops_at_budget(small_context_limits, monkeypatch):
     assert content_tokens <= SMALL_MEMORY_BUDGET
     assert len(selected) >= 1
     assert result.count("\n\n") + 1 == len(selected)
+
+
+def test_clearing_reaches_the_target_when_the_provider_counts_more_tokens_than_the_estimate(small_context_limits):
+    """The trigger is the provider's count; the stop condition must be in the same tokens. Dense
+    content (JSON, non-English) can count several times its chars/4 estimate."""
+    def turn(call_id: str, result: str) -> list:
+        return [
+            AIMessage(content="", tool_calls=[{"name": "t", "args": {}, "id": call_id}]),
+            ToolMessage(content=result, tool_call_id=call_id),
+        ]
+
+    old_result = _chars_for_tokens(150)
+    messages = [HumanMessage(content="q"), *turn("a", old_result), *turn("b", old_result), *turn("c", "small")]
+    # Estimated ~300 tokens (under the 400 target), but the provider reported four times that.
+    reported = 1_200
+    assert reported > SMALL_CLEAR_THRESHOLD
+
+    view, stubbed = build_model_view(
+        messages, system_text="", tools=[],
+        last_model_input_tokens=reported, message_count_at_last_model_call=len(messages),
+    )
+
+    assert stubbed == {"a", "b"}  # before the fix: nothing was cleared
+    assert all("result cleared" in m.content for m in view if isinstance(m, ToolMessage) and m.tool_call_id in "ab")

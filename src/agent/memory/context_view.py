@@ -174,9 +174,12 @@ def build_model_view(
             apply_stub(idx, msg)
 
     if context_tokens > threshold:
+        # context_tokens is the provider's count; view_total() is the chars/4 estimate, which can be
+        # far below it (JSON, non-English text). Scale the estimate so the target is in the same tokens.
+        scale = context_tokens / max(view_total(), 1)
         tool_indices = [i for i, m in enumerate(working) if isinstance(m, ToolMessage)]
         for idx in tool_indices:
-            if view_total() <= target:
+            if view_total() * scale <= target:
                 break
             original = working[idx]
             if isinstance(original, ToolMessage):
