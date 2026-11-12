@@ -7,7 +7,9 @@ world's stand-in (fixture_world.claude_code), which records what it was given an
 scripted result. The wrapper's process, environment and JSON in and out all run for real.
 """
 
+import asyncio
 import json
+import logging
 import os
 import time
 from datetime import date
@@ -546,3 +548,41 @@ def test_a_timeout_kills_the_cli_and_what_it_started_and_stops(cli, tmp_path):
     while any(running(p) for p in pids) and time.monotonic() < deadline:
         time.sleep(0.05)
     assert not any(running(p) for p in pids)
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_turn_kills_the_cli_and_what_it_started(cli, tmp_path):
+    """Ctrl-C cancels the turn: the CLI call must die with it, not run on for its whole timeout."""
+    cli.script([{"hang": True}])
+    calls_path = tmp_path / "calls.jsonl"
+
+    turn = asyncio.create_task(with_tools(claude_code(claude_code_timeout_s=60)).ainvoke("Any mail from Bob?"))
+    deadline = time.monotonic() + 10
+    while not fake_cli.hung_pids(calls_path) and time.monotonic() < deadline:
+        await asyncio.sleep(0.05)
+    pids = fake_cli.hung_pids(calls_path)
+    assert len(pids) == 2  # the stand-in and the child it started
+
+    turn.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await turn
+
+    deadline = time.monotonic() + 5  # an orphan is reaped by init a moment after it dies
+    while any(running(p) for p in pids) and time.monotonic() < deadline:
+        await asyncio.sleep(0.05)
+    assert not any(running(p) for p in pids)
+
+
+def test_a_tool_schema_that_cannot_be_checked_does_not_stop_the_turn(cli, caplog):
+    """A malformed parameters schema (an MCP server's, say) is the tool's problem, not the reply's."""
+    cli.script([{"structured_output": {"kind": "tool_calls", "calls": [{"name": "odd", "args": {"a": 1}}]}}])
+    odd = {"type": "function", "function": {
+        "name": "odd", "description": "", "parameters": {"type": "object", "properties": {"a": {"type": "nonsense"}}},
+    }}
+
+    with caplog.at_level(logging.WARNING, logger="agent.claude_code_model"):
+        reply = claude_code().bind_tools([odd]).invoke("go")
+
+    assert [c["name"] for c in reply.tool_calls] == ["odd"]
+    assert len(cli.calls()) == 1  # no re-ask
+    assert "odd" in caplog.text
