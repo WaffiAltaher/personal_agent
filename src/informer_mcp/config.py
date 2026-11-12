@@ -4,6 +4,9 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# The repo's `.env`, wherever the server is started from (the agent starts it in its own working directory).
+ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+
 INFORMER_API_URL = "https://api.informer.eu/v2"
 
 
@@ -39,7 +42,7 @@ class InformerSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="INFORMER_",
-        env_file=".env",
+        env_file=ENV_FILE,
         env_file_encoding="utf-8",
         extra="ignore",
     )

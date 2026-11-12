@@ -1,5 +1,13 @@
 # src/agent/config.py
+from pathlib import Path
+
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# The repo root (src/agent/config.py → src/agent → src → root). `.env` and the memory files are
+# found from here, not from the working directory: started elsewhere, the agent would otherwise
+# miss its `.env` and open a new, empty memory there.
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 class Settings(BaseSettings):
     # LLM
@@ -29,6 +37,13 @@ class Settings(BaseSettings):
     # fixture (tests/memory/test_cosine_threshold.py); live embedding calibration
     # is a follow-up when a real API key is available in CI.
     memory_score_threshold: float = 0.7
+
+    @field_validator("sqlite_path", "chroma_path")
+    @classmethod
+    def _relative_to_project_root(cls, value: str) -> str:
+        """A relative memory path is relative to the repo root; an absolute one is kept."""
+        return str(PROJECT_ROOT / Path(value).expanduser())
+
     memory_top_k: int = 5
     memory_budget: int = 10_000
 
@@ -46,7 +61,7 @@ class Settings(BaseSettings):
     tool_result_max_tokens: int = 20_000
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=PROJECT_ROOT / ".env",
         env_file_encoding="utf-8",
     )
 
