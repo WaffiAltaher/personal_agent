@@ -22,16 +22,16 @@ Informer's column balance has two behaviours the tools must handle (both observe
 
 Also correct the existing `trial_balance` tool's description: for balance-sheet ledgers the debit and credit columns are year-to-date up to `period_to`, whatever `period_from` says; only profit-and-loss ledgers show movements within the range. The fake Informer API must model both behaviours (year-to-date for balance-sheet ledgers, range for profit-and-loss ledgers) and a closed year, with seeded data. Both new tools are on the server's read allowlist.
 
-- [ ] Fake: balance-sheet ledgers return year-to-date columns ignoring `period_from`; profit-and-loss ledgers honour it; one seeded year is closed (Q4 moves the VAT ledgers to 1551), one is open
-- [ ] Test: exact Revenue for a full year and for a sub-range of periods
-- [ ] Test: exact VAT to pay for each quarter of the open year, where naive "query the quarter's periods" would give a different (year-to-date) answer
-- [ ] Test: a quarter seeded to come out negative
-- [ ] Test: a quarter with a genuine correction on each side (a debit on a VAT-charged ledger, a credit on a VAT-paid ledger) is included in the result
-- [ ] Test: the reverse-charge pair (1542/1543) cancels out
-- [ ] Test: Q4 of the closed year is refused with the message above; Q1–Q3 of that year still answer
-- [ ] Test: invalid quarter or period range is refused with a clear message
-- [ ] The `trial_balance` description states the year-to-date behaviour for balance-sheet ledgers
-- [ ] Amounts are decimal strings, never floats
+- [x] Fake: balance-sheet ledgers return year-to-date columns ignoring `period_from`; profit-and-loss ledgers honour it; one seeded year is closed (Q4 moves the VAT ledgers to 1551), one is open
+- [x] Test: exact Revenue for a full year and for a sub-range of periods
+- [x] Test: exact VAT to pay for each quarter of the open year, where naive "query the quarter's periods" would give a different (year-to-date) answer
+- [x] Test: a quarter seeded to come out negative
+- [x] Test: a quarter with a genuine correction on each side (a debit on a VAT-charged ledger, a credit on a VAT-paid ledger) is included in the result
+- [x] Test: the reverse-charge pair (1542/1543) cancels out
+- [x] Test: Q4 of the closed year is refused with the message above; Q1–Q3 of that year still answer
+- [x] Test: invalid quarter or period range is refused with a clear message
+- [x] The `trial_balance` description states the year-to-date behaviour for balance-sheet ledgers
+- [x] Amounts are decimal strings, never floats
 
 ## Notes for the implementer
 

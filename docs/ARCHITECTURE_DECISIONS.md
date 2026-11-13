@@ -5,7 +5,7 @@ Record of technical decisions made during the Personal Data Agent project. Each 
 ---
 
 ## ADR-001: LLM Provider — Gemini via langchain-google-genai
-**Date:** [TBD]
+**Date:** on or before 2026-04-18 (the first commit already uses it)
 **Status:** Accepted
 
 **Context:** Need an LLM for the ReAct agent. Options: Claude API (via langchain-anthropic), Gemini (via langchain-google-genai), OpenAI (via langchain-openai), or a provider-abstraction layer (aisuite/LiteLLM).
@@ -26,7 +26,7 @@ Record of technical decisions made during the Personal Data Agent project. Each 
 ---
 
 ## ADR-002: Vector Database — Chroma
-**Date:** [TBD]
+**Date:** on or before 2026-04-18 (the first commit already uses it)
 **Status:** Accepted
 
 **Context:** Need a vector store for semantic memory (Phase 3). Options: Chroma (local, Python-native) or pgvector (PostgreSQL extension).
@@ -34,15 +34,17 @@ Record of technical decisions made during the Personal Data Agent project. Each 
 **Decision:** Chroma.
 
 **Reasoning:**
-- simplest apprach for the goal of this project
+- simplest approach for the goal of this project
 
 **Consequences:**
-- [Fill in]
+- Semantic memory is a local Chroma collection on the owner's disk; no database server to run
+- The collection uses cosine space since 2026-10 (review-findings ticket 24), which needed a one-off re-index
+- [Fill in: anything else]
 
 ---
 
 ## ADR-003: Orchestration — LangGraph
-**Date:** [TBD]
+**Date:** on or before 2026-04-18 (the first commit already uses it)
 **Status:** Accepted
 
 **Context:** Need an orchestration layer for the ReAct agent. Options: vanilla LangChain agents, LangGraph, CrewAI, AutoGen, raw Python.
@@ -53,7 +55,8 @@ Record of technical decisions made during the Personal Data Agent project. Each 
 - [Fill in]
 
 **Consequences:**
-- [Fill in]
+- Approval (`interrupt()`), resumable runs (`SqliteSaver` checkpoints) and the per-tool retry policy are built on LangGraph features, so they are tied to it (ADR-010)
+- [Fill in: anything else]
 
 ---
 

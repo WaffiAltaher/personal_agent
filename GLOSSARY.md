@@ -48,8 +48,12 @@ _Avoid_: email (when unsent), message
 Any tool call that changes data in an external system or on the owner's computer; it always needs the owner's approval first and is never retried automatically.
 _Avoid_: mutation, side effect
 
+**Outbound read**:
+A read that sends text the agent wrote to a service outside the owner's own accounts, such as a web search. It needs the owner's approval once the agent has read the owner's data in the same conversation; before that it runs like any other read.
+_Avoid_: external call, egress
+
 **Approval**:
-The owner's single approve-or-reject answer covering every Write action the agent proposes at once; reads proposed alongside them are not part of it. Sending a new request instead of answering counts as a rejection.
+The owner's single approve-or-reject answer covering every Write action the agent proposes at once, and every Outbound read proposed after the agent has read the owner's data; other reads proposed alongside them are not part of it. Sending a new request instead of answering counts as a rejection.
 _Avoid_: confirmation, consent
 
 **Agent folder**:

@@ -12,8 +12,8 @@
 
 **What to build:** In the human review step, an Approval is approved only by the exact decision "approve". Every other value ("reject", "no", empty, None, a typo) rejects. Today anything except "reject" approves: it fails open.
 
-- [ ] The Track B killing test `k11_anything_but_approve_rejects` is added to the suite and passes
-- [ ] No other behaviour of the review step changes in this ticket
+- [x] The Track B killing test `k11_anything_but_approve_rejects` is added to the suite and passes
+- [x] No other behaviour of the review step changes in this ticket
 
 ## Notes for the implementer
 

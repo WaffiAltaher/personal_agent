@@ -12,10 +12,10 @@
 
 **What to build:** When Langfuse can't be reached (refused connection, bad keys, any error from its auth check), the CLI prints a warning naming the Langfuse base URL and runs the agent untraced. Today the auth check raises on everything except one error type, so the warning branch is dead and every run crashes before the agent starts.
 
-- [ ] The connection check never raises: any exception means "not connected" and returns false
-- [ ] The warning names the configured Langfuse base URL
-- [ ] Test through the CLI driver: with the Langfuse auth check raising a connection error, the run completes and the warning is printed
-- [ ] Test: with the auth check raising some other exception (e.g. an HTTP error), same behaviour
+- [x] The connection check never raises: any exception means "not connected" and returns false
+- [x] The warning names the configured Langfuse base URL
+- [x] Test through the CLI driver: with the Langfuse auth check raising a connection error, the run completes and the warning is printed
+- [x] Test: with the auth check raising some other exception (e.g. an HTTP error), same behaviour
 
 ## Notes for the implementer
 

@@ -12,4 +12,4 @@ Record every problem in `.scratch/review-findings/findings.md` as it is found: w
 - [x] Every interface answers: MS365 (mail, calendar, contacts, and both Draft tools), Informer (Relations, Sales invoices, Overdue invoices, trial balance), Gmail, Google Calendar, local files, web search, and memory
 - [x] Approval gates every Write action; a rejection creates nothing
 - [x] Each problem found is added to `.scratch/review-findings/findings.md`
-- [ ] At the end, `.scratch/review-findings/findings.md` is translated into separate tickets
+- [x] At the end, `.scratch/review-findings/findings.md` is translated into separate tickets

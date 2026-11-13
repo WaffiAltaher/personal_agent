@@ -78,7 +78,7 @@ Approval **fails closed**: every bound tool is classified read or Write action (
 - The `credentials/` and `checkpoints/` directories are gitignored
 - `notebooks/`, `.claude/skills/`, and the rest of `docs/` are gitignored. A worktree does not have those. Read them from the primary checkout (`git worktree list`). `docs/agents/` and `docs/ARCHITECTURE_DECISIONS.md` are tracked.
 - An MCP child sees only its allowlisted environment. A new variable is `FIXTURE_WORLD_*` or one of that server's own settings.
-- Phase roadmap is in `docs/MASTER_PLAN.md`. Phases 5–7 are implemented on `feat/complete-phases-5-7` (spec and tickets in `.scratch/complete-phases-5-7/`); live credentials setup (ticket 01) is still pending
+- Phase roadmap is in `docs/MASTER_PLAN.md`. Phases 5–7 are on main (spec and tickets in `.scratch/complete-phases-5-7/`)
 
 ## Agent skills
 
