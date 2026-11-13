@@ -40,6 +40,7 @@ from agent.evals.generation import GenerationScorer, generation_means, generatio
 from agent.evals.records import EvalResults, InterruptRecord, RunResult, ToolCallRecord
 from agent.evals.report import render_report
 from agent.evals.scenarios import Dataset, Scenario
+from agent.tools.classification import is_outbound_read
 from agent.evals.outcome import read_agent_folder, read_upload_log, run_passed, score_outcome
 from agent.evals.trajectory import score_facts, score_trajectory, summarise
 from fixture_world.purchase_handover import HANDOVER_FAIL_ENV, UPLOAD_LOG_ENV
@@ -47,7 +48,6 @@ from agent.conversation import run_conversation
 from agent.graph import build_graph, is_step_limit_answer
 from agent.tracing import TraceAttributes
 from agent.tools import LOCAL_TOOLS, load_all_tools
-from agent.tools.classification import is_read
 from agent.tools.gmail import get_gmail_message, save_gmail_attachment, search_gmail
 from agent.tools.memory import retrieve_episodic_memory
 from agent.tools.web import web_search
@@ -290,13 +290,9 @@ async def run_scenario(
                             interrupts.append(InterruptRecord(actions=pending.value.get("actions", ""),
                                                               decision=scenario.approval))
                         if scenario.approval == "reject":
-                            tool_by_name = {t.name: t for t in tools}
-                            rejected |= {
-                                call["id"]
-                                for call in result["messages"][-1].tool_calls
-                                if tool_by_name.get(call["name"]) is None
-                                or not is_read(tool_by_name[call["name"]])
-                            }
+                            # The calls this Approval covers: Write actions and gated Outbound reads.
+                            for pending in result["__interrupt__"]:
+                                rejected |= set(pending.value.get("tool_call_ids", []))
                         result = await run_conversation(
                             graph, config, tools=tools, resume_decision=scenario.approval,
                         )
@@ -335,6 +331,8 @@ async def run_scenario(
         expected_bytes=expected_bytes,
         saved=saved,
         approvals=len(interrupts),
+        tool_calls=tool_calls,
+        outbound_tools=frozenset(t.name for t in tools if is_outbound_read(t)),
     )
     run = RunResult(
         scenario_id=scenario.id,

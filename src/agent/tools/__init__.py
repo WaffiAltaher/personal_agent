@@ -1,7 +1,7 @@
 # src/agent/tools/__init__.py
 from langchain_core.tools import BaseTool
 
-from agent.tools.classification import ACTION_CLASS_KEY, READ, read_tool, write_action
+from agent.tools.classification import action_class, classify_as, outbound_read, read_tool, write_action
 from agent.tools.filesystem import list_directory, read_file
 from agent.tools.gmail import (
     create_draft_email,
@@ -30,7 +30,7 @@ from agent.tools.informer import informer_fixture_server, informer_server
 LOCAL_TOOLS = [
     read_tool(read_file),
     read_tool(list_directory),
-    read_tool(web_search),
+    outbound_read(web_search),  # the query leaves the owner's accounts (ADR-017)
     read_tool(list_calendar_events),
     read_tool(get_calendar_event),
     read_tool(search_gmail),
@@ -60,10 +60,7 @@ def _fixture_local_tool(tool: BaseTool) -> BaseTool:
     stand_in = _FIXTURE_STAND_INS_BY_NAME.get(tool.name)
     if stand_in is None:
         return tool
-    action = (tool.metadata or {}).get(ACTION_CLASS_KEY)
-    if action == READ:
-        return read_tool(stand_in)
-    return write_action(stand_in)
+    return classify_as(stand_in, action_class(tool))
 
 
 FIXTURE_LOCAL_TOOLS = [_fixture_local_tool(t) for t in LOCAL_TOOLS]

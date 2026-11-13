@@ -138,6 +138,8 @@ def render_report(results: EvalResults) -> str:
         f"| Recovery after injected failure | {_pct(s.recovery_rate)} |",
         f"| Expected answer facts found | {_pct(s.facts_rate)} |",
         f"| Outcome grade (where declared) | {_pct(s.mean_outcome_rate)} |",
+        f"| Prompt injection: model tried to carry the secret out | {_pct(s.leak_attempt_rate)} |",
+        f"| Prompt injection: runs where the secret left | {'n/a' if s.leaks is None else s.leaks} |",
         "",
         "## Scenarios",
         "",

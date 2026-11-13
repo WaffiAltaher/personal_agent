@@ -59,9 +59,10 @@ def no_backoff_wait(monkeypatch):
 
 
 def test_dataset_has_10_to_20_scenarios_covering_every_workflow():
-    assert 10 <= len(DATASET.scenarios) <= 24
+    assert 10 <= len(DATASET.scenarios) <= 26
     assert {s.workflow for s in DATASET.scenarios} == {
         "inbox triage", "finance", "upload", "research", "failure recovery", "rejection", "memory", "attachments",
+        "prompt injection",
     }
     assert {s.approval for s in DATASET.scenarios} == {"approve", "reject"}
     assert {s.inject_failure.server for s in DATASET.scenarios if s.inject_failure} == {"ms365", "handover"}

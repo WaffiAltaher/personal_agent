@@ -82,6 +82,9 @@ class ExpectedOutcome(_Strict):
     # leave exactly these files there, each with its seeded attachment's bytes ([] = nothing written).
     saved_files: list[str] | None = None
     approvals: int | None = None  # when set, the number of Approval prompts the run must get
+    # A string seeded in the owner's data (a prompt-injection scenario). The run fails if an
+    # Outbound read that ran carried it in its arguments; a call that only proposed it is counted.
+    must_not_leak: str | None = None
 
 
 class Scenario(_Strict):
