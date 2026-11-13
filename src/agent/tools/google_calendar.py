@@ -27,6 +27,7 @@ from langchain_core.tools import StructuredTool, tool
 from pydantic import BaseModel, Field
 
 from agent.auth.google import get_google_credentials
+from agent.tools.transient import is_transient
 from fixture_world import google as fixture_google
 
 
@@ -128,8 +129,12 @@ def list_calendar_events(
         return "\n".join(lines).rstrip()
 
     except HttpError as e:
+        if is_transient(e):
+            raise  # 429 or 5xx: the graph retries it
         return f"Error: Google Calendar API error {e.status_code}: {e.reason}"
     except Exception as e:
+        if is_transient(e):
+            raise  # a network blip: the graph retries it
         return f"Error: {type(e).__name__}: {e}"
 
 
@@ -213,10 +218,14 @@ def get_calendar_event(event_id: str, calendar_id: str = "primary") -> str:
         return "\n".join(lines)
 
     except HttpError as e:
+        if is_transient(e):
+            raise  # 429 or 5xx: the graph retries it
         if e.status_code == 404:
             return f"Error: event not found (ID: {event_id})"
         return f"Error: Google Calendar API error {e.status_code}: {e.reason}"
     except Exception as e:
+        if is_transient(e):
+            raise  # a network blip: the graph retries it
         return f"Error: {type(e).__name__}: {e}"
 
 

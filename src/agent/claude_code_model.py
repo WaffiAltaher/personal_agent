@@ -9,6 +9,7 @@ process runs from an empty temporary directory, and the API-key variables are re
 environment so it can never bill an API key.
 """
 
+import asyncio
 import functools
 import json
 import logging
@@ -17,6 +18,7 @@ import re
 import signal
 import subprocess
 import tempfile
+import threading
 import uuid
 
 import jsonschema
@@ -54,7 +56,9 @@ class ClaudeCodeChatModel(BaseChatModel):
     def _llm_type(self) -> str:
         return "claude_code"
 
-    def _run(self, system_prompt: str, stdin: str, schema: dict | None = None) -> dict:
+    def _run(
+        self, system_prompt: str, stdin: str, schema: dict | None = None, calls: "_RunningCalls | None" = None,
+    ) -> dict:
         args = [
             self.binary, "-p", "--safe-mode", "--strict-mcp-config", "--disable-slash-commands", "--no-chrome",
             "--tools", "", "--no-session-persistence", "--output-format", "json",
@@ -68,6 +72,8 @@ class ClaudeCodeChatModel(BaseChatModel):
                 args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                 env=env, cwd=cwd, start_new_session=True,
             )
+            if calls is not None:
+                calls.started(process)
             try:
                 stdout, stderr = process.communicate(stdin, timeout=self.timeout_s)
             except subprocess.TimeoutExpired:
@@ -87,14 +93,15 @@ class ClaudeCodeChatModel(BaseChatModel):
         ], **kwargs)
 
     def _generate(
-        self, messages: list[BaseMessage], stop=None, run_manager=None, tools: list[dict] | None = None, **kwargs,
+        self, messages: list[BaseMessage], stop=None, run_manager=None, tools: list[dict] | None = None,
+        calls: "_RunningCalls | None" = None, **kwargs,
     ) -> ChatResult:
         system = "\n\n".join(m.text for m in messages if isinstance(m, SystemMessage))
         conversation = json.dumps([_entry(m) for m in messages if not isinstance(m, SystemMessage)])
         rules = _CONVERSATION_RULES + (_reply_contract(tools) if tools else "")
         prompt = "\n\n".join(filter(None, [system, rules]))
         schema = _reply_schema(tools) if tools else None
-        results = [self._run(prompt, conversation, schema)]
+        results = [self._run(prompt, conversation, schema, calls)]
         if not tools:
             message = AIMessage(content=results[0]["result"])
         else:
@@ -103,7 +110,7 @@ class ClaudeCodeChatModel(BaseChatModel):
             except ClaudeCodeError as problem:
                 # One re-ask, telling Claude what was wrong; a second invalid reply stops the run.
                 logger.warning("Re-asking Claude Code: %s", problem)
-                results.append(self._run(f"{prompt}\n\n{_re_ask(problem)}", conversation, schema))
+                results.append(self._run(f"{prompt}\n\n{_re_ask(problem)}", conversation, schema, calls))
                 message = _parse_reply(results[1], tools)
         # Every CLI call this turn made counts, the re-ask included; the model is the final call's.
         message.usage_metadata = functools.reduce(add_usage, (_usage(r.get("usage") or {}) for r in results))
@@ -111,6 +118,45 @@ class ClaudeCodeChatModel(BaseChatModel):
         # The context check needs the final call's prompt size, not the sum; the usage stays the sum.
         message.response_metadata["prompt_input_tokens"] = _usage(_last_request(results[-1].get("usage") or {}))["input_tokens"]
         return ChatResult(generations=[ChatGeneration(message=message)])
+
+    async def _agenerate(self, messages: list[BaseMessage], stop=None, run_manager=None, **kwargs) -> ChatResult:
+        """The same call off the event loop. A cancelled turn (Ctrl-C) kills its CLI process: left
+        alone it would run on, on the owner's subscription, and hold the agent open until it ended."""
+        calls = _RunningCalls()
+        try:
+            return await asyncio.to_thread(self._generate, messages, stop, None, calls=calls, **kwargs)
+        except asyncio.CancelledError:
+            calls.cancel()
+            raise
+
+
+class _RunningCalls:
+    """The CLI processes of one model turn, so a cancelled turn can kill them from another thread."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._processes: list[subprocess.Popen] = []
+        self._cancelled = False
+
+    def started(self, process: subprocess.Popen) -> None:
+        with self._lock:
+            self._processes.append(process)
+            if self._cancelled:  # cancelled just before this process started
+                _kill_group(process)
+
+    def cancel(self) -> None:
+        with self._lock:
+            self._cancelled = True
+            for process in self._processes:
+                _kill_group(process)
+
+
+def _kill_group(process: subprocess.Popen) -> None:
+    if process.poll() is None:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass  # it ended in between
 
 
 # The conversation goes on stdin as JSON, so no content (an email body, a tool result) can
@@ -242,6 +288,9 @@ def _check_call(call: dict, schemas: dict[str, dict]) -> None:
         jsonschema.validate(call["args"], schemas[call["name"]])
     except jsonschema.ValidationError as e:
         raise ClaudeCodeError(f"Claude's reply calls {call['name']!r} with invalid args: {e.message}") from None
+    except jsonschema.SchemaError as e:
+        # The tool's own schema is malformed, so the args can't be checked here; the tool validates them itself.
+        logger.warning("Tool %s has a parameters schema that can't be checked: %s", call["name"], e.message)
 
 
 def _usage(usage: dict) -> UsageMetadata:

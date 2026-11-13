@@ -52,7 +52,6 @@ from pathlib import Path
 from typing import Annotated, Literal
 from zoneinfo import ZoneInfo
 
-from googleapiclient.errors import HttpError
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool
@@ -77,6 +76,7 @@ from agent.memory.run_log import build_run_record
 from agent.tools import LOCAL_TOOLS
 from agent.tools.classification import is_read
 from agent.tools.mcp_loader import TransientMcpError
+from agent.tools.transient import is_transient
 from agent.prompts import get_prompt
 
 logger = logging.getLogger(__name__)
@@ -142,17 +142,13 @@ def _should_retry(exc: Exception) -> bool:
     Permanent failures (bad auth, resource not found, invalid args) return
     False so we don't waste time retrying something that will never work.
     """
-    if isinstance(exc, (ConnectionError, TimeoutError)):
-        return True
     if isinstance(exc, TransientMcpError):
         # Mapped at the MCP boundary (agent/tools/mcp_loader.py): a server that
         # closed the connection, or a tool error its server config marks transient.
         return True
-    if isinstance(exc, HttpError):
-        # 429 Too Many Requests and 5xx server errors are transient.
-        # 4xx (except 429) are permanent — wrong credentials, not found, etc.
-        return exc.status_code == 429 or exc.status_code >= 500
-    return False
+    # Network blips, and HttpError 429 or 5xx: the same test the local tools use to
+    # decide what to raise instead of returning "Error: ..." (agent/tools/transient.py).
+    return is_transient(exc)
 
 
 # Backoff sequence with jitter (approximate):

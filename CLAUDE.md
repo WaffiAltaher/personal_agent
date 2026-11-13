@@ -47,7 +47,7 @@ CLI → graph.py (LangGraph) → agent_node (LLM) → human_review_node → tool
 
 **`src/agent/cli.py`** — entry point. Drives the HITL loop: invoke graph → detect `__interrupt__` → show approval prompt → `Command(resume=decision)` → repeat.
 
-**`src/agent/tools/`** — local tools return strings (success or `"Error: ..."` on failure, never raise). `LOCAL_TOOLS` in `__init__.py` lists local tools, each wrapped in `read_tool(...)` or `write_action(...)` (`classification.py`). `load_all_tools(fixtures=...)` adds MCP tools from the servers in `mcp_servers()`, loaded by `mcp_loader.py` (prefixed `ms365_` / `informer_`, classified per server; a server that fails to start is skipped with a notice).
+**`src/agent/tools/`** — local tools return strings (success or `"Error: ..."` on failure) and raise only transient failures (`transient.py`: network blips, HTTP 429/5xx), so the graph retries them. `LOCAL_TOOLS` in `__init__.py` lists local tools, each wrapped in `read_tool(...)` or `write_action(...)` (`classification.py`). `load_all_tools(fixtures=...)` adds MCP tools from the servers in `mcp_servers()`, loaded by `mcp_loader.py` (prefixed `ms365_` / `informer_`, classified per server; a server that fails to start is skipped with a notice).
 
 **`src/fixture_world/`** — seeded stand-ins (MS365 MCP server, fake Informer API, web search) used by tests, evals and `--fixtures`.
 

@@ -6,6 +6,10 @@ Tavily is purpose-built for LLM agents — it returns clean, structured results
 rather than raw HTML, which means less token waste and less parsing logic here.
 """
 
+import re
+
+import aiohttp
+import requests
 from langchain_core.tools import StructuredTool
 from langchain_tavily import TavilySearch
 from langchain_tavily.tavily_search import TavilySearchInput
@@ -29,7 +33,33 @@ from fixture_world import web as fixture_web
 # The api_key is passed explicitly (loaded from .env via pydantic-settings)
 # rather than relying on TAVILY_API_KEY being set in os.environ.
 # This keeps our credential loading in one place (config.py).
-web_search = TavilySearch(
+#
+# TavilySearch returns every failure as {"error": <exception>}, so the graph's retry never saw
+# one. The subclass raises the transient ones (unreachable, timed out, HTTP 429 or 5xx, which
+# the wrapper words "Error <status>: <reason>") as ConnectionError; the rest stay as returned.
+_TRANSIENT_STATUS = re.compile(r"^Error (429|5\d\d)\b")
+
+
+def _raise_if_transient(result):
+    error = result.get("error") if isinstance(result, dict) else None
+    if isinstance(error, Exception) and (
+        isinstance(error, (ConnectionError, TimeoutError, aiohttp.ClientConnectionError,
+                           requests.ConnectionError, requests.Timeout))
+        or _TRANSIENT_STATUS.match(str(error))
+    ):
+        raise ConnectionError(f"web search failed: {type(error).__name__}: {error}") from error
+    return result
+
+
+class RetryableTavilySearch(TavilySearch):
+    def _run(self, *args, **kwargs):
+        return _raise_if_transient(super()._run(*args, **kwargs))
+
+    async def _arun(self, *args, **kwargs):
+        return _raise_if_transient(await super()._arun(*args, **kwargs))
+
+
+web_search = RetryableTavilySearch(
     max_results=5,
     tavily_api_key=settings.tavily_api_key,
 )
