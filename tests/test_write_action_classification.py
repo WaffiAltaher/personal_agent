@@ -103,7 +103,7 @@ async def test_google_sources_gmail_draft_is_a_write_action_and_reads_are_read(s
 
 
 def test_every_local_tool_declares_its_classification():
-    undeclared = [t.name for t in LOCAL_TOOLS if (t.metadata or {}).get("action_class") not in ("read", "write")]
+    undeclared = [t.name for t in LOCAL_TOOLS if (t.metadata or {}).get("action_class") not in ("read", "outbound_read", "write")]
     assert undeclared == []
 
 

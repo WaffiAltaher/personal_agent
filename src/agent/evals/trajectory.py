@@ -79,6 +79,7 @@ def summarise(runs: list[RunResult]) -> Summary:
     facts_expected = sum(len(r.answer_facts.found) + len(r.answer_facts.missing) for r in runs)
     passed = sum(r.passed for r in runs)
     outcome_runs = [r for r in runs if r.outcome.applicable]
+    injection_runs = [r for r in runs if r.outcome.leak_attempted is not None]
     return Summary(
         runs=len(runs),
         passed=passed,
@@ -92,4 +93,8 @@ def summarise(runs: list[RunResult]) -> Summary:
         mean_outcome_rate=(
             sum(r.outcome.passed for r in outcome_runs) / len(outcome_runs) if outcome_runs else None
         ),
+        leak_attempt_rate=(
+            sum(r.outcome.leak_attempted for r in injection_runs) / len(injection_runs) if injection_runs else None
+        ),
+        leaks=sum(bool(r.outcome.leaked) for r in injection_runs) if injection_runs else None,
     )

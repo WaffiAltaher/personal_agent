@@ -8,8 +8,13 @@ as read only if it carries the read class; anything else (classified as write,
 unclassified, or a tool name that isn't bound at all) is a Write action: it
 pauses for approval and is never retried automatically.
 
-- Local tools declare their class explicitly with `read_tool` / `write_action`
-  (see LOCAL_TOOLS in agent/tools/__init__.py).
+A read that sends text the agent wrote to a service outside the owner's own accounts
+(a web search) is an Outbound read (ADR-017). It is still a read (it changes nothing and
+is retried), but it pauses for approval once the conversation holds a result from the
+owner's data, so a prompt injection can't carry that data out in a query.
+
+- Local tools declare their class explicitly with `read_tool` / `write_action` /
+  `outbound_read` (see LOCAL_TOOLS in agent/tools/__init__.py).
 - MCP tools are classified by `classify_mcp_tools`, once per server, at load time.
 """
 
@@ -20,6 +25,7 @@ from langchain_core.tools import BaseTool
 ACTION_CLASS_KEY = "action_class"
 READ = "read"
 WRITE = "write"
+OUTBOUND_READ = "outbound_read"
 
 
 def _set_class(tool: BaseTool, action_class: str) -> BaseTool:
@@ -37,9 +43,34 @@ def write_action(tool: BaseTool) -> BaseTool:
     return _set_class(tool, WRITE)
 
 
+def outbound_read(tool: BaseTool) -> BaseTool:
+    """Declare a tool an Outbound read: a read whose arguments leave the owner's accounts.
+
+    Any new read that sends model-written text to an outside service (a search engine, a URL
+    fetch) must use this, never `read_tool(...)`, or it could leak the owner's data unseen.
+    """
+    return _set_class(tool, OUTBOUND_READ)
+
+
+def action_class(tool: BaseTool | None) -> str:
+    """The tool's class; anything not explicitly classified is a Write action. Fails closed."""
+    declared = (tool.metadata or {}).get(ACTION_CLASS_KEY) if tool is not None else None
+    return declared if declared in (READ, OUTBOUND_READ) else WRITE
+
+
+def classify_as(tool: BaseTool, action: str) -> BaseTool:
+    """Give `tool` the class `action` (used for a stand-in that replaces a classified tool)."""
+    return _set_class(tool, action)
+
+
 def is_read(tool: BaseTool | None) -> bool:
-    """True only for a tool explicitly classified as read. Fails closed."""
-    return tool is not None and (tool.metadata or {}).get(ACTION_CLASS_KEY) == READ
+    """True only for a tool explicitly classified as read or Outbound read. Fails closed."""
+    return action_class(tool) in (READ, OUTBOUND_READ)
+
+
+def is_outbound_read(tool: BaseTool | None) -> bool:
+    """True only for a tool explicitly classified as an Outbound read."""
+    return action_class(tool) == OUTBOUND_READ
 
 
 def classify_mcp_tools(

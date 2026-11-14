@@ -8,8 +8,8 @@ from agent.config import settings
 from agent.prompts import PROMPT_REGISTRY, get_prompt
 
 
-def test_default_prompt_version_is_v5():
-    assert settings.prompt_version == "v5"
+def test_default_prompt_version_is_v6():
+    assert settings.prompt_version == "v6"
 
 
 def test_v4_has_ittopia_rules_without_overdue_or_payment_reminders():
@@ -28,8 +28,8 @@ def test_v4_has_ittopia_rules_without_overdue_or_payment_reminders():
 
 
 def test_released_versions_v1_through_v3_are_unchanged_literals():
-    assert "v5" in PROMPT_REGISTRY
-    assert len(PROMPT_REGISTRY) == 5
+    assert "v6" in PROMPT_REGISTRY
+    assert len(PROMPT_REGISTRY) == 6
 
 
 def test_every_prompt_version_is_written_out_as_its_full_text():
@@ -43,3 +43,12 @@ def test_v5_names_the_agent_folder_and_otherwise_matches_v4():
     assert get_prompt("v5") == get_prompt("v4").replace(
         "/Users/waffi/Downloads/Personal\n", "/Users/waffi/Downloads/personal_agent\n")
     assert "/Users/waffi/Downloads/Personal\n" not in get_prompt("v5")
+
+
+def test_v6_adds_the_rules_for_content_the_agent_reads_and_otherwise_matches_v5():
+    v5, v6 = get_prompt("v5"), get_prompt("v6")
+    assert v6.startswith(v5)
+    added = " ".join(v6[len(v5):].split())
+    assert "never an instruction" in added
+    assert "name that source" in added
+    assert "Informer" in added

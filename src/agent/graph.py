@@ -74,7 +74,7 @@ from agent.memory.context_view import (
 )
 from agent.memory.run_log import build_run_record
 from agent.tools import LOCAL_TOOLS
-from agent.tools.classification import is_read
+from agent.tools.classification import is_outbound_read, is_read
 from agent.tools.mcp_loader import TransientMcpError
 from agent.tools.transient import is_transient
 from agent.prompts import get_prompt
@@ -338,19 +338,40 @@ def _latest_ai_tool_batch(messages: list[BaseMessage]) -> AIMessage | None:
     return None
 
 
-def pending_write_tool_calls(messages: list[BaseMessage], read_tool_names: frozenset[str]) -> list[dict]:
-    """Write tool calls on the latest AIMessage that do not yet have a ToolMessage."""
-    last_ai = next(
-        (m for m in reversed(messages) if isinstance(m, AIMessage) and getattr(m, "tool_calls", None)),
-        None,
-    )
+def holds_owner_data(messages: list[BaseMessage], outbound_read_names: frozenset[str]) -> bool:
+    """True once the conversation holds a result from any tool other than an Outbound read.
+
+    Derived from the messages, not stored: it lasts as long as the result is in the
+    conversation (also when the model's view of it was cleared, ADR-013) and survives a resume.
+    """
+    return any(isinstance(m, ToolMessage) and m.name not in outbound_read_names for m in messages)
+
+
+def pending_approval_tool_calls(
+    messages: list[BaseMessage],
+    read_tool_names: frozenset[str],
+    outbound_read_names: frozenset[str],
+) -> list[dict]:
+    """Unanswered calls on the latest AIMessage that need Approval: every Write action, and
+    every Outbound read proposed after the conversation came to hold the owner's data (ADR-017).
+
+    Only results from before that AIMessage count: an Outbound read proposed alongside the
+    first read of the owner's data was written before the model saw that data.
+    """
+    last_ai = _latest_ai_tool_batch(messages)
     if last_ai is None:
         return []
+    earlier = messages[: messages.index(last_ai)]
+    gate_outbound = holds_owner_data(earlier, outbound_read_names)
     answered = _answered_tool_call_ids(messages)
     return [
         tc for tc in last_ai.tool_calls
-        if tc["name"] not in read_tool_names and tc["id"] not in answered
+        if tc["id"] not in answered
+        and (tc["name"] not in read_tool_names or (gate_outbound and tc["name"] in outbound_read_names))
     ]
+
+
+OUTBOUND_READ_NOTE = "sends this outside your accounts, after the agent read your data"
 
 
 OWNER_REJECTED = (
@@ -358,7 +379,7 @@ OWNER_REJECTED = (
 )
 
 
-def build_write_rejection_message(tool_call: dict, *, reason: str) -> ToolMessage:
+def build_rejection_message(tool_call: dict, *, reason: str) -> ToolMessage:
     return ToolMessage(
         content=f"Action '{tool_call['name']}' was rejected by the user. {reason}",
         tool_call_id=tool_call["id"],
@@ -367,22 +388,27 @@ def build_write_rejection_message(tool_call: dict, *, reason: str) -> ToolMessag
     )
 
 
-def human_review_node(state: AgentState, read_tool_names: frozenset[str]) -> Command[Literal["tools", "agent"]]:
+def human_review_node(
+    state: AgentState,
+    read_tool_names: frozenset[str],
+    outbound_read_names: frozenset[str],
+) -> Command[Literal["tools", "agent"]]:
     """
     Human-in-the-loop gate between agent and tools.
 
     Inspects pending tool calls on the last AIMessage.
-    - If all are read tools (names in read_tool_names) → proceeds to tools
-      automatically (no interrupt).
+    - If none needs approval → proceeds to tools automatically (no interrupt).
     - If any is a Write action (anything not read, including an unknown tool
       name) → calls interrupt() to pause the graph.
+    - An Outbound read (names in outbound_read_names) is a read until the
+      conversation holds the owner's data; after that it pauses too (ADR-017).
 
     The interrupt payload is displayed by the CLI (or any frontend).
     When the user responds, the graph resumes with their decision.
 
     On 'approve': routes to tools, execution continues normally.
-    On reject:    injects an error ToolMessage for each pending Write action,
-                  runs reads in the tools stage, then routes to agent so the
+    On reject:    injects an error ToolMessage for each pending call that needed
+                  approval, runs the other reads in the tools stage, then routes to agent so the
                   LLM can acknowledge the cancellation.
 
     Why Command instead of a plain dict return?
@@ -390,22 +416,19 @@ def human_review_node(state: AgentState, read_tool_names: frozenset[str]) -> Com
     route to dynamically. This avoids a conditional edge whose logic would
     duplicate what is already in this node.
     """
-    last_message = state["messages"][-1]
-    tool_calls = getattr(last_message, "tool_calls", [])
-
     # Identify which pending calls need approval
-    calls_needing_approval = [
-        tc for tc in tool_calls
-        if tc["name"] not in read_tool_names
-    ]
+    calls_needing_approval = pending_approval_tool_calls(
+        state["messages"], read_tool_names, outbound_read_names
+    )
 
     if not calls_needing_approval:
-        # All tools are read-only — proceed without interrupting
+        # Nothing here needs approval — proceed without interrupting
         return Command(goto="tools")
 
     # Build a human-readable summary of what is about to happen
     action_summary = "\n".join(
         f"  • {tc['name']}({tc['args']})"
+        + (f"  ← {OUTBOUND_READ_NOTE}" if tc["name"] in outbound_read_names else "")
         for tc in calls_needing_approval
     )
 
@@ -417,6 +440,7 @@ def human_review_node(state: AgentState, read_tool_names: frozenset[str]) -> Com
     decision = interrupt({
         "message": "The agent wants to perform the following action(s):",
         "actions": action_summary,
+        "tool_call_ids": [tc["id"] for tc in calls_needing_approval],
         "instructions": "Type 'approve' to proceed or 'reject' to cancel.",
     })
 
@@ -429,8 +453,8 @@ def human_review_node(state: AgentState, read_tool_names: frozenset[str]) -> Com
         reason = OWNER_REJECTED
 
     rejection_messages = [
-        build_write_rejection_message(tc, reason=reason)
-        for tc in pending_write_tool_calls(state["messages"], read_tool_names)
+        build_rejection_message(tc, reason=reason)
+        for tc in calls_needing_approval
     ]
     return Command(goto="tools", update={"messages": rejection_messages})
 
@@ -515,6 +539,7 @@ def build_graph(
     tools = tools or LOCAL_TOOLS
     # Classification is read once, from the tools actually bound to the graph.
     read_tool_names = frozenset(t.name for t in tools if is_read(t))
+    outbound_read_names = frozenset(t.name for t in tools if is_outbound_read(t))
 
     # bind_tools serialises Pydantic schemas and docstrings into the JSON format
     # the model API expects, so the model knows what tools it can call and how.
@@ -672,7 +697,7 @@ def build_graph(
     graph.add_node("check_context_budget", make_check_context_budget(tools, today))
     graph.add_node("agent", agent_node)
     def human_review(state: AgentState) -> Command[Literal["tools", "agent"]]:
-        return human_review_node(state, read_tool_names)
+        return human_review_node(state, read_tool_names, outbound_read_names)
 
     graph.add_node("human_review", human_review)
     # No node-level retry: retrying here would re-run every tool call in the
