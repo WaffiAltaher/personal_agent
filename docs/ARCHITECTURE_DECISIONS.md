@@ -382,6 +382,7 @@ Two plain tools were chosen over a hidden check that the Approval step calls bef
 **Consequences:**
 - A question that mixes the owner's data with a web search gets one extra Approval ("what's on Monday, and look up the venue"), unless the model proposes the search alongside the first read: it wrote that query before seeing any data.
 - A new read that sends model-written text outside (a URL fetch, another search engine) must be declared with `outbound_read(...)`. Wrapped in `read_tool(...)` it would leak silently; `ms365_download-bytes` stays a plain read because the pinned server accepts only relative Microsoft Graph paths.
+- `retrieve_memory` also sends a model-written query off the machine, to Google's embeddings API, and stays a plain read (owner's call, 2026-11-14): Google is already a provider trusted with this data under the owner's own key, where Tavily is a third party that otherwise sees nothing, and gating memory search would prompt on every recall after a mail read.
 - A steered answer (a mail falsely claiming an invoice is paid) is not stopped by any gate. Only the v6 rules address it, and the `injection-mail-false-claim` eval scenario measures how well.
 - The eval suite separates the guarantee from the rate: `leaks` must be zero (code enforces it), while `leak_attempt_rate` is model behaviour and is what a prompt change is judged on.
 
