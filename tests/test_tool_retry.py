@@ -230,7 +230,7 @@ async def test_a_transient_web_search_failure_is_retried(run_with_tool_calls, mo
     monkeypatch.setattr(TavilySearch, "_arun", flaky_arun)
 
     result = await run_with_tool_calls(
-        [read_tool(web_search)], [{"id": "c1", "name": web_search.name, "args": {"query": "q"}}]
+        [web_search], [{"id": "c1", "name": web_search.name, "args": {"query": "q"}}]
     )
 
     assert attempts["n"] == 3
@@ -252,7 +252,7 @@ async def test_a_permanent_web_search_failure_is_returned_as_before(run_with_too
     monkeypatch.setattr(TavilySearch, "_arun", failing_arun)
 
     result = await run_with_tool_calls(
-        [read_tool(web_search)], [{"id": "c1", "name": web_search.name, "args": {"query": "q"}}]
+        [web_search], [{"id": "c1", "name": web_search.name, "args": {"query": "q"}}]
     )
 
     assert attempts["n"] == 1

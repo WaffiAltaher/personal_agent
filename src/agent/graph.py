@@ -350,7 +350,7 @@ def holds_owner_data(messages: list[BaseMessage], outbound_read_names: frozenset
 def pending_approval_tool_calls(
     messages: list[BaseMessage],
     read_tool_names: frozenset[str],
-    outbound_read_names: frozenset[str] = frozenset(),
+    outbound_read_names: frozenset[str],
 ) -> list[dict]:
     """Unanswered calls on the latest AIMessage that need Approval: every Write action, and
     every Outbound read proposed after the conversation came to hold the owner's data (ADR-017).
@@ -361,7 +361,7 @@ def pending_approval_tool_calls(
     last_ai = _latest_ai_tool_batch(messages)
     if last_ai is None:
         return []
-    earlier = messages[: next(i for i, m in enumerate(messages) if m is last_ai)]
+    earlier = messages[: messages.index(last_ai)]
     gate_outbound = holds_owner_data(earlier, outbound_read_names)
     answered = _answered_tool_call_ids(messages)
     return [
@@ -379,7 +379,7 @@ OWNER_REJECTED = (
 )
 
 
-def build_write_rejection_message(tool_call: dict, *, reason: str) -> ToolMessage:
+def build_rejection_message(tool_call: dict, *, reason: str) -> ToolMessage:
     return ToolMessage(
         content=f"Action '{tool_call['name']}' was rejected by the user. {reason}",
         tool_call_id=tool_call["id"],
@@ -391,14 +391,13 @@ def build_write_rejection_message(tool_call: dict, *, reason: str) -> ToolMessag
 def human_review_node(
     state: AgentState,
     read_tool_names: frozenset[str],
-    outbound_read_names: frozenset[str] = frozenset(),
+    outbound_read_names: frozenset[str],
 ) -> Command[Literal["tools", "agent"]]:
     """
     Human-in-the-loop gate between agent and tools.
 
     Inspects pending tool calls on the last AIMessage.
-    - If all are read tools (names in read_tool_names) → proceeds to tools
-      automatically (no interrupt).
+    - If none needs approval → proceeds to tools automatically (no interrupt).
     - If any is a Write action (anything not read, including an unknown tool
       name) → calls interrupt() to pause the graph.
     - An Outbound read (names in outbound_read_names) is a read until the
@@ -423,7 +422,7 @@ def human_review_node(
     )
 
     if not calls_needing_approval:
-        # All tools are read-only — proceed without interrupting
+        # Nothing here needs approval — proceed without interrupting
         return Command(goto="tools")
 
     # Build a human-readable summary of what is about to happen
@@ -454,7 +453,7 @@ def human_review_node(
         reason = OWNER_REJECTED
 
     rejection_messages = [
-        build_write_rejection_message(tc, reason=reason)
+        build_rejection_message(tc, reason=reason)
         for tc in calls_needing_approval
     ]
     return Command(goto="tools", update={"messages": rejection_messages})

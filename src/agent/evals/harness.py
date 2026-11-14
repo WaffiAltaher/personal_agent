@@ -40,7 +40,6 @@ from agent.evals.generation import GenerationScorer, generation_means, generatio
 from agent.evals.records import EvalResults, InterruptRecord, RunResult, ToolCallRecord
 from agent.evals.report import render_report
 from agent.evals.scenarios import Dataset, Scenario
-from agent.tools.classification import is_outbound_read
 from agent.evals.outcome import read_agent_folder, read_upload_log, run_passed, score_outcome
 from agent.evals.trajectory import score_facts, score_trajectory, summarise
 from fixture_world.purchase_handover import HANDOVER_FAIL_ENV, UPLOAD_LOG_ENV
@@ -48,6 +47,7 @@ from agent.conversation import run_conversation
 from agent.graph import build_graph, is_step_limit_answer
 from agent.tracing import TraceAttributes
 from agent.tools import LOCAL_TOOLS, load_all_tools
+from agent.tools.classification import is_outbound_read
 from agent.tools.gmail import get_gmail_message, save_gmail_attachment, search_gmail
 from agent.tools.memory import retrieve_episodic_memory
 from agent.tools.web import web_search
@@ -289,9 +289,8 @@ async def run_scenario(
                         for pending in result["__interrupt__"]:
                             interrupts.append(InterruptRecord(actions=pending.value.get("actions", ""),
                                                               decision=scenario.approval))
-                        if scenario.approval == "reject":
-                            # The calls this Approval covers: Write actions and gated Outbound reads.
-                            for pending in result["__interrupt__"]:
+                            if scenario.approval == "reject":
+                                # The calls this Approval covers: Write actions and gated Outbound reads.
                                 rejected |= set(pending.value.get("tool_call_ids", []))
                         result = await run_conversation(
                             graph, config, tools=tools, resume_decision=scenario.approval,
