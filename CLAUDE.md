@@ -53,7 +53,7 @@ CLI → graph.py (LangGraph) → agent_node (LLM) → human_review_node → tool
 
 **`src/agent/evals/`** — eval harness: scenarios over the Fixture world, trajectory metrics, RAGAS generation metrics, cost/latency, model-comparison reports.
 
-**`src/agent/config.py`** — Pydantic Settings loading from `.env`. Required: `GOOGLE_API_KEY` (embeddings; use a key from a Google project with billing turned off), `TAVILY_API_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`. Optional: `ANTHROPIC_API_KEY` (required for `anthropic:` models), `CLAUDE_CODE_BINARY` and `CLAUDE_CODE_TIMEOUT_S` (`claude_code:` models), `MS365_MCP_*`, `INFORMER_*`, `EVAL_JUDGE_MODEL`.
+**`src/agent/config.py`** — Pydantic Settings loading from `.env`. Required: `GOOGLE_API_KEY` (embeddings; use a key from a Google project with billing turned off), `TAVILY_API_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`. Optional: `ANTHROPIC_API_KEY` (required for `anthropic:` models), `CLAUDE_CODE_BINARY` and `CLAUDE_CODE_TIMEOUT_S` (`claude_code:` models), `MODEL_TIMEOUT_S` (per API request for `google_genai:`/`anthropic:` models and embeddings; default 120), `MS365_MCP_*`, `INFORMER_*`, `EVAL_JUDGE_MODEL`.
 
 **`src/agent/auth/claude_code.py`** — Claude Code login check. With a `claude_code:` agent or judge model, real-mode CLI startup runs `claude auth status` and stops unless it is logged in with a claude.ai subscription, naming `claude auth login`. Tests never call the real `claude`: they point `CLAUDE_CODE_BINARY` at the stand-in `src/fixture_world/claude_code.py`, and `tests/conftest.py` sets it to a missing binary otherwise.
 

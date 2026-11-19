@@ -29,9 +29,9 @@ from pathlib import Path
 
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models import BaseChatModel
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 from agent.chat_model import ModelConfigError, create_chat_model
+from agent.chat_model import create_embeddings as create_chat_embeddings
 from agent.config import settings
 from agent.evals.compare import ResultsError, write_comparison
 from agent.evals.generation import RagasScorer
@@ -78,7 +78,7 @@ def _compare(argv: list[str]) -> None:
 
 def create_embeddings() -> Embeddings:
     """The embeddings RAGAS answer relevancy compares questions with (as semantic memory uses)."""
-    return GoogleGenerativeAIEmbeddings(model=settings.chroma_embedding_model, google_api_key=settings.google_api_key)
+    return create_chat_embeddings()
 
 
 async def main(

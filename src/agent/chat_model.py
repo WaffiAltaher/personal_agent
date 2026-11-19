@@ -13,10 +13,16 @@ no key for, is rejected, so a model is never built without the key check.
 
 API keys come from settings, not the process environment, so a missing key
 fails here with a clear message instead of deep inside the provider SDK.
+
+Every API request gets settings.model_timeout_s: the Gemini and Anthropic integrations (and
+the Google embeddings) otherwise wait forever on a request the server never answers.
 """
 
+from google import genai
+from google.genai.types import HttpOptions
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models import BaseChatModel
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 from agent.claude_code_model import ClaudeCodeChatModel
 from agent.config import Settings
@@ -78,4 +84,18 @@ def create_chat_model(model: str | None = None, *, settings: Settings = default_
             "Add it to .env, or pick another model with MODEL_NAME."
         )
 
-    return init_chat_model(name, model_provider=provider, **{kwarg: key})
+    return init_chat_model(name, model_provider=provider, timeout=settings.model_timeout_s, **{kwarg: key})
+
+
+def create_embeddings(*, settings: Settings = default_settings) -> GoogleGenerativeAIEmbeddings:
+    """The Google embeddings (semantic memory, RAGAS answer relevancy), with a request timeout."""
+    embeddings = GoogleGenerativeAIEmbeddings(
+        model=settings.chroma_embedding_model, google_api_key=settings.google_api_key,
+    )
+    # The integration takes no timeout, so its client is replaced by one with the same key and a
+    # timeout (HttpOptions.timeout is in milliseconds).
+    embeddings.client = genai.Client(
+        api_key=settings.google_api_key,
+        http_options=HttpOptions(timeout=int(settings.model_timeout_s * 1000)),
+    )
+    return embeddings

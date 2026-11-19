@@ -14,8 +14,8 @@ from pathlib import Path
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
+from agent.chat_model import create_embeddings
 from agent.config import settings
 
 COSINE_COLLECTION_METADATA = {"hnsw:space": "cosine"}
@@ -39,10 +39,7 @@ class SemanticMemory:
         Path(path).mkdir(parents=True, exist_ok=True)
         self._persist_dir = path
 
-        self._embeddings = GoogleGenerativeAIEmbeddings(
-            model=settings.chroma_embedding_model,
-            google_api_key=settings.google_api_key,
-        )
+        self._embeddings = create_embeddings()
 
         self._documents = self._open_collection("documents")
         self._memories = self._open_collection("memories")

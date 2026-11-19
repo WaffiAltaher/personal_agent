@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     # claude_code: models (agent/claude_code_model.py): the Claude Code CLI, and how long one call may take
     claude_code_binary: str = "claude"
     claude_code_timeout_s: float = 180
+    # google_genai: and anthropic: models, and the Google embeddings: how long one API request may
+    # take. Both integrations default to no timeout, so a request the server never answers would hang.
+    model_timeout_s: float = 120
 
     # Memory layer
     sqlite_path: str = "data/episodic.db"
