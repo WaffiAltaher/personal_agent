@@ -1,6 +1,11 @@
 """
 cli.py — Entry point with Langfuse tracing wired in.
 
+``python -m agent.cli [--fixtures] [--debug] ["first question"]`` starts a session: the agent
+starts once, answers the question if one was given, then reads Follow-ups at a ``> `` prompt,
+all on one Conversation (one thread, one Langfuse trace). An empty line does nothing; ``exit``,
+``quit`` or Ctrl-D ends the session. At exit the whole Conversation is one run log entry.
+
 Real-mode runs check the Google login before the agent starts. If Gmail or Calendar
 would need a new browser login, startup stops and names ``python -m agent.auth.google``.
 With a ``claude_code:`` agent or judge model they also check the Claude Code login, and stop
@@ -29,7 +34,7 @@ from agent.tools import load_all_tools
 from fixture_world import clock
 
 
-def _parse_args(argv: list[str]) -> tuple[bool, bool, str]:
+def _parse_args(argv: list[str]) -> tuple[bool, bool, str | None]:
     """Parse minimal CLI flags without adding a full CLI framework yet."""
     debug = False
     args = list(argv)
@@ -43,18 +48,26 @@ def _parse_args(argv: list[str]) -> tuple[bool, bool, str]:
         fixtures = True
         args.remove("--fixtures")
 
-    usage = "Usage: python -m agent.cli [--debug] [--fixtures] '<your question>'"
+    usage = "Usage: python -m agent.cli [--debug] [--fixtures] ['<your first question>']"
     # A mistyped flag (--fixture) must not become the question: it would run against real data.
     unknown = [a for a in args if a.startswith("--")]
     if unknown:
         print(f"Unknown option: {' '.join(unknown)}\n{usage}")
         sys.exit(1)
+    # No question: the session goes straight to the `> ` prompt.
     if not args:
-        print(usage)
-        sys.exit(1)
+        return debug, fixtures, None
 
     # An unquoted question arrives as several words: it is the whole line, not its first word.
     return debug, fixtures, " ".join(args)
+
+
+EXIT_WORDS = ("exit", "quit")
+
+
+def _read_line(prompt: str) -> str:
+    """Read one line at the session prompt; raises EOFError on Ctrl-D. Tests replace this."""
+    return input(prompt)
 
 
 def _stringify_content(content) -> str:
@@ -174,15 +187,16 @@ async def main():
                 print(f"Cannot start: {exc}")
                 sys.exit(1)
 
-    # Each CLI run gets a fresh thread_id so runs are independent.
+    # Each CLI session gets a fresh thread_id: one Conversation, independent of other sessions.
     # The checkpointer uses this to namespace the checkpoint.
     thread_id = str(uuid.uuid4())
+    print(f"Conversation {thread_id}")
 
     # Langfuse v4 (OTel-based) requires a 32 lowercase hex char trace ID — no dashes.
     # We derive it from thread_id so the two IDs stay linked.
     langfuse_trace_id = thread_id.replace("-", "")
 
-    # One handler per run = one trace in Langfuse. With Langfuse down there is no handler: the run is untraced.
+    # One handler per session = one trace in Langfuse for the whole Conversation. With Langfuse down there is no handler: the run is untraced.
     callbacks = [get_callback_handler(trace_id=langfuse_trace_id)] if langfuse_connected else []
 
     config = {
@@ -197,6 +211,7 @@ async def main():
     memory_ctx = fixtures_semantic_memory() if fixtures else nullcontext()
     result: dict = {"messages": []}
     run_error: str | None = None
+    questions: list[str] = []
 
     try:
         with memory_ctx:
@@ -217,43 +232,63 @@ async def main():
                     trace_name="cli-run",
                     metadata={"prompt-version": settings.prompt_version},
                 ):
-                    result = await run_conversation(
-                        agent_graph,
-                        config,
-                        tools=tools,
-                        user_message=user_input,
-                        today=today,
-                    )
-                    # HITL loop — handle zero or more interrupts per run.
-                    while "__interrupt__" in result:
-                        for interrupt_obj in result["__interrupt__"]:
-                            _display_interrupt(interrupt_obj.value)
-
-                        decision = _prompt_decision()
-                        print(f"\nResuming with: {decision}\n")
+                    first = [user_input] if user_input is not None else []
+                    while True:
+                        if first:
+                            line = first.pop()
+                        else:
+                            try:
+                                line = _read_line("> ")
+                            except EOFError:
+                                print()
+                                break
+                        question = line.strip()
+                        if not question:
+                            continue
+                        if question.lower() in EXIT_WORDS:
+                            break
+                        questions.append(question)
+                        turn_start = len(result["messages"])
 
                         result = await run_conversation(
                             agent_graph,
                             config,
                             tools=tools,
-                            resume_decision=decision,
+                            user_message=question,
+                            today=today,
                         )
+                        # HITL loop — handle zero or more interrupts per turn.
+                        while "__interrupt__" in result:
+                            for interrupt_obj in result["__interrupt__"]:
+                                _display_interrupt(interrupt_obj.value)
 
-        last = result["messages"][-1]
-        print(_stringify_content(last.content))
+                            decision = _prompt_decision()
+                            print(f"\nResuming with: {decision}\n")
 
-        if debug:
-            _display_debug_trace(result)
+                            result = await run_conversation(
+                                agent_graph,
+                                config,
+                                tools=tools,
+                                resume_decision=decision,
+                            )
+
+                        last = result["messages"][-1]
+                        print(_stringify_content(last.content))
+
+                        if debug:
+                            # Only what this turn added: earlier turns were shown after their own turn.
+                            _display_debug_trace({**result, "messages": result["messages"][turn_start:]})
 
         # A Fixture-world run is about seeded stand-in data, not the owner's: keep it out of real memory.
-        if not fixtures:
-            log_run_to_memory(result, user_input, model_name=settings.model_name)
+        # The whole Conversation is one run log entry; a session with no question leaves none.
+        if not fixtures and questions:
+            log_run_to_memory(result, "\n".join(questions), model_name=settings.model_name)
     except Exception as exc:
         run_error = f"{type(exc).__name__}: {exc}"
-        if not fixtures:
+        if not fixtures and questions:
             log_run_to_memory(
                 result,
-                user_input,
+                "\n".join(questions),
                 model_name=settings.model_name,
                 error=run_error,
             )
@@ -263,6 +298,7 @@ async def main():
             sys.exit(1)
         raise
     finally:
+        print(f"Conversation {thread_id}")
         flush_traces()
 
 

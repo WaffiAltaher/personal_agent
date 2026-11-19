@@ -9,7 +9,25 @@ from langchain_core.tools import tool
 from langgraph.checkpoint.memory import InMemorySaver
 
 import agent.cli as cli
+import agent.graph as graph
 from agent.tools.classification import read_tool, write_action
+
+
+def type_lines(monkeypatch, lines):
+    """Stand in for the owner at the `> ` prompt: each read returns the next line, then Ctrl-D (EOF).
+
+    Returns the prompts the CLI showed, in order."""
+    remaining = list(lines)
+    prompts = []
+
+    def read_line(prompt):
+        prompts.append(prompt)
+        if not remaining:
+            raise EOFError
+        return remaining.pop(0)
+
+    monkeypatch.setattr(cli, "_read_line", read_line)
+    return prompts
 
 
 class RecordingHandler(BaseCallbackHandler):
@@ -22,8 +40,8 @@ class RecordingHandler(BaseCallbackHandler):
 
 
 @pytest.fixture
-def cli_run(monkeypatch, scripted_model):
-    seen = {"ran": [], "flushed": 0, "handler": RecordingHandler(), "configs": []}
+def cli_run(monkeypatch, scripted_model, startup_login_checks_pass):
+    seen = {"ran": [], "flushed": 0, "handler": RecordingHandler(), "configs": [], "logged": []}
 
     @write_action
     @tool("send_mail")
@@ -45,16 +63,22 @@ def cli_run(monkeypatch, scripted_model):
     async def get_checkpointer():
         yield InMemorySaver()
 
-    def start(replies):
+    class EpisodicMemory:
+        def log_run(self, run):
+            seen["logged"].append(run)
+
+    def start(replies, *args, lines=()):
+        """Run main() with `args` (default: a question against the Fixture world), then `lines` at `> `."""
         monkeypatch.setattr(cli, "create_chat_model", lambda: scripted_model(replies))
         monkeypatch.setattr(cli, "verify_connection", lambda: True)
         monkeypatch.setattr(cli, "get_callback_handler", lambda **kwargs: seen["handler"])
         monkeypatch.setattr(cli, "load_all_tools", load_all_tools)
         monkeypatch.setattr(cli, "get_checkpointer", get_checkpointer)
-        monkeypatch.setattr(cli, "log_run_to_memory", lambda result, user_input, **kwargs: None)
+        monkeypatch.setattr(graph, "get_episodic_memory", lambda: EpisodicMemory())
         monkeypatch.setattr(cli, "flush_traces", lambda: seen.__setitem__("flushed", seen["flushed"] + 1))
         monkeypatch.setattr(cli, "_prompt_decision", lambda: "approve")
-        monkeypatch.setattr(sys, "argv", ["agent.cli", "--fixtures", "Mail Ann, then Bob."])
+        seen["prompts"] = type_lines(monkeypatch, lines)
+        monkeypatch.setattr(sys, "argv", ["agent.cli", *(args or ("--fixtures", "Mail Ann, then Bob."))])
         return cli.main()
     return seen, start
 

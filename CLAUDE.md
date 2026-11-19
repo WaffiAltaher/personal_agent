@@ -8,8 +8,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Install dependencies
 uv sync
 
-# Run the agent (add --fixtures to run against the seeded Fixture world instead of real data)
-python -m agent.cli "<question>"
+# Run the agent: a session that answers the optional first question, then reads Follow-ups at `> `
+# (exit, quit or Ctrl-D ends it). Add --fixtures to run against the seeded Fixture world instead of real data.
+python -m agent.cli ["<first question>"]
 
 # Log in to Google (Gmail/Calendar) when startup says the token is missing or dead
 python -m agent.auth.google
@@ -45,7 +46,7 @@ CLI → graph.py (LangGraph) → agent_node (LLM) → human_review_node → tool
 - `retry_tool_call` + `TOOL_RETRY_POLICY`: per-tool-call backoff (up to 3 attempts) on transient errors (ConnectionError, TimeoutError, 429, 5xx only); Write actions are never retried
 - `SqliteSaver` checkpoints to `checkpoints/hitl.db` keyed by `thread_id` — interrupted runs can resume
 
-**`src/agent/cli.py`** — entry point. Drives the HITL loop: invoke graph → detect `__interrupt__` → show approval prompt → `Command(resume=decision)` → repeat.
+**`src/agent/cli.py`** — entry point. Runs a session: each line at `> ` is a Follow-up on one thread, logged at exit as one run. Drives the HITL loop: invoke graph → detect `__interrupt__` → show approval prompt → `Command(resume=decision)` → repeat.
 
 **`src/agent/tools/`** — local tools return strings (success or `"Error: ..."` on failure) and raise only transient failures (`transient.py`: network blips, HTTP 429/5xx), so the graph retries them. `LOCAL_TOOLS` in `__init__.py` lists local tools, each wrapped in `read_tool(...)`, `outbound_read(...)` or `write_action(...)` (`classification.py`). `load_all_tools(fixtures=...)` adds MCP tools from the servers in `mcp_servers()`, loaded by `mcp_loader.py` (prefixed `ms365_` / `informer_`, classified per server; a server that fails to start is skipped with a notice).
 
