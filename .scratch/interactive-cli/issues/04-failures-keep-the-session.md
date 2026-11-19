@@ -4,12 +4,12 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] A Claude Code error mid-session prints `Stopped: …` and returns to `> `; a following question is answered on the same thread
-- [ ] The step limit does the same
-- [ ] An unexpected exception writes the run log entry with the error, prints the traceback and the Conversation id / resume hint, exits non-zero
-- [ ] The run log entry written at the end of a session that had a known failure records it
-- [ ] Tested through the shared CLI harness with a scripted model
+- [x] A Claude Code error mid-session prints `Stopped: …` and returns to `> `; a following question is answered on the same thread
+- [x] The step limit does the same
+- [x] An unexpected exception writes the run log entry with the error, prints the traceback and the Conversation id / resume hint, exits non-zero
+- [x] The run log entry written at the end of a session that had a known failure records it
+- [x] Tested through the shared CLI harness with a scripted model
 
 ## Comments

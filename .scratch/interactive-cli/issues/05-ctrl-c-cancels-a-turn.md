@@ -4,11 +4,11 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Ctrl-C during a turn prints `Interrupted.` and returns to `> `; the session continues on the same thread
-- [ ] Tool calls left open by the cancel are answered "interrupted by the owner" before the next question is processed
-- [ ] Ctrl-C at `> ` or at `Your decision:` clears the line and re-prompts
-- [ ] Tested through the shared CLI harness (simulated KeyboardInterrupt / cancellation, scripted model)
+- [x] Ctrl-C during a turn prints `Interrupted.` and returns to `> `; the session continues on the same thread
+- [x] Tool calls left open by the cancel are answered "interrupted by the owner" before the next question is processed
+- [x] Ctrl-C at `> ` or at `Your decision:` clears the line and re-prompts
+- [x] Tested through the shared CLI harness (simulated KeyboardInterrupt / cancellation, scripted model)
 
 ## Comments

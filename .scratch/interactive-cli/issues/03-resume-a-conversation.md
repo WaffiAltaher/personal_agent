@@ -8,15 +8,15 @@ The run log entry is keyed by the thread id and **replaced** at every exit, so a
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `--resume <id>` continues that thread: the model sees earlier turns
-- [ ] Bare `--resume` picks the most recent Conversation in the current world's checkpoint file
-- [ ] An unknown id, or bare `--resume` with no Conversations, stops with a clear message
-- [ ] Real and `--fixtures` runs use separate checkpoint files
-- [ ] Resuming and exiting replaces the Conversation's run log entry (one entry per thread id, existing entries without a thread id still readable)
-- [ ] Usage line and `CLAUDE.md` mention `--resume`
-- [ ] ADR-016 amended
-- [ ] Tested through the shared CLI harness with a scripted model and a real sqlite checkpointer in a temp dir
+- [x] `--resume <id>` continues that thread: the model sees earlier turns
+- [x] Bare `--resume` picks the most recent Conversation in the current world's checkpoint file
+- [x] An unknown id, or bare `--resume` with no Conversations, stops with a clear message
+- [x] Real and `--fixtures` runs use separate checkpoint files
+- [x] Resuming and exiting replaces the Conversation's run log entry (one entry per thread id, existing entries without a thread id still readable)
+- [x] Usage line and `CLAUDE.md` mention `--resume`
+- [x] ADR-016 amended
+- [x] Tested through the shared CLI harness with a scripted model and a real sqlite checkpointer in a temp dir
 
 ## Comments

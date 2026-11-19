@@ -6,15 +6,15 @@ At exit the run log (episodic memory) gets **one entry for the whole Conversatio
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] With no question argument the CLI goes straight to `> `; with one, it answers it first and then prompts
-- [ ] Each line at `> ` is answered with everything said earlier in the Conversation available to the model
-- [ ] An empty line does nothing; `exit`, `quit` and Ctrl-D (EOF) end the session
-- [ ] `Conversation <thread id>` is printed at start and at exit
-- [ ] `--debug` prints, after each turn, only the messages that turn added
-- [ ] At exit, exactly one run log entry covers the whole Conversation: all questions and answers, all tools, summed tokens and cost, outcome; not written for `--fixtures`
-- [ ] The CLI tests drive the session through a stubbed line reader added to the shared CLI test harness (scripted model, no live calls); existing CLI tests still pass
-- [ ] `CLAUDE.md`'s run command and the CLI module docstring describe the session
+- [x] With no question argument the CLI goes straight to `> `; with one, it answers it first and then prompts
+- [x] Each line at `> ` is answered with everything said earlier in the Conversation available to the model
+- [x] An empty line does nothing; `exit`, `quit` and Ctrl-D (EOF) end the session
+- [x] `Conversation <thread id>` is printed at start and at exit
+- [x] `--debug` prints, after each turn, only the messages that turn added
+- [x] At exit, exactly one run log entry covers the whole Conversation: all questions and answers, all tools, summed tokens and cost, outcome; not written for `--fixtures`
+- [x] The CLI tests drive the session through a stubbed line reader added to the shared CLI test harness (scripted model, no live calls); existing CLI tests still pass
+- [x] `CLAUDE.md`'s run command and the CLI module docstring describe the session
 
 ## Comments

@@ -4,13 +4,13 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `approve` / `reject` (case-insensitive, trimmed) behave as today
-- [ ] Input of more than one word is a Follow-up: pending Write actions are answered as rejected ("moved on"), none of them runs, and the Follow-up is answered
-- [ ] A single unrecognised word re-prompts and rejects nothing
-- [ ] The prompt tells the owner a follow-up question rejects
-- [ ] The run log outcome of a Conversation with a moved-on Approval is consistent with an explicit reject
-- [ ] Tested through the shared CLI harness with a scripted model
+- [x] `approve` / `reject` (case-insensitive, trimmed) behave as today
+- [x] Input of more than one word is a Follow-up: pending Write actions are answered as rejected ("moved on"), none of them runs, and the Follow-up is answered
+- [x] A single unrecognised word re-prompts and rejects nothing
+- [x] The prompt tells the owner a follow-up question rejects
+- [x] The run log outcome of a Conversation with a moved-on Approval is consistent with an explicit reject
+- [x] Tested through the shared CLI harness with a scripted model
 
 ## Comments
