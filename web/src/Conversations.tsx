@@ -5,6 +5,7 @@ import {
   ApiError, ConversationRow, LiveConversation, LiveEvent, PendingApproval, ToolStep, Transcript, Turn,
   applyEvent, askFollowUp, conversationEvents, listConversations, startConversation,
 } from "./api";
+import type { LoginRow } from "./api";
 
 // `refreshKey` changes when the list may have changed (a turn started or ended): it loads again.
 export function ConversationList({ selected, onSelect, refreshKey = 0 }:
@@ -140,9 +141,11 @@ export function QuestionBox({ placeholder, disabled = false, onAsk }:
   );
 }
 
-export function OpenConversation({ threadId, onTurnEnded }: { threadId: string; onTurnEnded?: () => void }) {
+export function OpenConversation({ threadId, onTurnEnded, onLoginStatus }:
+  { threadId: string; onTurnEnded?: () => void; onLoginStatus?: (logins: LoginRow[]) => void }) {
   const { live, disconnected } = useConversation(threadId, (event) => {
     if (event.name === "turn_ended") onTurnEnded?.();
+    if (event.name === "login_status") onLoginStatus?.(event.data.logins);
   });
 
   if (live === null) return disconnected ? <p role="alert" className="error">Cannot open this Conversation.</p> : null;

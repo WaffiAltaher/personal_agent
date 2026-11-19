@@ -25,6 +25,7 @@ from pydantic import BaseModel
 from agent.config import PROJECT_ROOT
 from agent.web.auth import SESSION_COOKIE, SESSION_MAX_AGE_S, Auth, require_session
 from agent.web.conversations import list_conversations, transcript
+from agent.web.logins import Logins
 from agent.web.request_checks import RequestChecks
 from agent.web.turns import TurnRefused, Turns
 
@@ -66,8 +67,10 @@ def create_app(
     web: WebConfig,
     langfuse_connected: bool = False,
     clock: Callable[[], float] = time.monotonic,
+    logins: Logins | None = None,
 ) -> FastAPI:
-    """The web app on one compiled graph. ``clock`` times the login rate limit (tests move it)."""
+    """The web app on one compiled graph. ``clock`` times the login rate limit (tests move it).
+    ``logins`` is the login status strip (none when not given)."""
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.state.graph = graph
     app.state.tools = tools
@@ -76,7 +79,10 @@ def create_app(
     app.state.web = web
     app.state.langfuse_connected = langfuse_connected
     app.state.turns = Turns(graph=graph, tools=tools, checkpoint_path=checkpoint_path,
-                            langfuse_connected=langfuse_connected)
+                            langfuse_connected=langfuse_connected, model=model, logins=logins)
+    app.state.logins = app.state.turns.logins
+    app.state.logins.on_change = lambda status: app.state.turns.broadcast("login_status", {"logins": status})
+    app.state.logins.on_tools = app.state.turns.add_tools
     # A Secure cookie is never sent back over plain http, which is how localhost is served.
     app.state.auth = Auth(web.password_hash, secure_cookie=web.host not in LOCAL_HOSTS, clock=clock)
     app.add_middleware(RequestChecks, allowed_hosts=web.allowed_hosts)
@@ -108,6 +114,11 @@ def create_app(
     @api.get("/session")
     def session():
         return {"ok": True}
+
+    @api.get("/logins")
+    def logins_status(request: Request):
+        """The login status strip: each integration alive or dead, with its login command."""
+        return request.app.state.logins.status()
 
     @api.get("/conversations")
     def conversations(request: Request):

@@ -169,16 +169,16 @@ async def serve(tmp_path, monkeypatch):
     monkeypatch.setattr(graph_module, "get_episodic_memory", lambda: memory)
     started = []
 
-    async def make(scripts, *, langfuse_connected=False):
+    async def make(scripts, *, langfuse_connected=False, logins=None, tools=TOOLS):
         port = free_port()
         origin = f"http://127.0.0.1:{port}"
         checkpointer_cm = get_checkpointer(db)
         checkpointer = await checkpointer_cm.__aenter__()
         model = StandInModel(messages=iter([]), scripts=scripts)
         app = create_app(
-            graph=build_graph(checkpointer, TOOLS, model), tools=TOOLS, model=model, checkpoint_path=db,
+            graph=build_graph(checkpointer, tools, model), tools=tools, model=model, checkpoint_path=db,
             web=WebConfig(password_hash=FAST_HASHER.hash(PASSWORD), port=port, dist_dir=dist),
-            langfuse_connected=langfuse_connected,
+            langfuse_connected=langfuse_connected, logins=logins,
         )
         server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
         task = asyncio.create_task(server.serve())

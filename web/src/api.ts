@@ -58,6 +58,11 @@ export const listConversations = () => request<ConversationRow[]>("GET", "/api/c
 export const openConversation = (threadId: string) =>
   request<Transcript>("GET", `/api/conversations/${encodeURIComponent(threadId)}`);
 
+// The login status strip (src/agent/web/logins.py): rechecked at the start of every turn; a change
+// arrives as a `login_status` event on every open Conversation's stream.
+export type LoginRow = { name: string; alive: boolean; command: string; detail: string | null };
+export const loginStatus = () => request<LoginRow[]>("GET", "/api/logins");
+
 export const startConversation = (question: string) =>
   request<{ thread_id: string }>("POST", "/api/conversations", { question });
 export const askFollowUp = (threadId: string, question: string) =>
@@ -74,9 +79,11 @@ export type LiveEvent =
   | { name: "step_finished"; data: { step: ToolStep } }
   | { name: "approval_pending"; data: { pending: PendingApproval } }
   | { name: "answer"; data: { text: string } }
-  | { name: "turn_ended"; data: { status: ThreadStatus; outcome: TurnOutcome; message: string | null } };
+  | { name: "turn_ended"; data: { status: ThreadStatus; outcome: TurnOutcome; message: string | null } }
+  | { name: "login_status"; data: { logins: LoginRow[] } };
 export const LIVE_EVENT_NAMES: LiveEvent["name"][] = [
   "state", "turn_started", "step_started", "step_finished", "approval_pending", "answer", "turn_ended",
+  "login_status",
 ];
 
 export type LiveConversation = { status: ThreadStatus; transcript: Transcript };

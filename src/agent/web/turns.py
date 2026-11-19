@@ -20,6 +20,12 @@ Events (name: data):
 - ``answer``: ``{text}``: the turn's answer, whole
 - ``turn_ended``: ``{status, outcome, message}``: outcome ``answered`` | ``approval`` | ``failed`` |
   ``error``; ``message`` is what the CLI would print for a failure, else null
+- ``login_status``: ``{logins}``: the login status strip changed (``Logins.status()``); sent on every
+  Conversation's stream, as it is not about one Conversation
+
+A turn first rechecks the logins (``Logins.refresh_for_turn``, bounded by its short wait), then
+runs on the graph and tools bound at that moment: tools an MCP server brings once its login
+passes (``add_tools``) rebuild the graph for later turns, and a turn already running keeps its own.
 """
 
 import asyncio
@@ -34,8 +40,10 @@ from agent.claude_code_model import ClaudeCodeError
 from agent.cli import STEP_LIMIT_STOPPED, write_run_log
 from agent.config import settings
 from agent.conversation import stream_conversation
+from agent.graph import build_graph
 from agent.tracing import get_callback_handler
 from agent.web.conversations import message_text, pending_approval, tool_step, transcript
+from agent.web.logins import Logins
 
 logger = logging.getLogger(__name__)
 
@@ -89,12 +97,26 @@ class ThreadState:
 
 
 class Turns:
-    def __init__(self, *, graph, tools, checkpoint_path: str, langfuse_connected: bool = False):
+    def __init__(self, *, graph, tools, checkpoint_path: str, langfuse_connected: bool = False,
+                 model=None, logins: Logins | None = None):
         self.graph = graph
         self.tools = tools
+        self.model = model
+        self.logins = logins or Logins()
         self.checkpoint_path = checkpoint_path
         self.langfuse_connected = langfuse_connected
         self.threads: dict[str, ThreadState] = {}
+
+    def add_tools(self, tools: list) -> None:
+        """Bind more tools for later turns: the graph is rebuilt on the same checkpointer."""
+        self.tools = [*self.tools, *tools]
+        self.graph = build_graph(self.graph.checkpointer, self.tools, self.model)
+
+    def broadcast(self, name: str, data: dict) -> None:
+        """An event about no one Conversation, put on every watching queue."""
+        for thread in self.threads.values():
+            for queue in thread.subscribers:
+                queue.put_nowait((name, data))
 
     def _thread(self, thread_id: str) -> ThreadState:
         return self.threads.setdefault(thread_id, ThreadState(thread_id))
@@ -154,9 +176,11 @@ class Turns:
     async def _run(self, thread: ThreadState, question: str) -> None:
         outcome, message, error = "answered", None, None
         try:
+            await self.logins.refresh_for_turn()
+            graph, tools = self.graph, self.tools  # this turn's, whatever later logins bind
             with propagate_attributes(user_id="waffi", trace_name="web-run",
                                       metadata={"prompt-version": settings.prompt_version}):
-                async for chunk in stream_conversation(self.graph, self._config(thread), tools=self.tools,
+                async for chunk in stream_conversation(graph, self._config(thread), tools=tools,
                                                        user_message=question):
                     if "__interrupt__" in chunk:
                         outcome = "approval"
