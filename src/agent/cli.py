@@ -5,6 +5,7 @@ cli.py — Entry point with Langfuse tracing wired in.
 starts once, answers the question if one was given, then reads Follow-ups at a ``> `` prompt,
 all on one Conversation (one thread, one Langfuse trace). An empty line does nothing; ``exit``,
 ``quit`` or Ctrl-D ends the session. At exit the whole Conversation is one run log entry.
+Ctrl-C while a turn runs cancels that turn and returns to ``> ``; at a prompt it clears the line.
 
 Real-mode runs check the Google login before the agent starts. If Gmail or Calendar
 would need a new browser login, startup stops and names ``python -m agent.auth.google``.
@@ -14,6 +15,7 @@ Use ``--fixtures`` for the seeded Fixture world (no Google login check).
 """
 
 import asyncio
+import signal
 import sys
 import uuid
 from contextlib import nullcontext
@@ -25,7 +27,7 @@ from agent.auth.claude_code import ClaudeCodeLoginCheckTimeout, ClaudeCodeLoginR
 from agent.auth.google import GoogleLoginRequired, check_google_login
 from agent.chat_model import ModelConfigError, create_chat_model, is_claude_code_model
 from agent.claude_code_model import ClaudeCodeError
-from agent.conversation import run_conversation
+from agent.conversation import close_interrupted_turn, run_conversation
 from agent.graph import build_graph, get_checkpointer, log_run_to_memory
 from agent.memory import fixtures_semantic_memory
 from agent.tracing import flush_traces, get_callback_handler, verify_connection
@@ -68,6 +70,28 @@ EXIT_WORDS = ("exit", "quit")
 def _read_line(prompt: str) -> str:
     """Read one line at the session prompt; raises EOFError on Ctrl-D. Tests replace this."""
     return input(prompt)
+
+
+_turn: asyncio.Task | None = None  # the graph call Ctrl-C cancels, while one runs
+
+
+def _on_sigint(signum, frame) -> None:
+    """Ctrl-C: cancel the running graph call; otherwise interrupt the prompt's read."""
+    if _turn is not None and not _turn.done():
+        _turn.cancel()
+        _turn.get_loop().call_soon_threadsafe(lambda: None)  # wake the loop if it is waiting
+        return
+    raise KeyboardInterrupt
+
+
+async def _cancellable(coro):
+    """Run one graph call so Ctrl-C can cancel it (raises CancelledError when it does)."""
+    global _turn
+    _turn = asyncio.ensure_future(coro)
+    try:
+        return await _turn
+    finally:
+        _turn = None
 
 
 def _stringify_content(content) -> str:
@@ -149,7 +173,10 @@ def _prompt_decision() -> str:
     while True:
         try:
             line = _read_line("Your decision: ").strip()
-        except (EOFError, KeyboardInterrupt):
+        except KeyboardInterrupt:
+            print()  # Ctrl-C only clears the line
+            continue
+        except EOFError:
             print("\nAborted.")
             sys.exit(0)
         if line.lower() in ("approve", "reject"):
@@ -215,6 +242,7 @@ async def main():
     result: dict = {"messages": []}
     run_error: str | None = None
     questions: list[str] = []
+    previous_sigint = signal.signal(signal.SIGINT, _on_sigint)
 
     try:
         with memory_ctx:
@@ -245,6 +273,9 @@ async def main():
                             except EOFError:
                                 print()
                                 break
+                            except KeyboardInterrupt:
+                                print()  # Ctrl-C only clears the line
+                                continue
                         question = line.strip()
                         if not question:
                             continue
@@ -253,31 +284,40 @@ async def main():
                         questions.append(question)
                         turn_start = len(result["messages"])
 
-                        result = await run_conversation(
-                            agent_graph,
-                            config,
-                            tools=tools,
-                            user_message=question,
-                            today=today,
-                        )
-                        # HITL loop — handle zero or more interrupts per turn.
-                        while "__interrupt__" in result:
-                            for interrupt_obj in result["__interrupt__"]:
-                                _display_interrupt(interrupt_obj.value)
-
-                            decision = _prompt_decision()
-                            if decision not in ("approve", "reject"):
-                                # A Follow-up rejects the pending Write actions; the loop answers it as the next turn.
-                                first.append(decision)
-                                break
-                            print(f"\nResuming with: {decision}\n")
-
-                            result = await run_conversation(
+                        try:
+                            turn = await _cancellable(run_conversation(
                                 agent_graph,
                                 config,
                                 tools=tools,
-                                resume_decision=decision,
-                            )
+                                user_message=question,
+                                today=today,
+                            ))
+                            # HITL loop — handle zero or more interrupts per turn.
+                            while "__interrupt__" in turn:
+                                for interrupt_obj in turn["__interrupt__"]:
+                                    _display_interrupt(interrupt_obj.value)
+
+                                decision = _prompt_decision()
+                                if decision not in ("approve", "reject"):
+                                    # A Follow-up rejects the pending Write actions; the loop answers it as the next turn.
+                                    first.append(decision)
+                                    break
+                                print(f"\nResuming with: {decision}\n")
+
+                                turn = await _cancellable(run_conversation(
+                                    agent_graph,
+                                    config,
+                                    tools=tools,
+                                    resume_decision=decision,
+                                ))
+                        except asyncio.CancelledError:
+                            if asyncio.current_task().cancelling():
+                                raise  # the session itself is being cancelled, not just the turn
+                            # Ctrl-C: tool calls the cancel left open get answered before the next question.
+                            await close_interrupted_turn(agent_graph, config)
+                            print("\nInterrupted.")
+                            continue
+                        result = turn
 
                         if first:
                             continue
@@ -308,6 +348,7 @@ async def main():
             sys.exit(1)
         raise
     finally:
+        signal.signal(signal.SIGINT, previous_sigint)
         print(f"Conversation {thread_id}")
         flush_traces()
 
