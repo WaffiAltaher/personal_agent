@@ -7,6 +7,8 @@ from langchain_core.messages import AIMessage
 from langchain_core.tools import tool
 
 import agent.cli as cli
+
+import agent.startup as startup
 import agent.graph as graph
 import agent.memory.episodic as episodic
 from agent.tools.classification import read_tool, write_action
@@ -81,7 +83,7 @@ def cli_run(monkeypatch, tmp_path, scripted_model, startup_login_checks_pass):
     def start(replies, *args, lines=()):
         """Run main() with `args` (default: a question against the Fixture world), then `lines` at `> `."""
         monkeypatch.setattr(cli, "create_chat_model", lambda: scripted_model(replies))
-        monkeypatch.setattr(cli, "verify_connection", lambda: True)
+        monkeypatch.setattr(startup, "verify_connection", lambda: True)
         monkeypatch.setattr(cli, "get_callback_handler", lambda **kwargs: seen["handler"])
         monkeypatch.setattr(cli, "load_all_tools", load_all_tools)
         monkeypatch.setattr(cli, "get_checkpointer", graph.get_checkpointer)

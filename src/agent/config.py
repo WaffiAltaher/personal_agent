@@ -87,6 +87,12 @@ class Settings(BaseSettings):
     # Optional: without them the agent starts without Informer tools, with a notice.
     informer_api_key: str | None = None
     informer_security_code: str | None = None
+    # Web interface (python -m agent.web, ADR-018). The owner's password as an argon2id hash, set
+    # with `python -m agent.web.set_password`; the server refuses to start without it.
+    web_password_hash: str | None = None
+    web_port: int = 8000
+    # Keep 127.0.0.1 until Sign in with Google replaces the password: the setting is for deploying online.
+    web_host: str = "127.0.0.1"
 
 
 settings = Settings()

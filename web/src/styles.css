@@ -1,0 +1,55 @@
+:root {
+  --bg: #ffffff;
+  --fg: #1d1d1f;
+  --muted: #6e6e73;
+  --line: #e5e5ea;
+  --accent: #2f6fde;
+  --error: #c62828;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c1c1e;
+    --fg: #f2f2f7;
+    --muted: #a1a1a6;
+    --line: #3a3a3c;
+    --accent: #5e9bff;
+    --error: #ff6b6b;
+  }
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); }
+
+button {
+  font: inherit;
+  padding: 0.4rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+button:disabled { opacity: 0.5; cursor: default; }
+
+.login { display: grid; place-items: center; min-height: 100vh; padding: 16px; }
+.login form { display: grid; gap: 0.9rem; width: min(320px, 100%); }
+.login h1 { font-size: 1.3rem; margin: 0; }
+.login label { display: grid; gap: 0.3rem; color: var(--muted); }
+.login input {
+  font: inherit; padding: 0.5rem; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--bg); color: var(--fg);
+}
+.error { color: var(--error); margin: 0; }
+
+.shell { display: flex; flex-direction: column; height: 100vh; }
+.shell header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 0.6rem 1rem; border-bottom: 1px solid var(--line);
+}
+.shell .body { display: flex; flex: 1; min-height: 0; }
+.conversations { width: 280px; border-right: 1px solid var(--line); overflow-y: auto; }
+.conversation { flex: 1; overflow-y: auto; }
