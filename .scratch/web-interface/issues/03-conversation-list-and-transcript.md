@@ -4,15 +4,15 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] The list shows threads from the real checkpoint file, ordered by latest checkpoint
-- [ ] A thread started with the CLI appears with its first question as title
-- [ ] Listing stays fast with several hundred threads (test with a seeded checkpoint file)
-- [ ] Opening a thread shows every turn, with tool calls as collapsible steps (arguments and results as escaped text)
-- [ ] An answer containing `<script>` or other HTML is shown as text, never executed (test it)
-- [ ] A thread parked at an Approval shows the pending card with its actions
-- [ ] pytest covers the list and transcript endpoints on a Fixture-world checkpoint file
+- [x] The list shows threads from the real checkpoint file, ordered by latest checkpoint
+- [x] A thread started with the CLI appears with its first question as title
+- [x] Listing stays fast with several hundred threads (test with a seeded checkpoint file)
+- [x] Opening a thread shows every turn, with tool calls as collapsible steps (arguments and results as escaped text)
+- [x] An answer containing `<script>` or other HTML is shown as text, never executed (test it)
+- [x] A thread parked at an Approval shows the pending card with its actions
+- [x] pytest covers the list and transcript endpoints on a Fixture-world checkpoint file
 
 Spec: `../spec.md` (Conversations, Rendering).
 

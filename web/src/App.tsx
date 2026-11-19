@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { ApiError, loggedIn, login, logout } from "./api";
+import { ConversationList, OpenConversation } from "./Conversations";
 
 type View = "loading" | "login" | "shell";
 
@@ -53,6 +54,8 @@ function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
 }
 
 function Shell({ onLoggedOut }: { onLoggedOut: () => void }) {
+  const [selected, setSelected] = useState<string | null>(null);
+
   async function signOut() {
     try {
       await logout();
@@ -69,9 +72,11 @@ function Shell({ onLoggedOut }: { onLoggedOut: () => void }) {
       </header>
       <div className="body">
         <nav className="conversations" aria-label="Conversations">
-          {/* The Conversation list goes here. */}
+          <ConversationList selected={selected} onSelect={setSelected} />
         </nav>
-        <main className="conversation" />
+        <main className="conversation">
+          {selected && <OpenConversation threadId={selected} />}
+        </main>
       </div>
     </div>
   );

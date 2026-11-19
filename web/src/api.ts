@@ -38,3 +38,21 @@ export async function loggedIn(): Promise<boolean> {
 
 export const login = (password: string) => request("POST", "/api/login", { password });
 export const logout = () => request("POST", "/api/logout");
+
+// The shapes of the Conversation endpoints (src/agent/web/conversations.py). A transcript is also
+// the shape live events update.
+export type ConversationRow = { thread_id: string; title: string; updated_at: number };
+export type ToolStep = { id: string; name: string; args: unknown; result: string | null; error: boolean };
+export type Turn = { question: string; steps: ToolStep[]; answer: string | null };
+export type PendingApproval = {
+  interrupt_id: string;
+  message: string;
+  actions: string;
+  tool_call_ids: string[];
+  instructions?: string;
+};
+export type Transcript = { thread_id: string; turns: Turn[]; pending: PendingApproval | null };
+
+export const listConversations = () => request<ConversationRow[]>("GET", "/api/conversations");
+export const openConversation = (threadId: string) =>
+  request<Transcript>("GET", `/api/conversations/${encodeURIComponent(threadId)}`);
