@@ -4,12 +4,12 @@
 
 **Blocked by:** 05
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Four journeys pass against `web/dist` built from the current source
-- [ ] They run on the Fixture world with no live calls
-- [ ] Without a Playwright browser installed they are skipped with a message naming the install command
-- [ ] `CLAUDE.md` documents how to run them
+- [x] Four journeys pass against `web/dist` built from the current source
+- [x] They run on the Fixture world with no live calls
+- [x] Without a Playwright browser installed they are skipped with a message naming the install command
+- [x] `CLAUDE.md` documents how to run them
 
 Spec: `../spec.md` (Testing Decisions).
 
