@@ -491,10 +491,17 @@ def should_continue(state: AgentState) -> str:
 _CHECKPOINT_DIR = Path(__file__).resolve().parents[2] / "checkpoints"
 _CHECKPOINT_DIR.mkdir(exist_ok=True)
 CHECKPOINT_DB = str(_CHECKPOINT_DIR / "hitl.db")
+# The Fixture world keeps its own Conversations: a resume never crosses between it and real data.
+FIXTURE_CHECKPOINT_DB = str(_CHECKPOINT_DIR / "fixtures.db")
+
+
+def checkpoint_db(fixtures: bool) -> str:
+    """The checkpoint file of the Fixture world or of real data."""
+    return FIXTURE_CHECKPOINT_DB if fixtures else CHECKPOINT_DB
 
 
 @asynccontextmanager
-async def get_checkpointer():
+async def get_checkpointer(db_path: str | None = None):
     """
     Async context manager that opens an AsyncSqliteSaver, yields it, then
     closes the underlying sqlite connection when the caller's block exits.
@@ -504,7 +511,7 @@ async def get_checkpointer():
             graph = build_graph(checkpointer)
             await graph.ainvoke(...)
     """
-    async with AsyncSqliteSaver.from_conn_string(CHECKPOINT_DB) as checkpointer:
+    async with AsyncSqliteSaver.from_conn_string(db_path or CHECKPOINT_DB) as checkpointer:
         yield checkpointer
 
 
@@ -743,6 +750,7 @@ def log_run_to_memory(
     model_name: str | None = None,
     run_date: date | None = None,
     error: str | None = None,
+    thread_id: str | None = None,
 ) -> None:
     """
     Persist an episodic run log entry from a completed (or failed) graph result.
@@ -759,6 +767,7 @@ def log_run_to_memory(
             model_name=model_name or _settings.model_name,
             run_date=run_date or date.today(),
             error=error,
+            thread_id=thread_id,
         )
         get_episodic_memory().log_run(run)
     except Exception as exc:

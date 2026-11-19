@@ -40,7 +40,7 @@ def run_cli(monkeypatch, scripted_model, tmp_path):
         return [], []
 
     @asynccontextmanager
-    async def get_checkpointer():
+    async def get_checkpointer(db_path=None):
         yield InMemorySaver()
 
     monkeypatch.setattr(cli, "create_chat_model", lambda: scripted_model([lambda _m: AIMessage(content="ok")]))
