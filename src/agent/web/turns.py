@@ -60,7 +60,6 @@ from agent.web.logins import Logins
 logger = logging.getLogger(__name__)
 
 
-
 class Status(StrEnum):
     """A thread's status, as the tabs see it."""
     IDLE = "idle"
