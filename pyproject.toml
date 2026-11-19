@@ -65,4 +65,5 @@ packages = ["src/agent", "src/informer_mcp", "src/fixture_world"]
 addopts = ["-m", "not live"]
 markers = [
     "live: read-only check against real MS365 and Informer, and one real Claude Code CLI call on the owner's subscription; run with pytest -m live",
+    "browser: Playwright journeys on the built web app in Chromium; leave them out with -m 'not browser and not live'",
 ]

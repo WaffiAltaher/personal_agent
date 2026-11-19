@@ -1,5 +1,6 @@
-"""Browser journeys (test_web_browser.py) are skipped when no Playwright browser is installed."""
+"""Browser journeys (marked ``browser``) are skipped when no Playwright browser is installed."""
 
+import asyncio
 import os
 
 import pytest
@@ -8,19 +9,18 @@ INSTALL = "uv run playwright install chromium"
 
 
 def _chromium_installed() -> bool:
-    try:
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as p:
+    async def installed() -> bool:
+        from playwright.async_api import async_playwright
+        async with async_playwright() as p:
             return os.path.exists(p.chromium.executable_path)
+    try:
+        return asyncio.run(installed())
     except Exception:
         return False
 
 
 def pytest_collection_modifyitems(config, items):
-    journeys = [item for item in items if item.path.name == "test_web_browser.py"]
-    # Playwright's sync API keeps an event loop running in the main thread until the session ends,
-    # which breaks asyncio.run() in any test after it: run the journeys last.
-    items[:] = [item for item in items if item not in journeys] + journeys
+    journeys = [item for item in items if item.get_closest_marker("browser")]
     if journeys and not _chromium_installed():
         skip = pytest.mark.skip(reason=f"no Playwright browser installed; run `{INSTALL}`")
         for item in journeys:
