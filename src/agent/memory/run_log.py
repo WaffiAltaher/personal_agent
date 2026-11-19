@@ -137,6 +137,7 @@ def build_run_record(
     model_name: str,
     run_date: date,
     error: str | None = None,
+    thread_id: str | None = None,
 ) -> RunRecord:
     messages: list[BaseMessage] = result.get("messages", [])
     token_usage, priced_usage = _sum_usage_metadata(messages)
@@ -154,4 +155,5 @@ def build_run_record(
         cost_usd=run_cost,
         outcome=_detect_outcome(messages, error=error),
         error_message=error,
+        thread_id=thread_id,
     )

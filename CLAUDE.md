@@ -10,7 +10,8 @@ uv sync
 
 # Run the agent: a session that answers the optional first question, then reads Follow-ups at `> `
 # (exit, quit or Ctrl-D ends it). Add --fixtures to run against the seeded Fixture world instead of real data.
-python -m agent.cli ["<first question>"]
+# --resume <id> continues an earlier Conversation (the id is printed at start and exit); a bare --resume the most recent.
+python -m agent.cli [--resume [<id>]] ["<first question>"]
 
 # Log in to Google (Gmail/Calendar) when startup says the token is missing or dead
 python -m agent.auth.google
@@ -44,9 +45,9 @@ CLI → graph.py (LangGraph) → agent_node (LLM) → human_review_node → tool
 - `human_review_node`: gates Write actions (any tool not classified read) behind `interrupt()` — pauses the graph for user approval
 - `tools_with_fallback`: wraps `ToolNode` with a fallback that injects error `ToolMessage`s on exhausted retries so the graph continues
 - `retry_tool_call` + `TOOL_RETRY_POLICY`: per-tool-call backoff (up to 3 attempts) on transient errors (ConnectionError, TimeoutError, 429, 5xx only); Write actions are never retried
-- `SqliteSaver` checkpoints to `checkpoints/hitl.db` keyed by `thread_id` — interrupted runs can resume
+- `SqliteSaver` checkpoints to `checkpoints/hitl.db` (`checkpoints/fixtures.db` for `--fixtures`) keyed by `thread_id` — interrupted runs and `--resume`d Conversations continue from them
 
-**`src/agent/cli.py`** — entry point. Runs a session: each line at `> ` is a Follow-up on one thread, logged at exit as one run. Drives the HITL loop: invoke graph → detect `__interrupt__` → show approval prompt → `Command(resume=decision)` → repeat.
+**`src/agent/cli.py`** — entry point. Runs a session: each line at `> ` is a Follow-up on one thread, logged at exit as one run (keyed by thread id, so a `--resume`d Conversation replaces its entry). Drives the HITL loop: invoke graph → detect `__interrupt__` → show approval prompt → `Command(resume=decision)` → repeat.
 
 **`src/agent/tools/`** — local tools return strings (success or `"Error: ..."` on failure) and raise only transient failures (`transient.py`: network blips, HTTP 429/5xx), so the graph retries them. `LOCAL_TOOLS` in `__init__.py` lists local tools, each wrapped in `read_tool(...)`, `outbound_read(...)` or `write_action(...)` (`classification.py`). `load_all_tools(fixtures=...)` adds MCP tools from the servers in `mcp_servers()`, loaded by `mcp_loader.py` (prefixed `ms365_` / `informer_`, classified per server; a server that fails to start is skipped with a notice).
 

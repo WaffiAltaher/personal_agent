@@ -1,12 +1,10 @@
 """Shared CLI harness for the concept 4-5 killing tests: everything outside the run is replaced."""
 import sys
-from contextlib import asynccontextmanager
 
 import pytest
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import AIMessage
 from langchain_core.tools import tool
-from langgraph.checkpoint.memory import InMemorySaver
 
 import agent.cli as cli
 import agent.graph as graph
@@ -40,7 +38,10 @@ class RecordingHandler(BaseCallbackHandler):
 
 
 @pytest.fixture
-def cli_run(monkeypatch, scripted_model, startup_login_checks_pass):
+def cli_run(monkeypatch, tmp_path, scripted_model, startup_login_checks_pass):
+    # Real sqlite checkpoint files in a temp dir: Conversations persist across start() calls.
+    monkeypatch.setattr(graph, "CHECKPOINT_DB", str(tmp_path / "hitl.db"))
+    monkeypatch.setattr(graph, "FIXTURE_CHECKPOINT_DB", str(tmp_path / "fixtures.db"))
     seen = {"ran": [], "flushed": 0, "handler": RecordingHandler(), "configs": [], "logged": []}
 
     @write_action
@@ -59,10 +60,6 @@ def cli_run(monkeypatch, scripted_model, startup_login_checks_pass):
     async def load_all_tools(*, fixtures=False):
         return [send_mail, lookup], []
 
-    @asynccontextmanager
-    async def get_checkpointer():
-        yield InMemorySaver()
-
     class EpisodicMemory:
         def log_run(self, run):
             seen["logged"].append(run)
@@ -73,7 +70,7 @@ def cli_run(monkeypatch, scripted_model, startup_login_checks_pass):
         monkeypatch.setattr(cli, "verify_connection", lambda: True)
         monkeypatch.setattr(cli, "get_callback_handler", lambda **kwargs: seen["handler"])
         monkeypatch.setattr(cli, "load_all_tools", load_all_tools)
-        monkeypatch.setattr(cli, "get_checkpointer", get_checkpointer)
+        monkeypatch.setattr(cli, "get_checkpointer", graph.get_checkpointer)
         monkeypatch.setattr(graph, "get_episodic_memory", lambda: EpisodicMemory())
         monkeypatch.setattr(cli, "flush_traces", lambda: seen.__setitem__("flushed", seen["flushed"] + 1))
         monkeypatch.setattr(cli, "_prompt_decision", lambda: "approve")

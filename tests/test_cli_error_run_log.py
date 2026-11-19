@@ -17,7 +17,7 @@ async def test_cli_logs_error_outcome_and_flushes_traces(monkeypatch, scripted_m
     flushed = {"n": 0}
 
     @asynccontextmanager
-    async def get_checkpointer():
+    async def get_checkpointer(db_path=None):
         yield InMemorySaver()
 
     async def load_all_tools(*, fixtures=False):

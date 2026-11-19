@@ -1,10 +1,12 @@
 """
 cli.py — Entry point with Langfuse tracing wired in.
 
-``python -m agent.cli [--fixtures] [--debug] ["first question"]`` starts a session: the agent
+``python -m agent.cli [--fixtures] [--debug] [--resume [<id>]] ["first question"]`` starts a session: the agent
 starts once, answers the question if one was given, then reads Follow-ups at a ``> `` prompt,
 all on one Conversation (one thread, one Langfuse trace). An empty line does nothing; ``exit``,
 ``quit`` or Ctrl-D ends the session. At exit the whole Conversation is one run log entry.
+``--resume <id>`` continues that Conversation from an earlier session; a bare ``--resume`` the
+most recent one. Real and ``--fixtures`` runs keep their Conversations in separate checkpoint files.
 
 Real-mode runs check the Google login before the agent starts. If Gmail or Calendar
 would need a new browser login, startup stops and names ``python -m agent.auth.google``.
@@ -26,7 +28,7 @@ from agent.auth.google import GoogleLoginRequired, check_google_login
 from agent.chat_model import ModelConfigError, create_chat_model, is_claude_code_model
 from agent.claude_code_model import ClaudeCodeError
 from agent.conversation import run_conversation
-from agent.graph import build_graph, get_checkpointer, log_run_to_memory
+from agent.graph import build_graph, checkpoint_db, get_checkpointer, log_run_to_memory
 from agent.memory import fixtures_semantic_memory
 from agent.tracing import flush_traces, get_callback_handler, verify_connection
 from agent.config import settings
@@ -48,7 +50,7 @@ def _parse_args(argv: list[str]) -> tuple[bool, bool, str | None]:
         fixtures = True
         args.remove("--fixtures")
 
-    usage = "Usage: python -m agent.cli [--debug] [--fixtures] ['<your first question>']"
+    usage = "Usage: python -m agent.cli [--debug] [--fixtures] [--resume [<id>]] ['<your first question>']"
     # A mistyped flag (--fixture) must not become the question: it would run against real data.
     unknown = [a for a in args if a.startswith("--")]
     if unknown:
@@ -60,6 +62,34 @@ def _parse_args(argv: list[str]) -> tuple[bool, bool, str | None]:
 
     # An unquoted question arrives as several words: it is the whole line, not its first word.
     return debug, fixtures, " ".join(args)
+
+
+def _pop_resume(argv: list[str]) -> tuple[bool, str | None, list[str]]:
+    """Take ``--resume [<id>]`` out of argv. The word after it is the id only if it is a
+    Conversation id (a UUID); otherwise it is the question and the resume is bare."""
+    args = list(argv)
+    if "--resume" not in args:
+        return False, None, args
+    at = args.index("--resume")
+    args.pop(at)
+    if at < len(args):
+        try:
+            return True, str(uuid.UUID(args[at])), args[:at] + args[at + 1:]
+        except ValueError:
+            pass
+    return True, None, args
+
+
+async def _resumed_thread_id(db_path: str, thread_id: str | None) -> str | None:
+    """The thread to resume from this world's checkpoint file: the given one if it is there,
+    else the most recent. None if there is no such Conversation."""
+    async with get_checkpointer(db_path) as checkpointer:
+        if thread_id is not None:
+            found = await checkpointer.aget_tuple({"configurable": {"thread_id": thread_id}})
+            return thread_id if found else None
+        async for latest in checkpointer.alist(None, limit=1):
+            return latest.config["configurable"]["thread_id"]
+        return None
 
 
 EXIT_WORDS = ("exit", "quit")
@@ -157,7 +187,8 @@ def _prompt_decision() -> str:
 
 
 async def main():
-    debug, fixtures, user_input = _parse_args(sys.argv[1:])
+    resume, resume_id, argv = _pop_resume(sys.argv[1:])
+    debug, fixtures, user_input = _parse_args(argv)
 
     # Build the chat model first: a missing API key for the selected provider
     # stops the run here, before any MCP server is started.
@@ -188,8 +219,18 @@ async def main():
                 sys.exit(1)
 
     # Each CLI session gets a fresh thread_id: one Conversation, independent of other sessions.
-    # The checkpointer uses this to namespace the checkpoint.
-    thread_id = str(uuid.uuid4())
+    # The checkpointer uses this to namespace the checkpoint. --resume reuses an earlier one.
+    db_path = checkpoint_db(fixtures)
+    if resume:
+        resumed = await _resumed_thread_id(db_path, resume_id)
+        if resumed is None:
+            world = "the Fixture world" if fixtures else "real data"
+            print(f"Cannot resume: no Conversation {resume_id} in {world}." if resume_id
+                  else f"Cannot resume: there is no Conversation in {world} yet.")
+            sys.exit(1)
+        thread_id = resumed
+    else:
+        thread_id = str(uuid.uuid4())
     print(f"Conversation {thread_id}")
 
     # Langfuse v4 (OTel-based) requires a 32 lowercase hex char trace ID — no dashes.
@@ -215,7 +256,7 @@ async def main():
 
     try:
         with memory_ctx:
-            async with get_checkpointer() as checkpointer:
+            async with get_checkpointer(db_path) as checkpointer:
                 tools, notices = await load_all_tools(fixtures=fixtures)
                 if fixtures:
                     print(
@@ -226,6 +267,12 @@ async def main():
                 for notice in notices:
                     print(f"Notice: {notice}")
                 agent_graph = build_graph(checkpointer, tools, model, today=today)
+                if resume:
+                    # The run log entry covers the whole Conversation, earlier sessions included.
+                    result = {"messages": [], **(await agent_graph.aget_state(config)).values}
+                    questions = [
+                        _stringify_content(m.content) for m in result["messages"] if isinstance(m, HumanMessage)
+                    ]
 
                 with propagate_attributes(
                     user_id="waffi",
@@ -282,7 +329,7 @@ async def main():
         # A Fixture-world run is about seeded stand-in data, not the owner's: keep it out of real memory.
         # The whole Conversation is one run log entry; a session with no question leaves none.
         if not fixtures and questions:
-            log_run_to_memory(result, "\n".join(questions), model_name=settings.model_name)
+            log_run_to_memory(result, "\n".join(questions), model_name=settings.model_name, thread_id=thread_id)
     except Exception as exc:
         run_error = f"{type(exc).__name__}: {exc}"
         if not fixtures and questions:
@@ -291,6 +338,7 @@ async def main():
                 "\n".join(questions),
                 model_name=settings.model_name,
                 error=run_error,
+                thread_id=thread_id,
             )
         # A Claude Code call that couldn't produce a turn already says what to do (ADR-016).
         if isinstance(exc, ClaudeCodeError):

@@ -72,7 +72,7 @@ def run_cli(monkeypatch, scripted_model, startup_login_checks_pass):
         return [], []
 
     @asynccontextmanager
-    async def get_checkpointer():
+    async def get_checkpointer(db_path=None):
         yield InMemorySaver()
 
     real_check = google_auth.check_google_login

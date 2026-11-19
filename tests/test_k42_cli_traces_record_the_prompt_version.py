@@ -21,7 +21,7 @@ async def test_a_cli_run_is_traced_with_the_prompt_version(monkeypatch, scripted
         return [], []
 
     @asynccontextmanager
-    async def get_checkpointer():
+    async def get_checkpointer(db_path=None):
         yield InMemorySaver()
 
     monkeypatch.setattr(cli.settings, "prompt_version", "v2")
