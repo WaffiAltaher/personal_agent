@@ -81,7 +81,6 @@ def cli_run(monkeypatch, scripted_model, startup_login_checks_pass):
         monkeypatch.setattr(cli, "get_checkpointer", get_checkpointer)
         monkeypatch.setattr(graph, "get_episodic_memory", lambda: EpisodicMemory())
         monkeypatch.setattr(cli, "flush_traces", lambda: seen.__setitem__("flushed", seen["flushed"] + 1))
-        monkeypatch.setattr(cli, "_prompt_decision", lambda: "approve")
         seen["prompts"] = type_lines(monkeypatch, lines)
         monkeypatch.setattr(sys, "argv", ["agent.cli", *(args or ("--fixtures", "Mail Ann, then Bob."))])
         return cli.main()
