@@ -37,23 +37,48 @@ import asyncio
 import copy
 import logging
 from dataclasses import dataclass, field
+from enum import StrEnum
+from typing import Literal
 
 from langchain_core.messages import AIMessage, ToolMessage
-from langfuse import propagate_attributes
-from langgraph.errors import GraphRecursionError
 
-from agent.claude_code_model import ClaudeCodeError
-from agent.cli import STEP_LIMIT_STOPPED, write_run_log
-from agent.config import settings
 from agent.conversation import APPROVAL_ABANDONED, close_interrupted_turn, stream_conversation
 from agent.graph import build_graph
 from agent.tracing import get_callback_handler
+from agent.turn_rules import (
+    KNOWN_FAILURES,
+    error_text,
+    known_failure,
+    run_config,
+    trace_attributes,
+    trace_id,
+    write_run_log,
+)
 from agent.web.conversations import message_text, pending_approval, tool_step, transcript
 from agent.web.logins import Logins
 
 logger = logging.getLogger(__name__)
 
-IDLE, RUNNING, AWAITING_APPROVAL = "idle", "running", "awaiting_approval"
+
+
+class Status(StrEnum):
+    """A thread's status, as the tabs see it."""
+    IDLE = "idle"
+    RUNNING = "running"
+    AWAITING_APPROVAL = "awaiting_approval"
+
+
+class Outcome(StrEnum):
+    """How a turn ended (``turn_ended``)."""
+    ANSWERED = "answered"
+    APPROVAL = "approval"  # parked at an Approval
+    FAILED = "failed"  # a known failure
+    ERROR = "error"  # an unexpected error
+    CANCELLED = "cancelled"  # Stop
+
+
+EventName = Literal["state", "turn_started", "step_started", "step_finished", "approval_pending",
+                    "approval_decided", "answer", "turn_ended", "login_status"]
 STOPPED_BY_OWNER = "Interrupted."  # what the CLI prints after Ctrl-C cancels a turn
 
 
@@ -61,7 +86,7 @@ class TurnRefused(Exception):
     """A turn the thread can't take now (one is running, or a decision answers no pending Approval)."""
 
 
-def apply_event(conversation: dict, name: str, data: dict) -> None:
+def apply_event(conversation: dict, name: EventName, data: dict) -> None:
     """Patch a transcript with one event, as the React app does."""
     turns = conversation["turns"]
     if name == "state":
@@ -92,7 +117,7 @@ def apply_event(conversation: dict, name: str, data: dict) -> None:
 @dataclass
 class ThreadState:
     thread_id: str
-    status: str = IDLE
+    status: Status = Status.IDLE
     transcript: dict | None = None
     subscribers: set = field(default_factory=set)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -105,12 +130,17 @@ class ThreadState:
     # model must not see it.
     stopped: dict[int, str] = field(default_factory=dict)
 
-    def publish(self, name: str, data: dict) -> None:
+    def publish(self, name: EventName, data: dict) -> None:
         apply_event(self.transcript, name, data)
         if name == "turn_ended" and data.get("message") and self.transcript["turns"]:
             self.stopped[len(self.transcript["turns"]) - 1] = data["message"]
         for queue in self.subscribers:
             queue.put_nowait((name, data))
+
+    def last_turn_steps(self) -> list[dict]:
+        """The steps of the transcript's last turn (none before its first turn)."""
+        turns = self.transcript["turns"]
+        return turns[-1]["steps"] if turns else []
 
     def snapshot(self) -> tuple[str, dict]:
         return "state", {"status": self.status, "transcript": self.transcript}
@@ -132,7 +162,7 @@ class Turns:
         self.tools = [*self.tools, *tools]
         self.graph = build_graph(self.graph.checkpointer, self.tools, self.model)
 
-    def broadcast(self, name: str, data: dict) -> None:
+    def broadcast(self, name: EventName, data: dict) -> None:
         """An event about no one Conversation, put on every watching queue."""
         for thread in self.threads.values():
             for queue in thread.subscribers:
@@ -154,7 +184,7 @@ class Turns:
     async def _reload(self, thread: ThreadState) -> None:
         """Rebuild the transcript and status from the checkpoint (the CLI may have moved it on)."""
         thread.transcript, waiting = await self._checkpoint_transcript(thread)
-        thread.status = AWAITING_APPROVAL if waiting else IDLE
+        thread.status = Status.AWAITING_APPROVAL if waiting else Status.IDLE
 
     async def transcript(self, thread_id: str) -> dict | None:
         """The thread's transcript as a reload shows it (GET /conversations/{id}); None if it has no turn."""
@@ -162,12 +192,8 @@ class Turns:
         return rebuilt if rebuilt["turns"] else None
 
     def _config(self, thread: ThreadState) -> dict:
-        return {
-            "callbacks": thread.callbacks or [],
-            "configurable": {"thread_id": thread.thread_id},
-            # As the CLI: settings.max_iterations bounds model calls; this is the backstop.
-            "recursion_limit": max(settings.max_iterations * 5 + 10, 40),
-        }
+        # As the CLI: settings.max_iterations bounds model calls; this is the backstop.
+        return run_config(thread.thread_id, thread.callbacks or [])
 
     async def exists(self, thread_id: str) -> bool:
         """The thread has a turn in the checkpoint or in this server."""
@@ -181,7 +207,7 @@ class Turns:
         thread = self._thread(thread_id)
         queue: asyncio.Queue = asyncio.Queue()
         async with thread.lock:
-            if thread.status != RUNNING:
+            if thread.status != Status.RUNNING:
                 await self._reload(thread)
             queue.put_nowait(thread.snapshot())
             thread.subscribers.add(queue)
@@ -195,19 +221,19 @@ class Turns:
     def _ensure_callbacks(self, thread: ThreadState) -> None:
         if thread.callbacks is None:
             # The CLI's rule: the trace id is the thread id without dashes (Langfuse wants 32 hex chars).
-            thread.callbacks = ([get_callback_handler(trace_id=thread.thread_id.replace("-", ""))]
+            thread.callbacks = ([get_callback_handler(trace_id=trace_id(thread.thread_id))]
                                 if self.langfuse_connected else [])
 
     async def ask(self, thread_id: str, question: str) -> None:
         """Start a turn on the thread with this question; refused while one runs."""
         thread = self._thread(thread_id)
         async with thread.lock:
-            if thread.status == RUNNING:
+            if thread.status == Status.RUNNING:
                 raise TurnRefused("A turn is already running in this Conversation.")
             await self._reload(thread)
             self._ensure_callbacks(thread)
             pending = thread.transcript["pending"]
-            thread.status = RUNNING
+            thread.status = Status.RUNNING
             if pending is None:
                 thread.publish("turn_started", {"question": question})
             else:
@@ -222,14 +248,14 @@ class Turns:
         decision must not resume a checkpoint that has moved on)."""
         thread = self._thread(thread_id)
         async with thread.lock:
-            if thread.status == RUNNING:
+            if thread.status == Status.RUNNING:
                 raise TurnRefused("A turn is already running in this Conversation.")
             await self._reload(thread)
             pending = thread.transcript["pending"]
             if pending is None or pending["interrupt_id"] != interrupt_id:
                 raise TurnRefused("This Approval is no longer pending.")
             self._ensure_callbacks(thread)
-            thread.status = RUNNING
+            thread.status = Status.RUNNING
             thread.publish("approval_decided", {"interrupt_id": interrupt_id, "decision": decision})
             thread.task = asyncio.create_task(self._run(thread, resume_decision=decision))
 
@@ -243,13 +269,12 @@ class Turns:
 
     async def _run(self, thread: ThreadState, question: str | None = None, *,
                    resume_decision: str | None = None, abandoning: bool = False) -> None:
-        outcome, message, error = "answered", None, None
+        outcome, message, error = Outcome.ANSWERED, None, None
         thread.streaming = True
         try:
             await self.logins.refresh_for_turn()
             graph, tools = self.graph, self.tools  # this turn's, whatever later logins bind
-            with propagate_attributes(user_id="waffi", trace_name="web-run",
-                                      metadata={"prompt-version": settings.prompt_version}):
+            with trace_attributes("web-run"):
                 async for chunk in stream_conversation(graph, self._config(thread), tools=tools,
                                                        user_message=question, resume_decision=resume_decision):
                     if APPROVAL_ABANDONED in chunk:
@@ -260,13 +285,11 @@ class Turns:
                         # An Approval met while abandoning is rejected in turn: no card for it.
                         chunk = {node: update for node, update in chunk.items() if node != "__interrupt__"}
                     elif "__interrupt__" in chunk:
-                        outcome = "approval"
+                        outcome = Outcome.APPROVAL
                     self._publish_chunk(thread, chunk)
-        except ClaudeCodeError as exc:
+        except KNOWN_FAILURES as exc:
             # As the CLI: the error already says what to do (ADR-016).
-            outcome, message, error = "failed", f"Stopped: {exc}", f"{type(exc).__name__}: {exc}"
-        except GraphRecursionError as exc:
-            outcome, message, error = "failed", STEP_LIMIT_STOPPED, f"{type(exc).__name__}: {exc}"
+            outcome, (message, error) = Outcome.FAILED, known_failure(exc)
         except asyncio.CancelledError:
             if not thread.stopping:
                 raise  # the server is shutting down, not a Stop
@@ -275,10 +298,10 @@ class Turns:
             await close_interrupted_turn(self.graph, self._config(thread))
             await self._publish_closed_steps(thread)
             await self._publish_unsaved_turn_dropped(thread)
-            outcome, message = "cancelled", STOPPED_BY_OWNER
+            outcome, message = Outcome.CANCELLED, STOPPED_BY_OWNER
         except Exception as exc:
             logger.exception("Web turn failed on thread %s", thread.thread_id)
-            outcome, message, error = "error", f"Error: {type(exc).__name__}: {exc}", f"{type(exc).__name__}: {exc}"
+            outcome, message, error = Outcome.ERROR, f"Error: {error_text(exc)}", error_text(exc)
         finally:
             thread.streaming = False
         try:
@@ -286,7 +309,7 @@ class Turns:
                                   questions=[question] if question else [])
         except Exception:
             logger.exception("Run log write failed on thread %s", thread.thread_id)
-        thread.status = AWAITING_APPROVAL if outcome == "approval" else IDLE
+        thread.status = Status.AWAITING_APPROVAL if outcome == Outcome.APPROVAL else Status.IDLE
         thread.task = None
         thread.stopping = False
         thread.publish("turn_ended", {"status": thread.status, "outcome": outcome, "message": message})
@@ -295,9 +318,7 @@ class Turns:
         """A step_finished for each running step of the last turn that now has its result."""
         state = await self.graph.aget_state(self._config(thread))
         results = {m.tool_call_id: m for m in state.values.get("messages", []) if isinstance(m, ToolMessage)}
-        if not thread.transcript["turns"]:
-            return
-        for step in list(thread.transcript["turns"][-1]["steps"]):
+        for step in list(thread.last_turn_steps()):
             if step["result"] is None and step["id"] in results:
                 thread.publish("step_finished", {"step": tool_step(step, results[step["id"]])})
 
@@ -322,8 +343,7 @@ class Turns:
                     if not message.tool_calls:
                         thread.publish("answer", {"text": message_text(message.content)})
                 elif isinstance(message, ToolMessage):
-                    known = next((s for s in thread.transcript["turns"][-1]["steps"]
-                                  if s["id"] == message.tool_call_id), None)
+                    known = next((s for s in thread.last_turn_steps() if s["id"] == message.tool_call_id), None)
                     call = {"id": message.tool_call_id, "name": known["name"] if known else message.name,
                             "args": known["args"] if known else {}}
                     thread.publish("step_finished", {"step": tool_step(call, message)})

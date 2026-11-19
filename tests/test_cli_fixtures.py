@@ -18,6 +18,7 @@ from langchain_core.messages import AIMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
 import agent.cli as cli
+import agent.turn_rules as turn_rules
 
 import agent.startup as startup
 
@@ -44,8 +45,9 @@ def run_cli(monkeypatch, scripted_model, startup_login_checks_pass):
     monkeypatch.setattr(cli, "get_callback_handler", lambda **kwargs: BaseCallbackHandler())
     monkeypatch.setattr(cli, "load_all_tools", load_all_tools)
     monkeypatch.setattr(cli, "get_checkpointer", get_checkpointer)
+    monkeypatch.setattr(turn_rules, "get_checkpointer", get_checkpointer)
     monkeypatch.setattr(
-        cli,
+        turn_rules,
         "log_run_to_memory",
         lambda result, user_input, **kwargs: seen["logged_to_memory"].append(user_input),
     )

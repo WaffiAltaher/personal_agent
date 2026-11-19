@@ -35,11 +35,14 @@ uv run pytest
 uv run pytest tests/test_tools.py -v
 uv run pytest tests/test_tools.py::test_read_file -v
 
-# Browser journeys (tests/web/test_web_browser.py): Playwright drives web/dist on the Fixture tools and a stand-in model, no live calls.
+# Browser journeys (tests/web/test_web_browser.py, marker `browser`): Playwright drives web/dist on the Fixture tools and a stand-in model, no live calls.
 # They need the built app and a browser, and are skipped (naming the install command) without a browser.
 cd web && npm run build && cd ..
 uv run playwright install chromium
 uv run pytest tests/web/test_web_browser.py
+# Everything but the journeys. Keep `not live`: a -m on the command line replaces the default
+# `-m "not live"`, and live tests call the real Claude Code and MS365.
+uv run pytest -m "not live and not browser"
 ```
 
 ## Architecture
@@ -61,6 +64,8 @@ CLI → graph.py (LangGraph) → agent_node (LLM) → human_review_node → tool
 - `SqliteSaver` checkpoints to `checkpoints/hitl.db` (`checkpoints/fixtures.db` for `--fixtures`) keyed by `thread_id` — interrupted runs and `--resume`d Conversations continue from them
 
 **`src/agent/cli.py`** — entry point. Runs a session: each line at `> ` is a Follow-up in one Conversation (one thread), whose one run log entry is written after every turn (and once more at exit), built from the thread by `write_run_log(db_path, thread_id)` (keyed by thread id, so each write replaces the entry and keeps earlier errors, also from a `--resume`d session). Ctrl-C cancels a running turn; outside a turn and a prompt it ends the session, which still writes the entry. Drives the HITL loop: invoke graph → detect `__interrupt__` → show approval prompt → `Command(resume=decision)` → repeat.
+
+**`src/agent/turn_rules.py`** — what the CLI and the web server do the same way around a turn: `write_run_log`, the run config (`run_config`), the Langfuse trace id and attributes (`trace_id`, `trace_attributes`, `OWNER_USER_ID`), and the message and run log error of a known failure (`KNOWN_FAILURES`, `known_failure`, `STEP_LIMIT_STOPPED`). The web package must not import `agent.cli`.
 
 **`src/agent/tools/`** — local tools return strings (success or `"Error: ..."` on failure) and raise only transient failures (`transient.py`: network blips, HTTP 429/5xx), so the graph retries them. `LOCAL_TOOLS` in `__init__.py` lists local tools, each wrapped in `read_tool(...)`, `outbound_read(...)` or `write_action(...)` (`classification.py`). `load_all_tools(fixtures=...)` adds MCP tools from the servers in `mcp_servers()`, loaded by `mcp_loader.py` (prefixed `ms365_` / `informer_`, classified per server; a server that fails to start is skipped with a notice).
 

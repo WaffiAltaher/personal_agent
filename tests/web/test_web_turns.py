@@ -25,10 +25,10 @@ from langgraph.errors import GraphRecursionError
 
 import agent.graph as graph_module
 from agent.claude_code_model import ClaudeCodeError
-from agent.cli import STEP_LIMIT_STOPPED
 from agent.graph import build_graph, get_checkpointer
 from agent.memory.episodic import EpisodicMemory
 from agent.tools.classification import read_tool, write_action
+from agent.turn_rules import STEP_LIMIT_STOPPED
 from agent.web import WebConfig, create_app
 
 pytestmark = pytest.mark.asyncio

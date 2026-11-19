@@ -7,6 +7,7 @@ from _cli_harness import cli_run, mail  # noqa: F401
 from langchain_core.messages import AIMessage
 
 import agent.cli as cli
+import agent.turn_rules as turn_rules
 from agent.claude_code_model import ClaudeCodeError
 from test_cli_ctrl_c import slow, slow_lookup
 
@@ -115,7 +116,7 @@ async def test_the_helper_needs_only_the_checkpoint_path_and_thread_id(cli_run, 
     seen["writes"].clear()
 
     from agent import graph
-    await cli.write_run_log(graph.CHECKPOINT_DB, thread_id)
+    await turn_rules.write_run_log(graph.CHECKPOINT_DB, thread_id)
 
     [run] = seen["writes"]
     assert run.user_input == "hello?" and run.final_output == "Hi."

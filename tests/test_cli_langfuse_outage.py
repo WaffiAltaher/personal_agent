@@ -17,6 +17,7 @@ from langfuse import Langfuse
 from langgraph.checkpoint.memory import InMemorySaver
 
 import agent.cli as cli
+import agent.turn_rules as turn_rules
 
 
 OUTAGE_BASE_URL = "http://langfuse.lan.test:4318"  # not the default, so a hard-coded URL would fail
@@ -54,8 +55,9 @@ def run_cli_against_langfuse(monkeypatch, scripted_model, langfuse_spans, startu
     monkeypatch.setattr(cli, "create_chat_model", lambda: scripted_model([reply]))
     monkeypatch.setattr(cli, "load_all_tools", load_all_tools)
     monkeypatch.setattr(cli, "get_checkpointer", get_checkpointer)
+    monkeypatch.setattr(turn_rules, "get_checkpointer", get_checkpointer)
     monkeypatch.setattr(
-        cli,
+        turn_rules,
         "log_run_to_memory",
         lambda result, user_input, **kwargs: seen["logged_to_memory"].append(user_input),
     )

@@ -26,17 +26,25 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-from langfuse import propagate_attributes
 from langgraph.errors import GraphRecursionError
 from agent import startup
 from agent.chat_model import ModelConfigError, create_chat_model
-from agent.claude_code_model import ClaudeCodeError
 from agent.conversation import close_interrupted_turn, run_conversation
-from agent.graph import build_graph, checkpoint_db, get_checkpointer, log_run_to_memory
+from agent.graph import build_graph, checkpoint_db, get_checkpointer
 from agent.memory import fixtures_semantic_memory
 from agent.tracing import flush_traces, get_callback_handler
 from agent.config import settings
 from agent.tools import load_all_tools
+from agent.turn_rules import (
+    KNOWN_FAILURES,
+    STEP_LIMIT_STOPPED,
+    known_failure,
+    run_config,
+    stringify_content,
+    trace_attributes,
+    trace_id,
+    write_run_log,
+)
 from fixture_world import clock
 
 
@@ -98,9 +106,6 @@ async def _resumed_thread_id(db_path: str, thread_id: str | None) -> str | None:
 
 EXIT_WORDS = ("exit", "quit")
 
-STEP_LIMIT_STOPPED = ("Stopped: the agent hit its step limit (~10 tool rounds) without a final answer. "
-                      "Try a narrower question.")
-
 
 def _read_line(prompt: str) -> str:
     """Read one line at the session prompt; raises EOFError on Ctrl-D. Tests replace this."""
@@ -153,17 +158,6 @@ async def _cancellable(coro):
         _turn = None
 
 
-def _stringify_content(content) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return " ".join(
-            block["text"] for block in content
-            if isinstance(block, dict) and block.get("type") == "text"
-        )
-    return str(content)
-
-
 def _display_debug_trace(result: dict) -> None:
     """Print the message trajectory and captured structured errors."""
     print("\n" + "=" * 60)
@@ -173,7 +167,7 @@ def _display_debug_trace(result: dict) -> None:
     for idx, message in enumerate(result.get("messages", []), start=1):
         print(f"\n[{idx}] {type(message).__name__}")
 
-        content = _stringify_content(getattr(message, "content", ""))
+        content = stringify_content(getattr(message, "content", ""))
         if content:
             print(f"content: {content[:1000]}")
         else:
@@ -284,17 +278,13 @@ async def main():
 
     # Langfuse v4 (OTel-based) requires a 32 lowercase hex char trace ID — no dashes.
     # We derive it from thread_id so the two IDs stay linked.
-    langfuse_trace_id = thread_id.replace("-", "")
+    langfuse_trace_id = trace_id(thread_id)
 
     # One handler per session = one trace in Langfuse for the whole Conversation. With Langfuse down there is no handler: the run is untraced.
     callbacks = [get_callback_handler(trace_id=langfuse_trace_id)] if langfuse_connected else []
 
-    config = {
-        "callbacks": callbacks,
-        "configurable": {"thread_id": thread_id},
-        # Backstop only: settings.max_iterations bounds model calls; keep headroom above that.
-        "recursion_limit": max(settings.max_iterations * 5 + 10, 40),
-    }
+    # Backstop only: settings.max_iterations bounds model calls; keep headroom above that.
+    config = run_config(thread_id, callbacks)
 
     # Against the Fixture world, "today" is its pinned date, for the model and the stand-ins alike.
     today = clock.pin_today() if fixtures else None
@@ -327,16 +317,12 @@ async def main():
                 if resume:
                     # The run log entry covers the whole Conversation, earlier sessions included.
                     questions = [
-                        _stringify_content(m.content)
+                        stringify_content(m.content)
                         for m in (await agent_graph.aget_state(config)).values.get("messages", [])
                         if isinstance(m, HumanMessage)
                     ]
 
-                with propagate_attributes(
-                    user_id="waffi",
-                    trace_name="cli-run",
-                    metadata={"prompt-version": settings.prompt_version},
-                ):
+                with trace_attributes("cli-run"):
                     pending_questions = [user_input] if user_input is not None else []
                     moved_on = False  # the last turn left its Approval for a Follow-up
                     while True:
@@ -397,15 +383,11 @@ async def main():
                             print("\nInterrupted.")
                             await log_turn()
                             continue
-                        except ClaudeCodeError as exc:
+                        except KNOWN_FAILURES as exc:
                             # A Claude Code call that couldn't produce a turn already says what to do (ADR-016).
-                            print(f"Stopped: {exc}")
-                            unlogged_failures.append(f"{type(exc).__name__}: {exc}")
-                            await log_turn()
-                            continue
-                        except GraphRecursionError as exc:
-                            print(STEP_LIMIT_STOPPED)
-                            unlogged_failures.append(f"{type(exc).__name__}: {exc}")
+                            message, error = known_failure(exc)
+                            print(message)
+                            unlogged_failures.append(error)
                             await log_turn()
                             continue
 
@@ -419,7 +401,7 @@ async def main():
                             continue
 
                         last = turn["messages"][-1]
-                        print(_stringify_content(last.content))
+                        print(stringify_content(last.content))
 
                         if debug:
                             # Only what this turn added: earlier turns were shown after their own turn.
@@ -445,32 +427,6 @@ async def main():
         _session = None
         print(f"Conversation {thread_id}")
         flush_traces()
-
-
-async def _conversation_so_far(db_path: str, config: dict) -> dict:
-    """The Conversation's thread as last checkpointed, for its run log entry. No messages if it
-    can't be read: the error that ended the session is the one to show."""
-    try:
-        async with get_checkpointer(db_path) as checkpointer:
-            saved = await checkpointer.aget_tuple(config)
-        return {"messages": [], **(saved.checkpoint["channel_values"] if saved else {})}
-    except Exception:
-        return {"messages": []}
-
-
-async def write_run_log(db_path: str, thread_id: str, *, error: str | None = None,
-                        questions: list[str] = ()) -> None:
-    """Write the Conversation's run log entry from its thread in the checkpoint file at ``db_path``,
-    replacing the thread's earlier entry. The questions are the thread's HumanMessages; ``questions``
-    stands in only while the thread has none (a first turn that failed before checkpointing). ``error``
-    is a failure not yet in the entry: the entry keeps the ones it already holds. Writes nothing for a
-    thread with no question and no error."""
-    result = await _conversation_so_far(db_path, {"configurable": {"thread_id": thread_id}})
-    asked = [_stringify_content(m.content) for m in result["messages"] if isinstance(m, HumanMessage)]
-    asked = asked or list(questions)
-    if not asked and not error:
-        return
-    log_run_to_memory(result, "\n".join(asked), model_name=settings.model_name, error=error, thread_id=thread_id)
 
 
 if __name__ == "__main__":
