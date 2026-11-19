@@ -53,3 +53,21 @@ button:disabled { opacity: 0.5; cursor: default; }
 .shell .body { display: flex; flex: 1; min-height: 0; }
 .conversations { width: 280px; border-right: 1px solid var(--line); overflow-y: auto; }
 .conversation { flex: 1; overflow-y: auto; }
+
+.muted { color: var(--muted); }
+.conversations ul { list-style: none; margin: 0; padding: 0; }
+.conversations .row {
+  display: grid; gap: 0.15rem; width: 100%; text-align: left; border: 0; border-radius: 0;
+  border-bottom: 1px solid var(--line); background: transparent; color: var(--fg);
+}
+.conversations .row.selected { background: var(--line); }
+.conversations .date { color: var(--muted); font-size: 0.8rem; }
+.conversation { padding: 1rem; }
+.turn { margin-bottom: 1.5rem; }
+.turn .question { font-weight: 600; margin: 0 0 0.5rem; white-space: pre-wrap; }
+.step { border: 1px solid var(--line); border-radius: 6px; padding: 0.3rem 0.6rem; margin: 0.3rem 0; }
+.step.failed summary { color: var(--error); }
+.step pre, .approval pre { white-space: pre-wrap; overflow-x: auto; margin: 0.4rem 0; font-size: 0.85rem; }
+.answer table { border-collapse: collapse; }
+.answer th, .answer td { border: 1px solid var(--line); padding: 0.2rem 0.5rem; }
+.approval { border: 2px solid var(--accent); border-radius: 8px; padding: 0.6rem 1rem; }

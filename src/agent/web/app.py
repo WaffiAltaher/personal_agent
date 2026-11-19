@@ -21,6 +21,7 @@ from pydantic import BaseModel
 
 from agent.config import PROJECT_ROOT
 from agent.web.auth import SESSION_COOKIE, SESSION_MAX_AGE_S, Auth, require_session
+from agent.web.conversations import list_conversations, transcript
 from agent.web.request_checks import RequestChecks
 
 WEB_DIST = PROJECT_ROOT / "web" / "dist"
@@ -94,6 +95,18 @@ def create_app(
     @api.get("/session")
     def session():
         return {"ok": True}
+
+    @api.get("/conversations")
+    def conversations(request: Request):
+        return list_conversations(request.app.state.checkpoint_path)
+
+    @api.get("/conversations/{thread_id}")
+    async def conversation(thread_id: str, request: Request):
+        state = await request.app.state.graph.aget_state({"configurable": {"thread_id": thread_id}})
+        messages = state.values.get("messages", [])
+        if not messages:
+            return JSONResponse({"detail": "No such Conversation."}, status_code=404)
+        return transcript(thread_id, messages, state.interrupts)
 
     app.include_router(public)
     app.include_router(api)
