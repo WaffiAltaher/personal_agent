@@ -150,3 +150,24 @@ def test_an_anthropic_request_the_server_never_answers_fails_instead_of_hanging(
         with pytest.raises(Exception, match="(?i)time"):
             model.invoke("hi")
         assert time.monotonic() - started < 10
+
+
+def test_every_model_tries_a_failed_request_the_configured_number_of_times():
+    s = with_settings(anthropic_api_key="sk-ant-dummy", model_attempts=3, claude_code_binary="claude")
+
+    # The Anthropic SDK counts retries after the first attempt; the Google SDK counts attempts.
+    assert create_chat_model("anthropic:claude-sonnet-5-5", settings=s).max_retries == 2
+    assert create_chat_model("google_genai:gemini-3.8-flash", settings=s).max_retries == 3
+    assert create_chat_model("claude_code:sonnet", settings=s).attempts == 3
+    embeddings = create_embeddings(settings=s)
+    assert embeddings.attempts == 3
+    assert embeddings.client._api_client._http_options.retry_options.attempts == 3
+
+
+def test_the_default_is_two_attempts():
+    assert Settings.model_fields["model_attempts"].default == 2
+
+
+def test_fewer_than_one_attempt_is_rejected():
+    with pytest.raises(ValueError, match="MODEL_ATTEMPTS"):
+        Settings(model_attempts=0)

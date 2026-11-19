@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     # google_genai: and anthropic: models, and the Google embeddings: how long one API request may
     # take. Both integrations default to no timeout, so a request the server never answers would hang.
     model_timeout_s: float = 120
+    # Every model and the Google embeddings: how many times (the first included) one request is
+    # tried when it fails in a way worth retrying, e.g. a timeout or an overloaded server's 503.
+    model_attempts: int = 2
 
     # Memory layer
     sqlite_path: str = "data/episodic.db"
@@ -40,6 +43,13 @@ class Settings(BaseSettings):
     # fixture (tests/memory/test_cosine_threshold.py); live embedding calibration
     # is a follow-up when a real API key is available in CI.
     memory_score_threshold: float = 0.7
+
+    @field_validator("model_attempts")
+    @classmethod
+    def _at_least_one_attempt(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("MODEL_ATTEMPTS must be at least 1")
+        return value
 
     @field_validator("sqlite_path", "chroma_path")
     @classmethod

@@ -4,11 +4,14 @@
 from __future__ import annotations
 
 from langchain_anthropic import ChatAnthropic
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import SystemMessage
 from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
+
+from agent.chat_model import GOOGLE_NETWORK_ERRORS
 
 CACHE_BREAKPOINT = {"type": "ephemeral"}
 
@@ -72,6 +75,22 @@ def bind_agent_tools(model: BaseChatModel, tools: list[BaseTool]) -> Runnable:
     formatted[-1] = last
     kwargs["tools"] = formatted
     return bound.bound.bind(**kwargs)
+
+
+def with_network_retry(bound: Runnable, model: BaseChatModel | Runnable) -> Runnable:
+    """`bound` (from bind_agent_tools), retrying a Gemini call that timed out or lost its
+    connection, as many times in all as the model's own max_retries (which the Google SDK uses as
+    its number of attempts at a 503). Other models are returned unchanged: the Anthropic SDK
+    retries those failures itself, and claude_code: retries its own timeouts. Kept apart from
+    bind_agent_tools, whose result callers read the bound tools from."""
+    chat_model = _unwrap_chat_model(model)
+    if not isinstance(chat_model, ChatGoogleGenerativeAI):
+        return bound
+    return bound.with_retry(
+        retry_if_exception_type=GOOGLE_NETWORK_ERRORS,
+        stop_after_attempt=max(chat_model.max_retries, 1),
+        wait_exponential_jitter=True,
+    )
 
 
 def anthropic_system_message(system_text: str) -> SystemMessage:

@@ -65,7 +65,7 @@ from typing_extensions import TypedDict
 
 from agent.chat_model import create_chat_model
 from agent.config import settings
-from agent.model_binding import bind_agent_tools, system_message_for_model
+from agent.model_binding import bind_agent_tools, system_message_for_model, with_network_retry
 from agent.memory import get_episodic_memory
 from agent.memory.context_view import (
     build_model_view,
@@ -546,6 +546,7 @@ def build_graph(
     if model is None:
         model = create_chat_model()  # provider:model from settings.model_name
     llm = bind_agent_tools(model, tools)
+    call_llm = with_network_retry(llm, model)  # a Gemini call that timed out or lost its connection is retried
 
     # ToolNode handles the mechanical work of tool execution:
     # - reads the AIMessage's tool_calls field
@@ -579,7 +580,7 @@ def build_graph(
             system_message=system_msg,
             stubbed_tool_call_ids=set(state.get("stubbed_tool_call_ids") or []),
         )
-        response = await llm.ainvoke(view)
+        response = await call_llm.ainvoke(view)
         usage = getattr(response, "usage_metadata", None) or {}
         update: dict = {
             "messages": [response],

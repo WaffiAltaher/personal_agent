@@ -538,7 +538,7 @@ def test_a_timeout_kills_the_cli_and_what_it_started_and_stops(cli, tmp_path):
     cli.script([{"hang": True}, ANSWER])
 
     with pytest.raises(ClaudeCodeError) as stop:
-        with_tools(claude_code(claude_code_timeout_s=2)).invoke("Any mail from Bob?")
+        with_tools(claude_code(claude_code_timeout_s=2, model_attempts=1)).invoke("Any mail from Bob?")
 
     assert str(stop.value) == "Claude Code did not answer within 2 s. Ask again."
     assert len(cli.calls()) == 1  # not retried, and no other model asked
@@ -548,6 +548,24 @@ def test_a_timeout_kills_the_cli_and_what_it_started_and_stops(cli, tmp_path):
     while any(running(p) for p in pids) and time.monotonic() < deadline:
         time.sleep(0.05)
     assert not any(running(p) for p in pids)
+
+
+def test_a_call_that_timed_out_is_run_again_up_to_the_configured_attempts(cli):
+    cli.script([{"hang": True}, ANSWER])
+
+    reply = with_tools(claude_code(claude_code_timeout_s=2, model_attempts=2)).invoke("Any mail from Bob?")
+
+    assert reply.content == "No mail from Bob."
+    assert len(cli.calls()) == 2
+
+
+def test_a_call_that_times_out_on_every_attempt_stops(cli):
+    cli.script([{"hang": True}, {"hang": True}, ANSWER])
+
+    with pytest.raises(ClaudeCodeError, match="did not answer within 1 s"):
+        with_tools(claude_code(claude_code_timeout_s=1, model_attempts=2)).invoke("Any mail from Bob?")
+
+    assert len(cli.calls()) == 2
 
 
 @pytest.mark.asyncio
