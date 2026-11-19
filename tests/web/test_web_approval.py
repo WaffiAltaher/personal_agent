@@ -14,6 +14,7 @@ from web.test_web_turns import TOOLS, Wait, ai, names, serve  # noqa: F401
 
 from agent.conversation import INTERRUPTED_BY_OWNER, MOVED_ON_REJECTION
 from agent.tools.classification import read_tool
+from agent.web.logins import Integration, Logins
 from agent.web.turns import apply_event
 
 pytestmark = pytest.mark.asyncio
@@ -190,6 +191,64 @@ async def test_stop_cancels_a_running_turn_and_closes_its_open_tool_calls(serve)
 
         assert (await web.ask(thread_id, "Again")).status_code == 202
         assert ("answer", {"text": "After the stop."}) in await stream.until("turn_ended")
+
+
+async def test_stop_while_a_follow_up_abandons_the_approval_lands_where_a_reload_shows_it(serve):
+    gate = asyncio.Event()
+    web = await serve({"Mail Ann": [
+        ai("", ("w1", "send_mail", {"to": "ann"})),
+        Wait(gate, ai("Not sent.")),  # the acknowledgement the Stop cancels
+    ]})
+    thread_id, _ = await parked(web, "Mail Ann")
+
+    async with web.events(thread_id) as stream:
+        _, state = await stream.next()
+        assert (await web.ask(thread_id, "Read my notes instead")).status_code == 202
+        events = await stream.until("step_finished")  # the earlier turn's Write step, rejected
+        assert (await stop(web, thread_id)).status_code == 202
+        events += await stream.until("turn_ended")
+
+    assert events[-1][1] == {"status": "idle", "outcome": "cancelled", "message": "Interrupted."}
+    live = state["transcript"]
+    for name, data in events:
+        apply_event(live, name, data)
+    reloaded = (await web.client.get(f"/api/conversations/{thread_id}")).json()
+    assert live == reloaded
+    # The Follow-up never reached the thread: the stop belongs to the turn it was ending.
+    assert [(t["question"], t.get("stopped")) for t in reloaded["turns"]] == [("Mail Ann", "Interrupted.")]
+
+
+async def test_stop_before_a_follow_ups_question_is_saved_shows_what_a_reload_shows(serve):
+    hold, checking = asyncio.Event(), asyncio.Event()
+
+    async def check():
+        if hold.is_set():  # the Follow-up's turn waits on this login refresh until the Stop
+            checking.set()
+            await asyncio.Event().wait()
+        return None
+
+    web = await serve({"Hi": [ai("Hello.")]}, logins=Logins([Integration("Slow", "log in", check)], turn_wait_s=30))
+    thread_id = await web.start("Hi")
+    async with web.events(thread_id) as stream:
+        await stream.settled()
+    hold.set()
+
+    async with web.events(thread_id) as stream:
+        _, state = await stream.next()
+        assert (await web.ask(thread_id, "And then?")).status_code == 202
+        await checking.wait()
+        assert (await stop(web, thread_id)).status_code == 202
+        events = await stream.until("turn_ended")
+
+    live = state["transcript"]
+    for name, data in events:
+        if name == "state":
+            live = data["transcript"]
+        else:
+            apply_event(live, name, data)
+    reloaded = (await web.client.get(f"/api/conversations/{thread_id}")).json()
+    assert live == reloaded
+    assert [(t["question"], t.get("stopped")) for t in reloaded["turns"]] == [("Hi", "Interrupted.")]
 
 
 async def test_stop_is_refused_when_no_turn_runs(serve):

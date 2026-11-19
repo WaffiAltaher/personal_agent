@@ -12,7 +12,10 @@ puts it on every watching queue in the same step (no ``await`` between), so a ta
 mid-turn gets the current ``state`` and then exactly the events after it.
 
 Events (name: data):
-- ``state``: ``{status, transcript}`` (first on every stream; ``transcript`` as GET /conversations/{id})
+- ``state``: ``{status, transcript}`` (first on every stream; ``transcript`` as GET /conversations/{id});
+  also sent mid-stream by a Stop that came before the turn's question reached the thread (while the
+  turn waited on its login refresh, or abandoned a pending Approval), so the tab drops that turn as a
+  reload does
 - ``turn_started``: ``{question}``: a new turn with no steps and no answer (a Follow-up sent while an
   Approval waits: after ``approval_decided`` and the events that end the earlier turn)
 - ``step_started``: ``{step}``: a tool call the model made (``result`` null)
@@ -31,6 +34,7 @@ passes (``add_tools``) rebuild the graph for later turns, and a turn already run
 """
 
 import asyncio
+import copy
 import logging
 from dataclasses import dataclass, field
 
@@ -60,7 +64,10 @@ class TurnRefused(Exception):
 def apply_event(conversation: dict, name: str, data: dict) -> None:
     """Patch a transcript with one event, as the React app does."""
     turns = conversation["turns"]
-    if name == "turn_started":
+    if name == "state":
+        conversation.clear()
+        conversation.update(copy.deepcopy(data["transcript"]))
+    elif name == "turn_started":
         turns.append({"question": data["question"], "steps": [], "answer": None})
         conversation["pending"] = None
     elif name == "step_started":
@@ -267,6 +274,7 @@ class Turns:
             # As Ctrl-C: tool calls the cancel left open are answered, so the thread takes the next question.
             await close_interrupted_turn(self.graph, self._config(thread))
             await self._publish_closed_steps(thread)
+            await self._publish_unsaved_turn_dropped(thread)
             outcome, message = "cancelled", STOPPED_BY_OWNER
         except Exception as exc:
             logger.exception("Web turn failed on thread %s", thread.thread_id)
@@ -292,6 +300,13 @@ class Turns:
         for step in list(thread.transcript["turns"][-1]["steps"]):
             if step["result"] is None and step["id"] in results:
                 thread.publish("step_finished", {"step": tool_step(step, results[step["id"]])})
+
+    async def _publish_unsaved_turn_dropped(self, thread: ThreadState) -> None:
+        """After a Stop that came before the turn's question reached the thread, a ``state`` with
+        the transcript as a reload shows it, so the stop lands on the turn the thread ends with."""
+        rebuilt, _ = await self._checkpoint_transcript(thread)
+        if len(rebuilt["turns"]) != len(thread.transcript["turns"]):
+            thread.publish("state", {"status": thread.status, "transcript": rebuilt})
 
     def _publish_chunk(self, thread: ThreadState, chunk: dict) -> None:
         for node, update in chunk.items():
