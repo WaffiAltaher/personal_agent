@@ -360,6 +360,29 @@ async def test_a_known_failure_ends_the_turn_with_the_clis_message(serve, failur
     assert type(failure).__name__ in run.error_message
 
 
+async def test_a_failed_turns_message_is_kept_across_reloads_and_never_reaches_the_model(serve):
+    gate = asyncio.Event()
+    web = await serve({"Hi": [Wait(gate, GraphRecursionError("Recursion limit of 40 reached")), ai("Recovered.")]})
+    thread_id = await web.start("Hi")
+    async with web.events(thread_id) as stream:
+        await stream.next()
+        gate.set()
+        await stream.until("turn_ended")
+
+    # A refresh or a new tab rebuilds the transcript from the checkpoint: the message is still there.
+    assert (await web.client.get(f"/api/conversations/{thread_id}")).json()["turns"][0]["stopped"] == STEP_LIMIT_STOPPED
+    async with web.events(thread_id) as stream:
+        _, state = await stream.next()
+        assert state["transcript"]["turns"][0]["stopped"] == STEP_LIMIT_STOPPED
+        assert (await web.ask(thread_id, "Again")).status_code == 202
+        await stream.until("turn_ended")
+
+    turns = (await web.client.get(f"/api/conversations/{thread_id}")).json()["turns"]
+    assert turns[0]["stopped"] == STEP_LIMIT_STOPPED and "stopped" not in turns[1]
+    thread = (await web.app.state.graph.aget_state({"configurable": {"thread_id": thread_id}})).values["messages"]
+    assert not any(STEP_LIMIT_STOPPED in str(m.content) for m in thread)
+
+
 async def test_an_unexpected_error_ends_the_turn_and_the_server_keeps_serving(serve):
     gate = asyncio.Event()
     web = await serve({"Hi": [Wait(gate, KeyError("boom")), ai("Recovered.")]})

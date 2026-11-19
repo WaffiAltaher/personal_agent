@@ -25,7 +25,7 @@ from pydantic import BaseModel
 
 from agent.config import PROJECT_ROOT
 from agent.web.auth import SESSION_COOKIE, SESSION_MAX_AGE_S, Auth, require_session
-from agent.web.conversations import list_conversations, transcript
+from agent.web.conversations import list_conversations
 from agent.web.logins import Logins
 from agent.web.request_checks import RequestChecks
 from agent.web.turns import TurnRefused, Turns
@@ -132,11 +132,10 @@ def create_app(
 
     @api.get("/conversations/{thread_id}")
     async def conversation(thread_id: str, request: Request):
-        state = await request.app.state.graph.aget_state({"configurable": {"thread_id": thread_id}})
-        messages = state.values.get("messages", [])
-        if not messages:
+        found = await request.app.state.turns.transcript(thread_id)
+        if found is None:
             return JSONResponse({"detail": "No such Conversation."}, status_code=404)
-        return transcript(thread_id, messages, state.interrupts)
+        return found
 
     @api.post("/conversations", status_code=201)
     async def start_conversation(body: QuestionRequest, request: Request):

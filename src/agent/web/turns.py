@@ -93,9 +93,15 @@ class ThreadState:
     callbacks: list | None = None  # one Langfuse handler per Conversation, made on its first web turn
     streaming: bool = False  # the running turn is in the driver (Stop may cancel it)
     stopping: bool = False  # Stop cancelled the running turn
+    # Each failed or stopped turn's message by turn index, merged back whenever the transcript is
+    # rebuilt from the checkpoint, for the server's lifetime. Never in the graph's messages: the
+    # model must not see it.
+    stopped: dict[int, str] = field(default_factory=dict)
 
     def publish(self, name: str, data: dict) -> None:
         apply_event(self.transcript, name, data)
+        if name == "turn_ended" and data.get("message") and self.transcript["turns"]:
+            self.stopped[len(self.transcript["turns"]) - 1] = data["message"]
         for queue in self.subscribers:
             queue.put_nowait((name, data))
 
@@ -128,11 +134,25 @@ class Turns:
     def _thread(self, thread_id: str) -> ThreadState:
         return self.threads.setdefault(thread_id, ThreadState(thread_id))
 
+    async def _checkpoint_transcript(self, thread: ThreadState) -> tuple[dict, bool]:
+        """The transcript as the checkpoint has it, with the messages of turns that failed or were
+        stopped on this server, and whether an Approval waits."""
+        state = await self.graph.aget_state(self._config(thread))
+        rebuilt = transcript(thread.thread_id, state.values.get("messages", []), state.interrupts)
+        for at, message in thread.stopped.items():
+            if at < len(rebuilt["turns"]):
+                rebuilt["turns"][at]["stopped"] = message
+        return rebuilt, bool(state.interrupts)
+
     async def _reload(self, thread: ThreadState) -> None:
         """Rebuild the transcript and status from the checkpoint (the CLI may have moved it on)."""
-        state = await self.graph.aget_state(self._config(thread))
-        thread.transcript = transcript(thread.thread_id, state.values.get("messages", []), state.interrupts)
-        thread.status = AWAITING_APPROVAL if state.interrupts else IDLE
+        thread.transcript, waiting = await self._checkpoint_transcript(thread)
+        thread.status = AWAITING_APPROVAL if waiting else IDLE
+
+    async def transcript(self, thread_id: str) -> dict | None:
+        """The thread's transcript as a reload shows it (GET /conversations/{id}); None if it has no turn."""
+        rebuilt, _ = await self._checkpoint_transcript(self.threads.get(thread_id) or ThreadState(thread_id))
+        return rebuilt if rebuilt["turns"] else None
 
     def _config(self, thread: ThreadState) -> dict:
         return {
