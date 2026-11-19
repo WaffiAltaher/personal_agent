@@ -140,20 +140,23 @@ def _display_interrupt(interrupt_payload: dict) -> None:
     print(interrupt_payload.get("actions", ""))
     print()
     print(interrupt_payload.get("instructions", "Type 'approve' or 'reject'."))
+    print("Or type a follow-up question: it rejects these actions and is answered instead.")
     print("=" * 60)
 
 
 def _prompt_decision() -> str:
-    """Prompt the user until they type 'approve' or 'reject'."""
+    """Prompt until the owner types 'approve' or 'reject', or a Follow-up (more than one word), which is returned as typed."""
     while True:
         try:
-            decision = input("Your decision: ").strip().lower()
+            line = _read_line("Your decision: ").strip()
         except (EOFError, KeyboardInterrupt):
             print("\nAborted.")
             sys.exit(0)
-        if decision in ("approve", "reject"):
-            return decision
-        print("Please type 'approve' or 'reject'.")
+        if line.lower() in ("approve", "reject"):
+            return line.lower()
+        if len(line.split()) > 1:
+            return line
+        print("Please type 'approve' or 'reject', or ask a follow-up question.")
 
 
 async def main():
@@ -263,6 +266,10 @@ async def main():
                                 _display_interrupt(interrupt_obj.value)
 
                             decision = _prompt_decision()
+                            if decision not in ("approve", "reject"):
+                                # A Follow-up rejects the pending Write actions; the loop answers it as the next turn.
+                                first.append(decision)
+                                break
                             print(f"\nResuming with: {decision}\n")
 
                             result = await run_conversation(
@@ -271,6 +278,9 @@ async def main():
                                 tools=tools,
                                 resume_decision=decision,
                             )
+
+                        if first:
+                            continue
 
                         last = result["messages"][-1]
                         print(_stringify_content(last.content))

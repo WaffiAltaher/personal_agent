@@ -88,7 +88,7 @@ async def test_at_exit_one_run_log_entry_covers_the_whole_conversation(cli_run, 
             AIMessage(content="Mailed Ann.", usage_metadata=_usage(1_000_000)),
         ],
         "Is Monday free?",
-        lines=["Mail Ann about it."],
+        lines=["Mail Ann about it.", "approve"],
     )
 
     [run] = seen["logged"]
@@ -106,3 +106,63 @@ async def test_a_fixture_world_conversation_writes_no_run_log(cli_run):
     await start(["Hello.", "Hello again."], "--fixtures", "hi", lines=["again"])
 
     assert seen["logged"] == []
+
+
+@pytest.mark.parametrize("answer", ["approve", " APPROVE "])
+@pytest.mark.asyncio
+async def test_approve_at_the_approval_prompt_runs_the_write_action(cli_run, capsys, answer):
+    seen, start = cli_run
+    await start([mail("ann", "c1"), "Mailed Ann."], "--fixtures", lines=["Mail Ann.", answer])
+
+    assert seen["ran"] == ["ann"]
+    assert "Mailed Ann." in capsys.readouterr().out
+    assert seen["prompts"] == ["> ", "Your decision: ", "> "]
+
+
+@pytest.mark.asyncio
+async def test_reject_at_the_approval_prompt_runs_nothing(cli_run):
+    seen, start = cli_run
+    await start([mail("ann", "c1"), "Not mailed."], "--fixtures", lines=["Mail Ann.", "Reject"])
+
+    assert seen["ran"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_follow_up_at_the_approval_prompt_rejects_and_is_answered(cli_run, capsys):
+    seen, start = cli_run
+    await start(
+        [mail("ann", "c1"), "Not mailed.", "Monday is free."],
+        "--fixtures",
+        lines=["Mail Ann.", "Actually, is Monday free?"],
+    )
+
+    assert seen["ran"] == []
+    assert "Monday is free." in capsys.readouterr().out
+    assert seen["prompts"] == ["> ", "Your decision: ", "> "]
+
+
+@pytest.mark.asyncio
+async def test_a_single_unrecognised_word_asks_again_and_rejects_nothing(cli_run, capsys):
+    seen, start = cli_run
+    await start([mail("ann", "c1"), "Mailed Ann."], "--fixtures", lines=["Mail Ann.", "aprove", "approve"])
+
+    assert seen["ran"] == ["ann"]
+    assert seen["prompts"] == ["> ", "Your decision: ", "Your decision: ", "> "]
+    assert "Please type 'approve' or 'reject'" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_the_approval_prompt_says_a_follow_up_question_rejects(cli_run, capsys):
+    seen, start = cli_run
+    await start([mail("ann", "c1"), "Mailed Ann."], "--fixtures", lines=["Mail Ann.", "approve"])
+
+    assert "follow-up question: it rejects" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_a_moved_on_approval_is_logged_as_rejected(cli_run):
+    seen, start = cli_run
+    await start([mail("ann", "c1"), "Not mailed.", "Monday is free."], "Mail Ann.", lines=["Is Monday free?"])
+
+    [run] = seen["logged"]
+    assert run.outcome == "rejected"
