@@ -88,8 +88,8 @@ async def test_a_resumed_conversations_run_log_entry_covers_every_session(cli_ru
     thread_id = _conversation_id(capsys.readouterr().out)
     await start(["Tuesday too."], "--resume", thread_id, "And Tuesday?")
 
-    first, second = seen["logged"]
-    assert first.thread_id == second.thread_id == thread_id
+    [second] = seen["logged"]  # one entry for the thread: the second session replaced the first
+    assert second.thread_id == thread_id
     assert second.user_input == "Is Monday free?\nAnd Tuesday?"
     assert second.final_output == "Monday is free.\nTuesday too."
 
@@ -105,7 +105,7 @@ async def test_a_resumed_conversations_run_log_entry_keeps_an_earlier_sessions_f
     thread_id = _conversation_id(capsys.readouterr().out)
     await start(["Tuesday is free."], "--resume", thread_id, "And Tuesday?")
 
-    first, second = seen["logged"]
+    [second] = seen["logged"]
     assert second.outcome == "error"
     assert second.error_message == "ClaudeCodeError: usage limit reached"
 

@@ -4,7 +4,8 @@ cli.py — Entry point with Langfuse tracing wired in.
 ``python -m agent.cli [--fixtures] [--debug] [--resume [<id>]] ["first question"]`` starts a session (one CLI process): the agent
 starts once, answers the question if one was given, then reads Follow-ups at a ``> `` prompt,
 all on one Conversation (one thread, one Langfuse trace). An empty line does nothing; ``exit``,
-``quit`` or Ctrl-D ends the session. At exit the whole Conversation is one run log entry.
+``quit`` or Ctrl-D ends the session. The whole Conversation is one run log entry, written after
+every turn (and once more at exit), so it exists while the session is still open.
 ``--resume <id>`` continues that Conversation from an earlier session; a bare ``--resume`` the
 most recent one. Real and ``--fixtures`` runs keep their Conversations in separate checkpoint files.
 Ctrl-C while a turn runs cancels that turn and returns to ``> ``; at a prompt it clears the line;
@@ -318,7 +319,13 @@ async def main():
     memory_ctx = fixtures_semantic_memory() if fixtures else nullcontext()
     run_error: str | None = None
     questions: list[str] = []
-    known_failures: list[str] = []
+    unlogged_failures: list[str] = []  # known failures not yet in the entry; it keeps the ones it holds
+
+    async def log_turn() -> None:
+        # A Fixture-world run is about seeded stand-in data, not the owner's: keep it out of real memory.
+        if not fixtures:
+            await write_run_log(db_path, thread_id, error="; ".join(unlogged_failures) or None, questions=questions)
+            unlogged_failures.clear()
     global _session, _ending
     _session, _ending = asyncio.current_task(), False
     previous_sigint = signal.signal(signal.SIGINT, _on_sigint)
@@ -407,17 +414,21 @@ async def main():
                             # Ctrl-C: tool calls the cancel left open get answered before the next question.
                             await close_interrupted_turn(agent_graph, config)
                             print("\nInterrupted.")
+                            await log_turn()
                             continue
                         except ClaudeCodeError as exc:
                             # A Claude Code call that couldn't produce a turn already says what to do (ADR-016).
                             print(f"Stopped: {exc}")
-                            known_failures.append(f"{type(exc).__name__}: {exc}")
+                            unlogged_failures.append(f"{type(exc).__name__}: {exc}")
+                            await log_turn()
                             continue
                         except GraphRecursionError as exc:
                             print(STEP_LIMIT_STOPPED)
-                            known_failures.append(f"{type(exc).__name__}: {exc}")
+                            unlogged_failures.append(f"{type(exc).__name__}: {exc}")
+                            await log_turn()
                             continue
 
+                        await log_turn()
                         if "__interrupt__" in turn:
                             if decision.kind == "end":
                                 break  # Ctrl-D at the Approval prompt ends the session
@@ -445,17 +456,10 @@ async def main():
     finally:
         if _ending:
             asyncio.current_task().uncancel()  # Ctrl-C's cancel must not stop this exit path
-        # A Fixture-world run is about seeded stand-in data, not the owner's: keep it out of real memory.
-        # The whole Conversation is one run log entry, built from the thread, so a cancelled, failed or
-        # crashed last turn counts too; a session with no question leaves none. Every exit writes it here.
-        if not fixtures and questions:
-            log_run_to_memory(
-                await _conversation_so_far(db_path, config),
-                "\n".join(questions),
-                model_name=settings.model_name,
-                error="; ".join([*known_failures, *([run_error] if run_error else [])]) or None,
-                thread_id=thread_id,
-            )
+        # The entry is written after every turn; this last pass adds a crash or a cancel outside a turn.
+        if run_error:
+            unlogged_failures.append(run_error)
+        await log_turn()
         signal.signal(signal.SIGINT, previous_sigint)
         _session = None
         print(f"Conversation {thread_id}")
@@ -471,6 +475,21 @@ async def _conversation_so_far(db_path: str, config: dict) -> dict:
         return {"messages": [], **(saved.checkpoint["channel_values"] if saved else {})}
     except Exception:
         return {"messages": []}
+
+
+async def write_run_log(db_path: str, thread_id: str, *, error: str | None = None,
+                        questions: list[str] = ()) -> None:
+    """Write the Conversation's run log entry from its thread in the checkpoint file at ``db_path``,
+    replacing the thread's earlier entry. The questions are the thread's HumanMessages; ``questions``
+    stands in only while the thread has none (a first turn that failed before checkpointing). ``error``
+    is a failure not yet in the entry: the entry keeps the ones it already holds. Writes nothing for a
+    thread with no question and no error."""
+    result = await _conversation_so_far(db_path, {"configurable": {"thread_id": thread_id}})
+    asked = [_stringify_content(m.content) for m in result["messages"] if isinstance(m, HumanMessage)]
+    asked = asked or list(questions)
+    if not asked and not error:
+        return
+    log_run_to_memory(result, "\n".join(asked), model_name=settings.model_name, error=error, thread_id=thread_id)
 
 
 if __name__ == "__main__":
