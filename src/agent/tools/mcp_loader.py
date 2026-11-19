@@ -198,6 +198,23 @@ async def _load_server(server: McpServer) -> list[BaseTool]:
     return classified
 
 
+async def load_mcp_server(server: McpServer) -> list[BaseTool]:
+    """One configured server's classified tools, as at startup. Raises LoginRequired when its login
+    is missing or expired, or the server's own failure when it fails to start."""
+    return await _load_server(server)
+
+
+async def check_mcp_login(server: McpServer) -> str | None:
+    """Why a configured server's login is missing or expired, or None when it is fine (or it has no
+    login, or no check tool to ask)."""
+    if server.login is None:
+        return None
+    async with MultiServerMCPClient({server.name: server.connection}).session(server.name) as session:
+        if not any(tool.name == server.login.check_tool for tool in await _list_tools(session)):
+            return None
+        return await _login_problem(session, server.login)
+
+
 async def load_mcp_tools(servers: list[McpServer]) -> tuple[list[BaseTool], list[str]]:
     """Load every server's tools concurrently. Returns (tools, notices about unavailable servers)."""
 

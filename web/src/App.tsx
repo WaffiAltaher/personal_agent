@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { ApiError, loggedIn, login, logout } from "./api";
 import { ConversationList, NewConversation, OpenConversation } from "./Conversations";
+import { LoginStrip, useLoginStatus } from "./LoginStrip";
 
 type View = "loading" | "login" | "shell";
 
@@ -57,6 +58,7 @@ function Shell({ onLoggedOut }: { onLoggedOut: () => void }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [listKey, setListKey] = useState(0);
   const refreshList = () => setListKey((key) => key + 1);
+  const [logins, setLogins, refreshLogins] = useLoginStatus();
 
   async function signOut() {
     try {
@@ -70,6 +72,7 @@ function Shell({ onLoggedOut }: { onLoggedOut: () => void }) {
     <div className="shell">
       <header>
         <span>Personal agent</span>
+        <LoginStrip logins={logins} />
         <button onClick={signOut}>Log out</button>
       </header>
       <div className="body">
@@ -79,7 +82,8 @@ function Shell({ onLoggedOut }: { onLoggedOut: () => void }) {
         </nav>
         <main className="conversation">
           {selected
-            ? <OpenConversation key={selected} threadId={selected} onTurnEnded={refreshList} />
+            ? <OpenConversation key={selected} threadId={selected} onLoginStatus={setLogins}
+                                onTurnEnded={() => { refreshList(); refreshLogins(); }} />
             : <NewConversation onStarted={(threadId) => { setSelected(threadId); refreshList(); }} />}
         </main>
       </div>
