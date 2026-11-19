@@ -34,6 +34,12 @@ python -m agent.evals compare a.json b.json
 uv run pytest
 uv run pytest tests/test_tools.py -v
 uv run pytest tests/test_tools.py::test_read_file -v
+
+# Browser journeys (tests/web/test_web_browser.py): Playwright drives web/dist on the Fixture tools and a stand-in model, no live calls.
+# They need the built app and a browser, and are skipped (naming the install command) without a browser.
+cd web && npm run build && cd ..
+uv run playwright install chromium
+uv run pytest tests/web/test_web_browser.py
 ```
 
 ## Architecture
