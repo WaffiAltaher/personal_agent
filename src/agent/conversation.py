@@ -4,14 +4,19 @@ from __future__ import annotations
 
 from datetime import date
 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.types import Command
 
-from agent.graph import new_runtime_clock_iso
+from agent.graph import _answered_tool_call_ids, _latest_ai_tool_batch, new_runtime_clock_iso
 
 MOVED_ON_REJECTION = (
     "The owner moved on without approving. Do not retry this action. Acknowledge and continue."
+)
+
+INTERRUPTED_BY_OWNER = (
+    "Interrupted by the owner (Ctrl-C) before this finished; its outcome is unknown. "
+    "Do not retry it unless the owner asks."
 )
 
 
@@ -31,6 +36,28 @@ def _abandon_resume_command() -> Command:
 async def _abandon_pending_approval(graph, config) -> None:
     """Reject pending Write actions so reads can finish before a new user message."""
     await graph.ainvoke(_abandon_resume_command(), config=config)
+
+
+async def close_interrupted_turn(graph, config) -> None:
+    """After a turn was cancelled mid-graph, answer each open tool call "interrupted by the owner"
+    so the thread never holds an unanswered tool call. A pending Approval is left as it is:
+    the next user message abandons it (run_conversation)."""
+    state = await graph.aget_state(config)
+    if state.interrupts:
+        return
+    messages = state.values.get("messages", [])
+    last_ai = _latest_ai_tool_batch(messages)
+    if last_ai is None:
+        return
+    answered = _answered_tool_call_ids(messages)
+    closing = [
+        ToolMessage(content=INTERRUPTED_BY_OWNER, tool_call_id=tc["id"], name=tc["name"], status="error")
+        for tc in last_ai.tool_calls
+        if tc["id"] not in answered
+    ]
+    if closing:
+        # As human_review: it routes by Command, so the update leaves no next step pending.
+        await graph.aupdate_state(config, {"messages": closing}, as_node="human_review")
 
 
 async def run_conversation(
