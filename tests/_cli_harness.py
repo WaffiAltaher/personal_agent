@@ -15,6 +15,7 @@ from agent.tools.classification import read_tool, write_action
 
 def type_lines(monkeypatch, lines):
     """Stand in for the owner at the `> ` prompt: each read returns the next line, then Ctrl-D (EOF).
+    A line that is an exception (KeyboardInterrupt for Ctrl-C) is raised instead.
 
     Returns the prompts the CLI showed, in order."""
     remaining = list(lines)
@@ -24,7 +25,10 @@ def type_lines(monkeypatch, lines):
         prompts.append(prompt)
         if not remaining:
             raise EOFError
-        return remaining.pop(0)
+        line = remaining.pop(0)
+        if isinstance(line, BaseException):
+            raise line
+        return line
 
     monkeypatch.setattr(cli, "_read_line", read_line)
     return prompts
@@ -41,7 +45,8 @@ class RecordingHandler(BaseCallbackHandler):
 
 @pytest.fixture
 def cli_run(monkeypatch, scripted_model, startup_login_checks_pass):
-    seen = {"ran": [], "flushed": 0, "handler": RecordingHandler(), "configs": [], "logged": []}
+    seen = {"ran": [], "flushed": 0, "handler": RecordingHandler(), "configs": [], "logged": [],
+            "tools": []}  # a test adds its own tools here before start()
 
     @write_action
     @tool("send_mail")
@@ -57,7 +62,7 @@ def cli_run(monkeypatch, scripted_model, startup_login_checks_pass):
         return "nothing found"
 
     async def load_all_tools(*, fixtures=False):
-        return [send_mail, lookup], []
+        return [send_mail, lookup, *seen["tools"]], []
 
     @asynccontextmanager
     async def get_checkpointer():
