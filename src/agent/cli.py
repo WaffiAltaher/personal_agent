@@ -1,13 +1,14 @@
 """
 cli.py — Entry point with Langfuse tracing wired in.
 
-``python -m agent.cli [--fixtures] [--debug] [--resume [<id>]] ["first question"]`` starts a session: the agent
+``python -m agent.cli [--fixtures] [--debug] [--resume [<id>]] ["first question"]`` starts a session (one CLI process): the agent
 starts once, answers the question if one was given, then reads Follow-ups at a ``> `` prompt,
 all on one Conversation (one thread, one Langfuse trace). An empty line does nothing; ``exit``,
 ``quit`` or Ctrl-D ends the session. At exit the whole Conversation is one run log entry.
 ``--resume <id>`` continues that Conversation from an earlier session; a bare ``--resume`` the
 most recent one. Real and ``--fixtures`` runs keep their Conversations in separate checkpoint files.
-Ctrl-C while a turn runs cancels that turn and returns to ``> ``; at a prompt it clears the line.
+Ctrl-C while a turn runs cancels that turn and returns to ``> ``; at a prompt it clears the line;
+anywhere else (between turns, while a cancelled turn is closed) it ends the session.
 
 Real-mode runs check the Google login before the agent starts. If Gmail or Calendar
 would need a new browser login, startup stops and names ``python -m agent.auth.google``.
@@ -21,6 +22,7 @@ import signal
 import sys
 import uuid
 from contextlib import nullcontext
+from dataclasses import dataclass
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langfuse import propagate_attributes
@@ -106,15 +108,39 @@ def _read_line(prompt: str) -> str:
 
 
 _turn: asyncio.Task | None = None  # the graph call Ctrl-C cancels, while one runs
+_session: asyncio.Task | None = None  # the session Ctrl-C ends, outside a turn and a prompt
+_reading = False  # a prompt is waiting for a line
+_ending = False  # Ctrl-C asked the session to end
 
 
 def _on_sigint(signum, frame) -> None:
-    """Ctrl-C: cancel the running graph call; otherwise interrupt the prompt's read."""
+    """Ctrl-C: cancel the running graph call; at a prompt interrupt its read; anywhere else end
+    the session by cancelling it, so its exit path still runs (raising here could escape it)."""
+    global _ending
     if _turn is not None and not _turn.done():
         _turn.cancel()
         _turn.get_loop().call_soon_threadsafe(lambda: None)  # wake the loop if it is waiting
         return
-    raise KeyboardInterrupt
+    if _reading:
+        raise KeyboardInterrupt
+    if _ending or _session is None:
+        return  # the session is already ending: let it write its run log entry
+    _ending = True
+    _session.cancel()
+    _session.get_loop().call_soon_threadsafe(lambda: None)
+
+
+def _read(prompt: str) -> str:
+    """Read a line at a prompt, where Ctrl-C only clears the line. Ctrl-C that came while no
+    prompt was shown ends the session: the read answers EOF, as Ctrl-D would."""
+    global _reading
+    if _ending:
+        raise EOFError
+    _reading = True
+    try:
+        return _read_line(prompt)
+    finally:
+        _reading = False
 
 
 async def _cancellable(coro):
@@ -201,21 +227,28 @@ def _display_interrupt(interrupt_payload: dict) -> None:
     print("=" * 60)
 
 
-def _prompt_decision() -> str:
-    """Prompt until the owner types 'approve' or 'reject', or a Follow-up (more than one word), which is returned as typed."""
+@dataclass(frozen=True)
+class Decision:
+    """What the owner answered at the Approval prompt."""
+    kind: str  # "approve" | "reject" | "follow-up" | "end" (Ctrl-D: the session ends)
+    follow_up: str = ""
+
+
+def _prompt_decision() -> Decision:
+    """Prompt until the owner types 'approve' or 'reject', or a Follow-up (more than one word), or Ctrl-D."""
     while True:
         try:
-            line = _read_line("Your decision: ").strip()
+            line = _read("Your decision: ").strip()
         except KeyboardInterrupt:
             print()  # Ctrl-C only clears the line
             continue
         except EOFError:
             print("\nAborted.")
-            sys.exit(0)
+            return Decision("end")
         if line.lower() in ("approve", "reject"):
-            return line.lower()
+            return Decision(line.lower())
         if len(line.split()) > 1:
-            return line
+            return Decision("follow-up", line)
         print("Please type 'approve' or 'reject', or ask a follow-up question.")
 
 
@@ -283,10 +316,11 @@ async def main():
     # Against the Fixture world, "today" is its pinned date, for the model and the stand-ins alike.
     today = clock.pin_today() if fixtures else None
     memory_ctx = fixtures_semantic_memory() if fixtures else nullcontext()
-    result: dict = {"messages": []}
     run_error: str | None = None
     questions: list[str] = []
     known_failures: list[str] = []
+    global _session, _ending
+    _session, _ending = asyncio.current_task(), False
     previous_sigint = signal.signal(signal.SIGINT, _on_sigint)
 
     try:
@@ -304,9 +338,10 @@ async def main():
                 agent_graph = build_graph(checkpointer, tools, model, today=today)
                 if resume:
                     # The run log entry covers the whole Conversation, earlier sessions included.
-                    result = {"messages": [], **(await agent_graph.aget_state(config)).values}
                     questions = [
-                        _stringify_content(m.content) for m in result["messages"] if isinstance(m, HumanMessage)
+                        _stringify_content(m.content)
+                        for m in (await agent_graph.aget_state(config)).values.get("messages", [])
+                        if isinstance(m, HumanMessage)
                     ]
 
                 with propagate_attributes(
@@ -314,13 +349,14 @@ async def main():
                     trace_name="cli-run",
                     metadata={"prompt-version": settings.prompt_version},
                 ):
-                    first = [user_input] if user_input is not None else []
+                    pending_questions = [user_input] if user_input is not None else []
+                    moved_on = False  # the last turn left its Approval for a Follow-up
                     while True:
-                        if first:
-                            line = first.pop()
+                        if pending_questions:
+                            line = pending_questions.pop()
                         else:
                             try:
-                                line = _read_line("> ")
+                                line = _read("> ")
                             except EOFError:
                                 print()
                                 break
@@ -333,7 +369,11 @@ async def main():
                         if question.lower() in EXIT_WORDS:
                             break
                         questions.append(question)
-                        turn_start = len(result["messages"])
+                        # --debug shows what the thread gained since this turn started; a turn that
+                        # moved on from its Approval is shown with the Follow-up that answered it.
+                        if not moved_on:
+                            turn_start = len((await agent_graph.aget_state(config)).values.get("messages", []))
+                        moved_on = False
 
                         # A known failure ends the turn, not the session: the thread still ends on
                         # answered messages (these are raised before a node writes anything).
@@ -351,17 +391,15 @@ async def main():
                                     _display_interrupt(interrupt_obj.value)
 
                                 decision = _prompt_decision()
-                                if decision not in ("approve", "reject"):
-                                    # A Follow-up rejects the pending Write actions; the loop answers it as the next turn.
-                                    first.append(decision)
+                                if decision.kind in ("follow-up", "end"):
                                     break
-                                print(f"\nResuming with: {decision}\n")
+                                print(f"\nResuming with: {decision.kind}\n")
 
                                 turn = await _cancellable(run_conversation(
                                     agent_graph,
                                     config,
                                     tools=tools,
-                                    resume_decision=decision,
+                                    resume_decision=decision.kind,
                                 ))
                         except asyncio.CancelledError:
                             if asyncio.current_task().cancelling():
@@ -379,46 +417,60 @@ async def main():
                             print(STEP_LIMIT_STOPPED)
                             known_failures.append(f"{type(exc).__name__}: {exc}")
                             continue
-                        result = turn
 
-                        if first:
+                        if "__interrupt__" in turn:
+                            if decision.kind == "end":
+                                break  # Ctrl-D at the Approval prompt ends the session
+                            # A Follow-up rejects the pending Write actions; the loop answers it as the next turn.
+                            pending_questions.append(decision.follow_up)
+                            moved_on = True
                             continue
 
-                        last = result["messages"][-1]
+                        last = turn["messages"][-1]
                         print(_stringify_content(last.content))
 
                         if debug:
                             # Only what this turn added: earlier turns were shown after their own turn.
-                            _display_debug_trace({**result, "messages": result["messages"][turn_start:]})
-
-        # A Fixture-world run is about seeded stand-in data, not the owner's: keep it out of real memory.
-        # The whole Conversation is one run log entry; a session with no question leaves none.
-        if not fixtures and questions:
-            log_run_to_memory(
-                result,
-                "\n".join(questions),
-                model_name=settings.model_name,
-                error="; ".join(known_failures) or None,
-                thread_id=thread_id,
-            )
+                            _display_debug_trace({**turn, "messages": turn["messages"][turn_start:]})
+    except asyncio.CancelledError:
+        if not _ending:
+            raise
+        print("\nInterrupted.")  # Ctrl-C outside a turn ended the session
     except Exception as exc:
         run_error = f"{type(exc).__name__}: {exc}"
-        if not fixtures and questions:
-            log_run_to_memory(
-                result,
-                "\n".join(questions),
-                model_name=settings.model_name,
-                error=run_error,
-                thread_id=thread_id,
-            )
         # The session ends: name the command that resumes the Conversation, in the same world.
         resume_cmd = f"python -m agent.cli {'--fixtures ' if fixtures else ''}--resume {thread_id}"
-        print(f"Session ended by an error. Resume it with: {resume_cmd}")
+        print(f"Conversation ended by an error. Resume it with: {resume_cmd}")
         raise
     finally:
+        if _ending:
+            asyncio.current_task().uncancel()  # Ctrl-C's cancel must not stop this exit path
+        # A Fixture-world run is about seeded stand-in data, not the owner's: keep it out of real memory.
+        # The whole Conversation is one run log entry, built from the thread, so a cancelled, failed or
+        # crashed last turn counts too; a session with no question leaves none. Every exit writes it here.
+        if not fixtures and questions:
+            log_run_to_memory(
+                await _conversation_so_far(db_path, config),
+                "\n".join(questions),
+                model_name=settings.model_name,
+                error="; ".join([*known_failures, *([run_error] if run_error else [])]) or None,
+                thread_id=thread_id,
+            )
         signal.signal(signal.SIGINT, previous_sigint)
+        _session = None
         print(f"Conversation {thread_id}")
         flush_traces()
+
+
+async def _conversation_so_far(db_path: str, config: dict) -> dict:
+    """The Conversation's thread as last checkpointed, for its run log entry. No messages if it
+    can't be read: the error that ended the session is the one to show."""
+    try:
+        async with get_checkpointer(db_path) as checkpointer:
+            saved = await checkpointer.aget_tuple(config)
+        return {"messages": [], **(saved.checkpoint["channel_values"] if saved else {})}
+    except Exception:
+        return {"messages": []}
 
 
 if __name__ == "__main__":
@@ -430,3 +482,6 @@ if __name__ == "__main__":
     except ModelConfigError as exc:
         print(f"Cannot start: {exc}")
         sys.exit(1)
+    except KeyboardInterrupt:
+        print()  # Ctrl-C before the session could start: nothing to log, no traceback
+        sys.exit(130)

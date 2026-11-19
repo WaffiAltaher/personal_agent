@@ -50,5 +50,5 @@ async def test_cli_logs_error_outcome_and_flushes_traces(monkeypatch, scripted_m
     out = capsys.readouterr().out
     conversation_id = out.split("Conversation ", 1)[1].split()[0]
     resume_cmd = f"python -m agent.cli {' '.join([*flags, '--resume'])} {conversation_id}"
-    assert f"Session ended by an error. Resume it with: {resume_cmd}" in out
+    assert f"Conversation ended by an error. Resume it with: {resume_cmd}" in out
     assert flushed["n"] == 1

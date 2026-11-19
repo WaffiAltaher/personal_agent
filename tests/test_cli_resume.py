@@ -3,6 +3,8 @@ import pytest
 from _cli_harness import cli_run  # noqa: F401
 from langchain_core.messages import AIMessage
 
+from agent.claude_code_model import ClaudeCodeError
+
 
 def _conversation_id(out):
     return next(line for line in out.splitlines() if line.startswith("Conversation ")).removeprefix("Conversation ")
@@ -90,6 +92,22 @@ async def test_a_resumed_conversations_run_log_entry_covers_every_session(cli_ru
     assert first.thread_id == second.thread_id == thread_id
     assert second.user_input == "Is Monday free?\nAnd Tuesday?"
     assert second.final_output == "Monday is free.\nTuesday too."
+
+
+@pytest.mark.asyncio
+async def test_a_resumed_conversations_run_log_entry_keeps_an_earlier_sessions_failure(cli_run, capsys):
+    seen, start = cli_run
+
+    def stopped(messages):
+        raise ClaudeCodeError("usage limit reached")
+
+    await start([stopped], "Is Monday free?")
+    thread_id = _conversation_id(capsys.readouterr().out)
+    await start(["Tuesday is free."], "--resume", thread_id, "And Tuesday?")
+
+    first, second = seen["logged"]
+    assert second.outcome == "error"
+    assert second.error_message == "ClaudeCodeError: usage limit reached"
 
 
 def test_the_usage_line_mentions_resume(capsys):

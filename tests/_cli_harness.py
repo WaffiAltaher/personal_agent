@@ -8,6 +8,7 @@ from langchain_core.tools import tool
 
 import agent.cli as cli
 import agent.graph as graph
+import agent.memory.episodic as episodic
 from agent.tools.classification import read_tool, write_action
 
 
@@ -65,9 +66,13 @@ def cli_run(monkeypatch, tmp_path, scripted_model, startup_login_checks_pass):
     async def load_all_tools(*, fixtures=False):
         return [send_mail, lookup, *seen["tools"]], []
 
-    class EpisodicMemory:
+    class EpisodicMemory(episodic.EpisodicMemory):
+        """The real run log in a temp file; `seen["logged"]` gets each entry as it was stored."""
         def log_run(self, run):
-            seen["logged"].append(run)
+            super().log_run(run)
+            seen["logged"].append(next(r for r in self.get_recent_runs(1000) if r.id == run.id))
+
+    memory = EpisodicMemory(str(tmp_path / "memory.db"))
 
     def start(replies, *args, lines=()):
         """Run main() with `args` (default: a question against the Fixture world), then `lines` at `> `."""
@@ -76,7 +81,7 @@ def cli_run(monkeypatch, tmp_path, scripted_model, startup_login_checks_pass):
         monkeypatch.setattr(cli, "get_callback_handler", lambda **kwargs: seen["handler"])
         monkeypatch.setattr(cli, "load_all_tools", load_all_tools)
         monkeypatch.setattr(cli, "get_checkpointer", graph.get_checkpointer)
-        monkeypatch.setattr(graph, "get_episodic_memory", lambda: EpisodicMemory())
+        monkeypatch.setattr(graph, "get_episodic_memory", lambda: memory)
         monkeypatch.setattr(cli, "flush_traces", lambda: seen.__setitem__("flushed", seen["flushed"] + 1))
         seen["prompts"] = type_lines(monkeypatch, lines)
         monkeypatch.setattr(sys, "argv", ["agent.cli", *(args or ("--fixtures", "Mail Ann, then Bob."))])

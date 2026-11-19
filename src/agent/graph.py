@@ -327,11 +327,11 @@ def check_context_budget(state: AgentState) -> dict:
     return _check_context_budget(state, [], None)
 
 
-def _answered_tool_call_ids(messages: list[BaseMessage]) -> set[str]:
+def answered_tool_call_ids(messages: list[BaseMessage]) -> set[str]:
     return {m.tool_call_id for m in messages if isinstance(m, ToolMessage)}
 
 
-def _latest_ai_tool_batch(messages: list[BaseMessage]) -> AIMessage | None:
+def latest_ai_tool_batch(messages: list[BaseMessage]) -> AIMessage | None:
     for message in reversed(messages):
         if isinstance(message, AIMessage) and getattr(message, "tool_calls", None):
             return message
@@ -358,12 +358,12 @@ def pending_approval_tool_calls(
     Only results from before that AIMessage count: an Outbound read proposed alongside the
     first read of the owner's data was written before the model saw that data.
     """
-    last_ai = _latest_ai_tool_batch(messages)
+    last_ai = latest_ai_tool_batch(messages)
     if last_ai is None:
         return []
     earlier = messages[: messages.index(last_ai)]
     gate_outbound = holds_owner_data(earlier, outbound_read_names)
-    answered = _answered_tool_call_ids(messages)
+    answered = answered_tool_call_ids(messages)
     return [
         tc for tc in last_ai.tool_calls
         if tc["id"] not in answered
@@ -621,12 +621,12 @@ def build_graph(
         the next LLM invocation.
         """
         try:
-            last_batch = _latest_ai_tool_batch(state["messages"])
+            last_batch = latest_ai_tool_batch(state["messages"])
             if last_batch is None:
                 return {}
 
             tool_calls = last_batch.tool_calls or []
-            answered = _answered_tool_call_ids(state["messages"])
+            answered = answered_tool_call_ids(state["messages"])
             pending = [tc for tc in tool_calls if tc["id"] not in answered]
             if not pending:
                 return {}
@@ -646,9 +646,9 @@ def build_graph(
         except GraphBubbleUp:
             raise  # interrupt() from a tool must pause the graph, not become an error
         except Exception as exc:
-            last_batch = _latest_ai_tool_batch(state["messages"])
+            last_batch = latest_ai_tool_batch(state["messages"])
             tool_calls = (last_batch.tool_calls or []) if last_batch is not None else []
-            answered = _answered_tool_call_ids(state["messages"])
+            answered = answered_tool_call_ids(state["messages"])
             pending = [tc for tc in tool_calls if tc["id"] not in answered]
 
             logger.exception(

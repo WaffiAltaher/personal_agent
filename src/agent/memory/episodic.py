@@ -139,8 +139,18 @@ class EpisodicMemory:
         self._conn.commit()
 
     def log_run(self, run: RunRecord) -> str:
-        """Insert a new run record, replacing its Conversation's earlier entry. Returns the run_id."""
+        """Insert a new run record, replacing its Conversation's earlier entry. Returns the run_id.
+
+        The replacing entry keeps the errors of the Conversation's earlier sessions: they are not
+        in the thread, so the new record could not know them."""
         if run.thread_id is not None:
+            earlier = self._conn.execute(
+                "SELECT error_message FROM runs WHERE thread_id = ? AND error_message IS NOT NULL",
+                (run.thread_id,),
+            ).fetchone()
+            if earlier is not None:
+                run.error_message = "; ".join(e for e in (earlier[0], run.error_message) if e)
+                run.outcome = "error"
             self._conn.execute("DELETE FROM runs WHERE thread_id = ?", (run.thread_id,))
         self._conn.execute(
             """INSERT INTO runs

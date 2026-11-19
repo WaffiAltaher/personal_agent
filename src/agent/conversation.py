@@ -8,7 +8,7 @@ from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.types import Command
 
-from agent.graph import _answered_tool_call_ids, _latest_ai_tool_batch, new_runtime_clock_iso
+from agent.graph import answered_tool_call_ids, latest_ai_tool_batch, new_runtime_clock_iso
 
 MOVED_ON_REJECTION = (
     "The owner moved on without approving. Do not retry this action. Acknowledge and continue."
@@ -41,15 +41,17 @@ async def _abandon_pending_approval(graph, config) -> None:
 async def close_interrupted_turn(graph, config) -> None:
     """After a turn was cancelled mid-graph, answer each open tool call "interrupted by the owner"
     so the thread never holds an unanswered tool call. A pending Approval is left as it is:
-    the next user message abandons it (run_conversation)."""
+    the next user message abandons it (run_conversation). Safe to run again: calls already
+    answered are left alone, so it also runs before each new user message, in case an earlier
+    run of it was itself interrupted before its write."""
     state = await graph.aget_state(config)
     if state.interrupts:
         return
     messages = state.values.get("messages", [])
-    last_ai = _latest_ai_tool_batch(messages)
+    last_ai = latest_ai_tool_batch(messages)
     if last_ai is None:
         return
-    answered = _answered_tool_call_ids(messages)
+    answered = answered_tool_call_ids(messages)
     closing = [
         ToolMessage(content=INTERRUPTED_BY_OWNER, tool_call_id=tc["id"], name=tc["name"], status="error")
         for tc in last_ai.tool_calls
@@ -85,6 +87,7 @@ async def run_conversation(
         return await graph.ainvoke(Command(resume=resume_decision), config=config)
 
     assert user_message is not None
+    await close_interrupted_turn(graph, config)
     if pending:
         result = await graph.ainvoke(_abandon_resume_command(), config=config)
         while "__interrupt__" in result:

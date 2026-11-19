@@ -6,6 +6,7 @@ from _cli_harness import cli_run, mail  # noqa: F401
 from langchain_core.messages import AIMessage
 
 import agent.cli as cli
+from agent.claude_code_model import ClaudeCodeError
 
 
 @pytest.mark.asyncio
@@ -166,3 +167,63 @@ async def test_a_moved_on_approval_is_logged_as_rejected(cli_run):
 
     [run] = seen["logged"]
     assert run.outcome == "rejected"
+
+
+@pytest.mark.asyncio
+async def test_ctrl_d_at_the_approval_prompt_ends_the_session_and_writes_the_run_log(cli_run, capsys):
+    seen, start = cli_run
+    await start([mail("ann", "c1")], "Mail Ann.")
+
+    assert seen["ran"] == []
+    assert seen["prompts"] == ["Your decision: "]
+    [run] = seen["logged"]
+    assert run.user_input == "Mail Ann."
+    assert run.tools_called == ["send_mail"]
+
+
+def _lookup(call_id, input_tokens):
+    return AIMessage(content="", tool_calls=[{"id": call_id, "name": "lookup", "args": {"query": "x"}}],
+                     usage_metadata=_usage(input_tokens))
+
+
+def _stopped(messages):
+    raise ClaudeCodeError("usage limit reached")
+
+
+@pytest.mark.asyncio
+async def test_the_run_log_entry_counts_a_failed_last_turns_tools_and_tokens(cli_run, monkeypatch):
+    seen, start = cli_run
+    monkeypatch.setattr(cli.settings, "model_name", "anthropic:claude-sonnet-5-5")
+    await start(
+        [AIMessage(content="Monday is free.", usage_metadata=_usage(1_000_000)), _lookup("c1", 1_000_000), _stopped],
+        "Is Monday free?",
+        lines=["Look it up."],
+    )
+
+    [run] = seen["logged"]
+    assert run.tools_called == ["lookup"]
+    assert run.token_usage["total"] == 2_000_000
+    assert run.cost_usd == pytest.approx(4.0)
+    assert run.outcome == "error"
+
+
+@pytest.mark.asyncio
+async def test_debug_does_not_repeat_a_failed_turn(cli_run, capsys):
+    seen, start = cli_run
+    await start([_lookup("c1", 1), _stopped, "Second answer."], "--fixtures", "--debug", "first?",
+                lines=["second?"])
+
+    [shown] = capsys.readouterr().out.split("DEBUG: MESSAGE TRAJECTORY")[1:]
+    assert "second?" in shown and "first?" not in shown
+
+
+@pytest.mark.asyncio
+async def test_debug_shows_a_moved_on_approval_turn_in_full(cli_run, capsys):
+    seen, start = cli_run
+    await start(["Hello.", mail("ann", "c1"), "Not mailed.", "Monday is free."], "--fixtures", "--debug", "Say hi.",
+                lines=["Mail Ann.", "Actually, is Monday free?"])
+
+    first, second = capsys.readouterr().out.split("DEBUG: MESSAGE TRAJECTORY")[1:]
+    assert "Mail Ann." not in first
+    assert "Say hi." not in second
+    assert "Mail Ann." in second and "send_mail" in second and "Actually, is Monday free?" in second
