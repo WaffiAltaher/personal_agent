@@ -71,3 +71,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 .answer table { border-collapse: collapse; }
 .answer th, .answer td { border: 1px solid var(--line); padding: 0.2rem 0.5rem; }
 .approval { border: 2px solid var(--accent); border-radius: 8px; padding: 0.6rem 1rem; }
+.conversations .new { width: 100%; margin-bottom: 0.5rem; }
+.question-box { display: grid; grid-template-columns: 1fr auto; gap: 0.5rem; margin-top: 1rem; }
+.question-box textarea { min-height: 3rem; resize: vertical; font: inherit; }
+.question-box .error { grid-column: 1 / -1; }

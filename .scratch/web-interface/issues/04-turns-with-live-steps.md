@@ -4,18 +4,18 @@
 
 **Blocked by:** 01, 03
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Starting a Conversation creates a new thread and runs its first question; it appears at the top of the list
-- [ ] Tool steps arrive live in order, and the answer arrives whole
-- [ ] A second question on a thread with a running turn is refused
-- [ ] Two Conversations' turns run concurrently (test with a stand-in model that waits)
-- [ ] Two SSE clients on one thread receive the same events; a late client gets the current state first
-- [ ] A `ClaudeCodeError` or the step limit ends the turn with the CLI's message; an unexpected exception ends the turn, not the server
-- [ ] The run log entry is rewritten after each web turn
-- [ ] The Langfuse trace id equals the thread id without dashes
-- [ ] A Conversation started on the web continues with `python -m agent.cli --resume <id>` (test through the CLI harness)
-- [ ] pytest on the Fixture world with the stand-in model; no live calls
+- [x] Starting a Conversation creates a new thread and runs its first question; it appears at the top of the list
+- [x] Tool steps arrive live in order, and the answer arrives whole
+- [x] A second question on a thread with a running turn is refused
+- [x] Two Conversations' turns run concurrently (test with a stand-in model that waits)
+- [x] Two SSE clients on one thread receive the same events; a late client gets the current state first
+- [x] A `ClaudeCodeError` or the step limit ends the turn with the CLI's message; an unexpected exception ends the turn, not the server
+- [x] The run log entry is rewritten after each web turn
+- [x] The Langfuse trace id equals the thread id without dashes
+- [x] A Conversation started on the web continues with `python -m agent.cli --resume <id>` (test through the CLI harness)
+- [x] pytest on the Fixture world with the stand-in model; no live calls
 
 Spec: `../spec.md` (Conversations, Live events, Tracing).
 

@@ -7,13 +7,16 @@ stand-in model. They are kept on ``app.state`` for the endpoints. Every endpoint
 except login depends on ``require_session``; the built React app is served from ``web/dist``.
 """
 
+import asyncio
+import json
 import time
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, FastAPI, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool
@@ -23,6 +26,7 @@ from agent.config import PROJECT_ROOT
 from agent.web.auth import SESSION_COOKIE, SESSION_MAX_AGE_S, Auth, require_session
 from agent.web.conversations import list_conversations, transcript
 from agent.web.request_checks import RequestChecks
+from agent.web.turns import TurnRefused, Turns
 
 WEB_DIST = PROJECT_ROOT / "web" / "dist"
 LOCAL_HOSTS = ("127.0.0.1", "localhost")
@@ -46,6 +50,13 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class QuestionRequest(BaseModel):
+    question: str
+
+
+KEEPALIVE_S = 15.0
+
+
 def create_app(
     *,
     graph,
@@ -64,6 +75,8 @@ def create_app(
     app.state.checkpoint_path = checkpoint_path
     app.state.web = web
     app.state.langfuse_connected = langfuse_connected
+    app.state.turns = Turns(graph=graph, tools=tools, checkpoint_path=checkpoint_path,
+                            langfuse_connected=langfuse_connected)
     # A Secure cookie is never sent back over plain http, which is how localhost is served.
     app.state.auth = Auth(web.password_hash, secure_cookie=web.host not in LOCAL_HOSTS, clock=clock)
     app.add_middleware(RequestChecks, allowed_hosts=web.allowed_hosts)
@@ -107,6 +120,54 @@ def create_app(
         if not messages:
             return JSONResponse({"detail": "No such Conversation."}, status_code=404)
         return transcript(thread_id, messages, state.interrupts)
+
+    @api.post("/conversations", status_code=201)
+    async def start_conversation(body: QuestionRequest, request: Request):
+        """A new Conversation (a new thread, as the CLI makes one) running its first question."""
+        question = body.question.strip()
+        if not question:
+            return JSONResponse({"detail": "Ask a question."}, status_code=422)
+        thread_id = str(uuid.uuid4())
+        await request.app.state.turns.ask(thread_id, question)
+        return {"thread_id": thread_id}
+
+    @api.post("/conversations/{thread_id}/turns", status_code=202)
+    async def follow_up(thread_id: str, body: QuestionRequest, request: Request):
+        """A Follow-up in a Conversation; refused while a turn runs in it."""
+        turns: Turns = request.app.state.turns
+        question = body.question.strip()
+        if not question:
+            return JSONResponse({"detail": "Ask a question."}, status_code=422)
+        if not await turns.exists(thread_id):
+            return JSONResponse({"detail": "No such Conversation."}, status_code=404)
+        try:
+            await turns.ask(thread_id, question)
+        except TurnRefused as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=409)
+        return {"ok": True}
+
+    @api.get("/conversations/{thread_id}/events")
+    async def events(thread_id: str, request: Request):
+        """The Conversation's live events as Server-Sent Events: its current state, then each event."""
+        turns: Turns = request.app.state.turns
+        if not await turns.exists(thread_id):
+            return JSONResponse({"detail": "No such Conversation."}, status_code=404)
+        queue = await turns.subscribe(thread_id)
+
+        async def stream():
+            try:
+                while True:
+                    try:
+                        name, data = await asyncio.wait_for(queue.get(), KEEPALIVE_S)
+                    except TimeoutError:
+                        yield ": keepalive\n\n"
+                        continue
+                    yield f"event: {name}\ndata: {json.dumps(data)}\n\n"
+            finally:
+                turns.unsubscribe(thread_id, queue)
+
+        return StreamingResponse(stream(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     app.include_router(public)
     app.include_router(api)

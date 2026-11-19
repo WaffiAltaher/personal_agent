@@ -194,6 +194,23 @@ def test_a_foreign_or_missing_origin_is_refused_on_event_streams(web):
     assert client.get("/api/session", headers={"Accept": "text/event-stream", "Origin": ORIGIN}).status_code == 200
 
 
+def test_a_same_origin_event_stream_without_origin_is_accepted_by_its_fetch_metadata(web):
+    """A browser may leave Origin off a same-origin EventSource GET, but it always marks the request
+    ``Sec-Fetch-Site: same-origin``, which no other web page can make it send."""
+    client, _ = web()
+    login(client)
+
+    def stream(headers):
+        return client.get("/api/session", headers={"Accept": "text/event-stream", **headers}).status_code
+
+    assert stream({"Sec-Fetch-Site": "same-origin"}) == 200
+    assert stream({"Sec-Fetch-Site": "cross-site"}) == 403
+    assert stream({"Sec-Fetch-Site": "same-site"}) == 403
+    assert stream({"Sec-Fetch-Site": "same-origin", "Origin": "http://evil.example"}) == 403  # a foreign Origin wins
+    # A state-changing request still needs its Origin.
+    assert client.post("/api/logout", headers={"Sec-Fetch-Site": "same-origin"}).status_code == 403
+
+
 def test_plain_reads_need_no_origin(web):
     client, _ = web()
     login(client)

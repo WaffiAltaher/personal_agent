@@ -1,17 +1,20 @@
-import { useEffect, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
-  ConversationRow, PendingApproval, ToolStep, Transcript, Turn, listConversations, openConversation,
+  ApiError, ConversationRow, LiveConversation, LiveEvent, PendingApproval, ToolStep, Transcript, Turn,
+  applyEvent, askFollowUp, conversationEvents, listConversations, startConversation,
 } from "./api";
 
-export function ConversationList({ selected, onSelect }: { selected: string | null; onSelect: (id: string) => void }) {
+// `refreshKey` changes when the list may have changed (a turn started or ended): it loads again.
+export function ConversationList({ selected, onSelect, refreshKey = 0 }:
+                                 { selected: string | null; onSelect: (id: string) => void; refreshKey?: number }) {
   const [rows, setRows] = useState<ConversationRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     listConversations().then(setRows).catch((err) => setError(err.message));
-  }, []);
+  }, [refreshKey]);
 
   if (error) return <p role="alert" className="error">{error}</p>;
   if (rows === null) return null;
@@ -53,6 +56,7 @@ export function TurnView({ turn }: { turn: Turn }) {
       <p className="question">{turn.question}</p>
       {turn.steps.map((step) => <StepView key={step.id} step={step} />)}
       {turn.answer !== null && <div className="answer"><AnswerMarkdown text={turn.answer} /></div>}
+      {turn.stopped && <p role="alert" className="error">{turn.stopped}</p>}
     </section>
   );
 }
@@ -77,17 +81,87 @@ export function TranscriptView({ transcript }: { transcript: Transcript }) {
   );
 }
 
-export function OpenConversation({ threadId }: { threadId: string }) {
-  const [transcript, setTranscript] = useState<Transcript | null>(null);
-  const [error, setError] = useState<string | null>(null);
+// The live state of one Conversation: its event stream applied to the `state` it starts with.
+// `onEvent` sees each event too (the shell refreshes the list when a turn ends).
+export function useConversation(threadId: string, onEvent?: (event: LiveEvent) => void) {
+  const [live, setLive] = useState<LiveConversation | null>(null);
+  const [disconnected, setDisconnected] = useState(false);
 
   useEffect(() => {
-    setTranscript(null);
-    setError(null);
-    openConversation(threadId).then(setTranscript).catch((err) => setError(err.message));
+    setLive(null);
+    setDisconnected(false);
+    return conversationEvents(threadId, (event) => {
+      setDisconnected(false);
+      setLive((current) => applyEvent(current, event));
+      onEvent?.(event);
+    }, () => setDisconnected(true));
+    // onEvent is a callback from the parent: a new one must not reopen the stream.
   }, [threadId]);
 
-  if (error) return <p role="alert" className="error">{error}</p>;
-  if (transcript === null) return null;
-  return <TranscriptView transcript={transcript} />;
+  return { live, disconnected };
+}
+
+// The message box. Disabled while it sends; `disabled` (a turn runs) keeps it closed.
+export function QuestionBox({ placeholder, disabled = false, onAsk }:
+                            { placeholder: string; disabled?: boolean; onAsk: (question: string) => Promise<void> }) {
+  const [question, setQuestion] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    const text = question.trim();
+    if (!text) return;
+    setSending(true);
+    setError(null);
+    try {
+      await onAsk(text);
+      setQuestion("");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not reach the server.");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <form className="question-box" onSubmit={submit}>
+      <textarea aria-label="Question" placeholder={placeholder} value={question} disabled={disabled || sending}
+                onChange={(e) => setQuestion(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    e.currentTarget.form?.requestSubmit();
+                  }
+                }} />
+      <button type="submit" disabled={disabled || sending || !question.trim()}>Send</button>
+      {error && <p role="alert" className="error">{error}</p>}
+    </form>
+  );
+}
+
+export function OpenConversation({ threadId, onTurnEnded }: { threadId: string; onTurnEnded?: () => void }) {
+  const { live, disconnected } = useConversation(threadId, (event) => {
+    if (event.name === "turn_ended") onTurnEnded?.();
+  });
+
+  if (live === null) return disconnected ? <p role="alert" className="error">Cannot open this Conversation.</p> : null;
+  const running = live.status === "running";
+  return (
+    <div>
+      <TranscriptView transcript={live.transcript} />
+      {running && <p className="muted" aria-live="polite">Working…</p>}
+      {disconnected && <p role="alert" className="error">Connection lost. Reconnecting…</p>}
+      <QuestionBox placeholder="Ask a follow-up" disabled={running}
+                   onAsk={async (question) => { await askFollowUp(threadId, question); }} />
+    </div>
+  );
+}
+
+// A new Conversation: its first question starts it (a new thread on the server).
+export function NewConversation({ onStarted }: { onStarted: (threadId: string) => void }) {
+  return (
+    <QuestionBox placeholder="Ask a question to start a Conversation"
+                 onAsk={async (question) => onStarted((await startConversation(question)).thread_id)} />
+  );
 }

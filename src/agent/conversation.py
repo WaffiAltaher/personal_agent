@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from datetime import date
 
 from langchain_core.messages import HumanMessage, ToolMessage
@@ -62,16 +63,16 @@ async def close_interrupted_turn(graph, config) -> None:
         await graph.aupdate_state(config, {"messages": closing}, as_node="human_review")
 
 
-async def run_conversation(
+async def _turn_input(
     graph,
     config,
     *,
-    tools: list[BaseTool],
-    user_message: str | None = None,
-    resume_decision: str | None = None,
-    today: date | None = None,
-) -> dict:
-    """Start or continue a conversation. Exactly one of user_message or resume_decision."""
+    user_message: str | None,
+    resume_decision: str | None,
+    today: date | None,
+):
+    """Apply the turn rules (refusals, closing a cancelled turn, abandoning a pending Approval)
+    and return the graph input that runs the turn."""
     if (user_message is None) == (resume_decision is None):
         raise ConversationDriverError("Pass exactly one of user_message or resume_decision.")
 
@@ -84,7 +85,7 @@ async def run_conversation(
             raise ConversationDriverError(
                 "This conversation has no pending approval; resume is refused."
             )
-        return await graph.ainvoke(Command(resume=resume_decision), config=config)
+        return Command(resume=resume_decision)
 
     assert user_message is not None
     await close_interrupted_turn(graph, config)
@@ -92,14 +93,42 @@ async def run_conversation(
         result = await graph.ainvoke(_abandon_resume_command(), config=config)
         while "__interrupt__" in result:
             result = await graph.ainvoke(_abandon_resume_command(), config=config)
-    return await graph.ainvoke(
-        {
-            "messages": [HumanMessage(content=user_message)],
-            "model_call_count": 0,
-            "runtime_clock_iso": new_runtime_clock_iso(today),
-            "last_model_input_tokens": None,
-            "message_count_at_last_model_call": 0,
-            "stubbed_tool_call_ids": [],
-        },
-        config=config,
-    )
+    return {
+        "messages": [HumanMessage(content=user_message)],
+        "model_call_count": 0,
+        "runtime_clock_iso": new_runtime_clock_iso(today),
+        "last_model_input_tokens": None,
+        "message_count_at_last_model_call": 0,
+        "stubbed_tool_call_ids": [],
+    }
+
+
+async def run_conversation(
+    graph,
+    config,
+    *,
+    tools: list[BaseTool],
+    user_message: str | None = None,
+    resume_decision: str | None = None,
+    today: date | None = None,
+) -> dict:
+    """Start or continue a conversation. Exactly one of user_message or resume_decision."""
+    turn = await _turn_input(graph, config, user_message=user_message, resume_decision=resume_decision, today=today)
+    return await graph.ainvoke(turn, config=config)
+
+
+async def stream_conversation(
+    graph,
+    config,
+    *,
+    tools: list[BaseTool],
+    user_message: str | None = None,
+    resume_decision: str | None = None,
+    today: date | None = None,
+) -> AsyncIterator[dict]:
+    """run_conversation's streaming form, under the same rules: yields each node's update as it
+    happens (``{node: update}``, or ``{"__interrupt__": (Interrupt, ...)}`` when the turn parks at
+    an Approval). The turn's final state is the thread's, as after run_conversation."""
+    turn = await _turn_input(graph, config, user_message=user_message, resume_decision=resume_decision, today=today)
+    async for chunk in graph.astream(turn, config=config, stream_mode="updates"):
+        yield chunk
