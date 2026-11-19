@@ -29,7 +29,7 @@ class _FakeEmbeddings:
 @pytest.fixture
 def mem(tmp_path):
     with patch(
-        "agent.memory.semantic.GoogleGenerativeAIEmbeddings",
+        "agent.memory.semantic.create_embeddings",
         return_value=_FakeEmbeddings(),
     ):
         yield SemanticMemory(persist_dir=str(tmp_path / "chroma"))

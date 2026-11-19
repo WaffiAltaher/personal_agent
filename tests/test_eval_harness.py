@@ -19,6 +19,7 @@ from langchain_core.messages import AIMessage
 import agent.graph as graph_module
 from agent.evals.__main__ import main
 from agent.evals.generation import RagasScorer
+from agent.evals.judge_log import JudgeCallLog
 from agent.evals.harness import run_eval, write_results
 from agent.evals.records import EvalResults
 from agent.evals.scenarios import ScenarioError, load_dataset
@@ -265,13 +266,40 @@ async def test_eval_runs_write_nothing_to_the_owners_memory(evaluate, monkeypatc
     from agent.memory.episodic import EpisodicMemory
     from agent.memory.semantic import SemanticMemory
 
-    written = []
-    monkeypatch.setattr(EpisodicMemory, "log_run", lambda self, run: written.append(run))
-    monkeypatch.setattr(SemanticMemory, "remember", lambda self, *a, **k: written.append(a))
+    from agent.config import settings
+
+    # Every store records the path it opened; a store that skipped __init__ is the owner's.
+    owner_paths = {Path(settings.sqlite_path).resolve(), Path(settings.chroma_path).resolve()}
+    real_episodic_init, real_semantic_init = EpisodicMemory.__init__, SemanticMemory.__init__
+    real_log_run, real_remember = EpisodicMemory.log_run, SemanticMemory.remember
+
+    def episodic_init(self, db_path=None):
+        self._spy_path = Path(db_path or settings.sqlite_path).resolve()
+        real_episodic_init(self, db_path)
+
+    def semantic_init(self, persist_dir=None):
+        self._spy_path = Path(persist_dir or settings.chroma_path).resolve()
+        real_semantic_init(self, persist_dir)
+
+    written_to = []
+
+    def log_run(self, run):
+        written_to.append(getattr(self, "_spy_path", None))
+        return real_log_run(self, run)
+
+    def remember(self, *a, **k):
+        written_to.append(getattr(self, "_spy_path", None))
+        return real_remember(self, *a, **k)
+
+    monkeypatch.setattr(EpisodicMemory, "__init__", episodic_init)
+    monkeypatch.setattr(SemanticMemory, "__init__", semantic_init)
+    monkeypatch.setattr(EpisodicMemory, "log_run", log_run)
+    monkeypatch.setattr(SemanticMemory, "remember", remember)
 
     await evaluate("reply-flaky-mailbox")
 
-    assert written == []
+    assert written_to, "the eval's own episodic store is seeded"
+    assert all(path is not None and path not in owner_paths for path in written_to)
 
 
 @pytest.mark.asyncio
@@ -366,6 +394,31 @@ def evaluate_with_judge(scripted_model, judge):
             judge_model="scripted-judge",
         )
     return evaluate
+
+
+@pytest.mark.asyncio
+async def test_judge_log_records_every_ragas_call_with_prompt_and_reply(
+        scripted_model, judge, tmp_path,
+):
+    log_path = tmp_path / "judge.jsonl"
+    results = await run_eval(
+        load_dataset(DATASET),
+        model_name="scripted",
+        model_factory=lambda scenario: scripted_model(SCRIPTS[scenario.id]),
+        scenario_filter="reply-flaky-mailbox",
+        scorer=RagasScorer(judge=judge, embeddings=ScriptedEmbeddings(), judge_log=JudgeCallLog(log_path)),
+        judge_model="scripted-judge",
+    )
+
+    assert len(results.runs) == 1
+    rows = [json.loads(line) for line in log_path.read_text().splitlines() if line.strip()]
+    assert rows
+    assert {r["scenario_id"] for r in rows} == {"reply-flaky-mailbox"}
+    assert all(r["judge_model"] == "scripted-judge" for r in rows)
+    assert all(r["prompt"] and r["response"] for r in rows)
+    metrics = {r["metric"] for r in rows}
+    assert "faithfulness" in metrics
+    assert all(r["call_index"] >= 1 for r in rows)
 
 
 @pytest.mark.asyncio

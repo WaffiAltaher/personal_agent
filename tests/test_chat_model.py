@@ -84,3 +84,90 @@ def test_unknown_provider_prefix_is_rejected():
     # Any provider we hold no key for would skip the key check entirely.
     with pytest.raises(ValueError, match="provider"):
         create_chat_model("openai:gpt-9", settings=with_settings())
+
+
+# --- Request timeout: both integrations default to none, so a silent server would hang the run ---
+
+import socket
+import threading
+import time
+from contextlib import contextmanager
+
+from agent.chat_model import create_embeddings
+
+
+@contextmanager
+def silent_server():
+    """A local HTTP endpoint that accepts connections and never answers."""
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen()
+    held: list[socket.socket] = []
+    stop = threading.Event()
+
+    def accept():
+        listener.settimeout(0.1)
+        while not stop.is_set():
+            try:
+                held.append(listener.accept()[0])
+            except OSError:
+                pass
+
+    thread = threading.Thread(target=accept, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{listener.getsockname()[1]}"
+    finally:
+        stop.set()
+        thread.join()
+        for conn in held:
+            conn.close()
+        listener.close()
+
+
+def test_api_models_get_the_configured_request_timeout():
+    s = with_settings(anthropic_api_key="sk-ant-dummy", model_timeout_s=42)
+
+    assert create_chat_model("anthropic:claude-sonnet-5-5", settings=s).default_request_timeout == 42
+    assert create_chat_model("google_genai:gemini-3.8-flash", settings=s).timeout == 42
+
+
+def test_the_embeddings_client_gets_the_configured_request_timeout():
+    embeddings = create_embeddings(settings=with_settings(model_timeout_s=42))
+
+    assert embeddings.client._api_client._http_options.timeout == 42_000  # milliseconds
+
+
+def test_an_anthropic_request_the_server_never_answers_fails_instead_of_hanging(monkeypatch):
+    with silent_server() as url:
+        monkeypatch.setenv("ANTHROPIC_BASE_URL", url)
+        model = create_chat_model(
+            "anthropic:claude-sonnet-5-5",
+            settings=with_settings(anthropic_api_key="sk-ant-dummy", model_timeout_s=0.5),
+        )
+        model.max_retries = 0
+        started = time.monotonic()
+        with pytest.raises(Exception, match="(?i)time"):
+            model.invoke("hi")
+        assert time.monotonic() - started < 10
+
+
+def test_every_model_tries_a_failed_request_the_configured_number_of_times():
+    s = with_settings(anthropic_api_key="sk-ant-dummy", model_attempts=3, claude_code_binary="claude")
+
+    # The Anthropic SDK counts retries after the first attempt; the Google SDK counts attempts.
+    assert create_chat_model("anthropic:claude-sonnet-5-5", settings=s).max_retries == 2
+    assert create_chat_model("google_genai:gemini-3.8-flash", settings=s).max_retries == 3
+    assert create_chat_model("claude_code:sonnet", settings=s).attempts == 3
+    embeddings = create_embeddings(settings=s)
+    assert embeddings.attempts == 3
+    assert embeddings.client._api_client._http_options.retry_options.attempts == 3
+
+
+def test_the_default_is_two_attempts():
+    assert Settings.model_fields["model_attempts"].default == 2
+
+
+def test_fewer_than_one_attempt_is_rejected():
+    with pytest.raises(ValueError, match="MODEL_ATTEMPTS"):
+        Settings(model_attempts=0)

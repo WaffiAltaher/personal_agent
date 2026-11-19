@@ -39,7 +39,7 @@ def episodic(tmp_path, monkeypatch):
 @pytest.fixture
 def semantic(tmp_path, monkeypatch):
     with patch(
-        "agent.memory.semantic.GoogleGenerativeAIEmbeddings",
+        "agent.memory.semantic.create_embeddings",
         return_value=_FakeEmbeddings(),
     ):
         mem = SemanticMemory(persist_dir=str(tmp_path / "chroma"))

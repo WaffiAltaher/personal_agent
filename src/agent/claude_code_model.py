@@ -51,6 +51,7 @@ class ClaudeCodeChatModel(BaseChatModel):
     model: str  # passed to --model as given: an alias (sonnet) or a full ID
     binary: str = "claude"
     timeout_s: float = 180
+    attempts: int = 1  # CLI runs (the first included) for a call that timed out
 
     @property
     def _llm_type(self) -> str:
@@ -66,23 +67,27 @@ class ClaudeCodeChatModel(BaseChatModel):
             "--model", self.model, "--system-prompt", system_prompt,
         ]
         env = claude_code_env()
-        with tempfile.TemporaryDirectory(prefix="claude-code-call-") as cwd:
-            # Its own process group, so a timeout kills the CLI and anything it started.
-            process = subprocess.Popen(
-                args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                env=env, cwd=cwd, start_new_session=True,
-            )
-            if calls is not None:
-                calls.started(process)
-            try:
-                stdout, stderr = process.communicate(stdin, timeout=self.timeout_s)
-            except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.communicate()
-                raise ClaudeCodeError(
-                    f"Claude Code did not answer within {self.timeout_s:g} s. Ask again."
-                ) from None
-        return _reply_or_stop(_parse_result(process.returncode, stdout, stderr))
+        for attempt in range(1, self.attempts + 1):
+            with tempfile.TemporaryDirectory(prefix="claude-code-call-") as cwd:
+                # Its own process group, so a timeout kills the CLI and anything it started.
+                process = subprocess.Popen(
+                    args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                    env=env, cwd=cwd, start_new_session=True,
+                )
+                if calls is not None:
+                    calls.started(process)
+                try:
+                    stdout, stderr = process.communicate(stdin, timeout=self.timeout_s)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.communicate()
+                    if attempt < self.attempts:
+                        continue  # run the CLI again
+                    raise ClaudeCodeError(
+                        f"Claude Code did not answer within {self.timeout_s:g} s. Ask again."
+                    ) from None
+            return _reply_or_stop(_parse_result(process.returncode, stdout, stderr))
+        raise AssertionError("unreachable: attempts is at least 1")
 
     def bind_tools(self, tools, **kwargs) -> Runnable:
         """Bind tools as {name, description, parameters}; they go into the prompt, not to the CLI."""

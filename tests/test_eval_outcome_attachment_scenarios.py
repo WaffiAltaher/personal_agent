@@ -239,5 +239,8 @@ async def test_the_gmail_stand_ins_are_offered_in_the_gmail_attachment_scenario(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scenario_id", [OUTLOOK_SCENARIO, CHAIN_SCENARIO, "inbox-logged-out"])
-async def test_the_gmail_stand_ins_are_not_offered_in_scenarios_that_dont_need_them(scenario_id):
-    assert not GMAIL_STAND_INS & await _offered_tools(scenario_id)
+async def test_every_local_tool_is_offered_in_scenarios_that_dont_need_it(scenario_id):
+    # The model chooses among the same tools as in production, so a wrong pick can show up.
+    from agent.tools import LOCAL_TOOLS
+
+    assert {t.name for t in LOCAL_TOOLS} <= await _offered_tools(scenario_id)

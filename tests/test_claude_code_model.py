@@ -390,9 +390,9 @@ def test_system_prompt_goes_to_the_flag_and_the_rest_of_the_view_to_stdin_as_jso
 
 # One call's usage as the CLI reports it: 1,000 uncached input tokens, a 4,000-token cache read, a
 # 2,000-token cache write (1,500 for 5 minutes, 500 for 1 hour) and 300 output tokens (100 thinking).
-# At Claude Sonnet 5.5 rates ($2 in / $10 out / $0.20 cache read / $2.50 5-minute and $4 1-hour
-# cache write per 1M): 1000×2 + 4000×0.2 + 1500×2.5 + 500×4 + 300×10 = 11,550 per 1M = $0.01155.
-SONNET_CALL_COST = 0.01155
+# At Claude Sonnet 5.5 rates ($2 in / $10 out / $0.10 cache read / $2.50 5-minute and $4 1-hour
+# cache write per 1M): 1000×2 + 4000×0.1 + 1500×2.5 + 500×4 + 300×10 = 11,150 per 1M = $0.01115.
+SONNET_CALL_COST = 0.01115
 
 
 def cli_result(model_id="claude-sonnet-5-5"):
@@ -538,7 +538,7 @@ def test_a_timeout_kills_the_cli_and_what_it_started_and_stops(cli, tmp_path):
     cli.script([{"hang": True}, ANSWER])
 
     with pytest.raises(ClaudeCodeError) as stop:
-        with_tools(claude_code(claude_code_timeout_s=2)).invoke("Any mail from Bob?")
+        with_tools(claude_code(claude_code_timeout_s=2, model_attempts=1)).invoke("Any mail from Bob?")
 
     assert str(stop.value) == "Claude Code did not answer within 2 s. Ask again."
     assert len(cli.calls()) == 1  # not retried, and no other model asked
@@ -548,6 +548,24 @@ def test_a_timeout_kills_the_cli_and_what_it_started_and_stops(cli, tmp_path):
     while any(running(p) for p in pids) and time.monotonic() < deadline:
         time.sleep(0.05)
     assert not any(running(p) for p in pids)
+
+
+def test_a_call_that_timed_out_is_run_again_up_to_the_configured_attempts(cli):
+    cli.script([{"hang": True}, ANSWER])
+
+    reply = with_tools(claude_code(claude_code_timeout_s=2, model_attempts=2)).invoke("Any mail from Bob?")
+
+    assert reply.content == "No mail from Bob."
+    assert len(cli.calls()) == 2
+
+
+def test_a_call_that_times_out_on_every_attempt_stops(cli):
+    cli.script([{"hang": True}, {"hang": True}, ANSWER])
+
+    with pytest.raises(ClaudeCodeError, match="did not answer within 1 s"):
+        with_tools(claude_code(claude_code_timeout_s=1, model_attempts=2)).invoke("Any mail from Bob?")
+
+    assert len(cli.calls()) == 2
 
 
 @pytest.mark.asyncio

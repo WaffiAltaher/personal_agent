@@ -4,7 +4,7 @@ tests/test_eval_pricing.py
 Cost of a run from the token usage LangChain reports (`AIMessage.usage_metadata`), priced with
 the dated per-model table in agent.evals.pricing. Expected values are worked by hand from the
 published prices (Gemini 3.8 Flash: $0.75 in / $3.75 out / $0.075 cached per 1M tokens through
-2026-12-31, then double; Claude Sonnet 5.5: $2 in / $10 out / $0.20 cache hit / $2.50 5-minute
+2026-12-31, then double; Claude Sonnet 5.5: $2 in / $10 out / $0.10 cache hit / $2.50 5-minute
 cache write per 1M tokens).
 """
 
@@ -39,8 +39,8 @@ def test_claude_cost_prices_cache_reads_and_writes():
         "total_tokens": 12_000,
         "input_token_details": {"cache_read": 4_000, "cache_creation": 0, "ephemeral_5m_input_tokens": 1_000},
     }
-    # 5k uncached × 2 + 4k read × 0.20 + 1k written × 2.50 + 2k out × 10, per 1M
-    assert cost_usd("claude-sonnet-5-5", usage, on=date(2026, 10, 7)) == pytest.approx(0.0333)
+    # 5k uncached × 2 + 4k read × 0.10 + 1k written × 2.50 + 2k out × 10, per 1M
+    assert cost_usd("claude-sonnet-5-5", usage, on=date(2026, 10, 7)) == pytest.approx(0.0329)
 
 
 @pytest.mark.parametrize("name", ["google_genai:gemini-3.8-flash", "models/gemini-3.8-flash"])

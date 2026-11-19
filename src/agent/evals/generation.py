@@ -28,6 +28,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from pydantic import BaseModel, ValidationError
 
+from agent.evals.judge_log import JudgeCallLog
 from agent.evals.records import GenerationScores, RunResult
 from agent.evals.scenarios import Scenario
 
@@ -60,14 +61,23 @@ def _parse(reply: AIMessage, response_model: type[T]) -> T:
 class ChatModelJudge(InstructorBaseRagasLLM):
     """A LangChain chat model as a RAGAS judge LLM."""
 
-    def __init__(self, model: BaseChatModel):
+    def __init__(self, model: BaseChatModel, *, judge_log: JudgeCallLog | None = None):
         self.model = model
+        self._judge_log = judge_log
 
     def generate(self, prompt: str, response_model: type[T]) -> T:
-        return _parse(self.model.invoke([HumanMessage(content=prompt)]), response_model)
+        reply = self.model.invoke([HumanMessage(content=prompt)])
+        self._maybe_log(prompt, reply)
+        return _parse(reply, response_model)
 
     async def agenerate(self, prompt: str, response_model: type[T]) -> T:
-        return _parse(await self.model.ainvoke([HumanMessage(content=prompt)]), response_model)
+        reply = await self.model.ainvoke([HumanMessage(content=prompt)])
+        self._maybe_log(prompt, reply)
+        return _parse(reply, response_model)
+
+    def _maybe_log(self, prompt: str, reply: AIMessage) -> None:
+        if self._judge_log is not None:
+            self._judge_log.record(prompt=prompt, response=reply.text)
 
 
 class LangChainEmbeddings(BaseRagasEmbedding):
@@ -109,14 +119,37 @@ class GenerationScorer(Protocol):
 class RagasScorer:
     """Scores samples with the four RAGAS metrics, graded by `judge`."""
 
-    def __init__(self, *, judge: BaseChatModel, embeddings: Embeddings):
-        llm = ChatModelJudge(judge)
+    def __init__(
+        self,
+        *,
+        judge: BaseChatModel,
+        embeddings: Embeddings,
+        judge_log: JudgeCallLog | None = None,
+    ):
+        self.judge_log = judge_log
+        llm = ChatModelJudge(judge, judge_log=judge_log)
         self._metrics = {
             "faithfulness": Faithfulness(llm=llm),
             "answer_relevancy": AnswerRelevancy(llm=llm, embeddings=LangChainEmbeddings(embeddings)),
             "context_precision": ContextPrecision(llm=llm),
             "context_recall": ContextRecall(llm=llm),
         }
+
+    def begin_scenario_run(
+        self,
+        *,
+        eval_run_id: str,
+        scenario_id: str,
+        repeat: int,
+        judge_model: str,
+    ) -> None:
+        if self.judge_log is not None:
+            self.judge_log.begin_scenario_run(
+                eval_run_id=eval_run_id,
+                scenario_id=scenario_id,
+                repeat=repeat,
+                judge_model=judge_model,
+            )
 
     async def score(self, sample: GenerationSample) -> GenerationScores:
         q, a, ctx, ref = sample.user_input, sample.response, sample.contexts, sample.reference
@@ -133,15 +166,22 @@ class RagasScorer:
             if missing:
                 scores[name], notes[name] = None, missing
                 continue
+            metric_token = None
+            if self.judge_log is not None:
+                metric_token = self.judge_log.set_metric(name)
             try:
-                value = (await self._metrics[name].ascore(**kwargs)).value
-            except Exception as exc:  # a judge failure is recorded, not raised
-                scores[name], notes[name] = None, f"{type(exc).__name__}: {exc}"
-                continue
-            if value is None or math.isnan(value):
-                scores[name], notes[name] = None, "the judge found nothing to score"
-            else:
-                scores[name] = float(value)
+                try:
+                    value = (await self._metrics[name].ascore(**kwargs)).value
+                except Exception as exc:  # a judge failure is recorded, not raised
+                    scores[name], notes[name] = None, f"{type(exc).__name__}: {exc}"
+                    continue
+                if value is None or math.isnan(value):
+                    scores[name], notes[name] = None, "the judge found nothing to score"
+                else:
+                    scores[name] = float(value)
+            finally:
+                if metric_token is not None:
+                    self.judge_log.reset_metric(metric_token)
         return GenerationScores(**scores, contexts=len(ctx), notes=notes)
 
 

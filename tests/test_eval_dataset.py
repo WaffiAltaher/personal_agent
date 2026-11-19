@@ -30,6 +30,8 @@ TOOL_ARGS = {
     "informer_revenue": {"year": 2026, "period_from": 1, "period_to": 13},
     "informer_vat_position": {"year": 2026, "quarter": 1},
     "tavily_search": {"query": "route planning software for a small logistics company"},
+    "search_gmail": {"query": "is:unread"},
+    "list_calendar_events": {"days_ahead": 7},
 }
 SCENARIO_TOOL_ARGS = {
     ("reply-sanne-rejected", "ms365_create-reply-draft"): {

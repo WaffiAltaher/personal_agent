@@ -20,7 +20,7 @@ def test_search_score_equals_cosine_similarity(tmp_path, monkeypatch):
     query_text = "calibration-query"
     embeddings = MappedEmbeddings({doc_text: doc_vec, query_text: query_vec})
     with patch(
-        "agent.memory.semantic.GoogleGenerativeAIEmbeddings",
+        "agent.memory.semantic.create_embeddings",
         return_value=embeddings,
     ):
         mem = SemanticMemory(persist_dir=str(tmp_path / "chroma"))
@@ -36,7 +36,7 @@ def test_search_score_equals_cosine_similarity(tmp_path, monkeypatch):
 def test_calibration_queries_match_labels_at_configured_threshold(tmp_path, monkeypatch):
     embeddings = CalibrationEmbeddings(CALIBRATION_FACTS, CALIBRATION_QUERIES)
     with patch(
-        "agent.memory.semantic.GoogleGenerativeAIEmbeddings",
+        "agent.memory.semantic.create_embeddings",
         return_value=embeddings,
     ):
         mem = SemanticMemory(persist_dir=str(tmp_path / "chroma"))
@@ -86,7 +86,7 @@ def test_l2_store_is_reindexed_to_cosine_on_open(tmp_path, monkeypatch):
     assert l2._collection.configuration["hnsw"]["space"] == "l2"
 
     with patch(
-        "agent.memory.semantic.GoogleGenerativeAIEmbeddings",
+        "agent.memory.semantic.create_embeddings",
         return_value=LegacyEmbeddings(),
     ):
         reopened = SemanticMemory(persist_dir=str(legacy_path))

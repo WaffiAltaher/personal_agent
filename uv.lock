@@ -2435,6 +2435,7 @@ name = "personal-agent"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "aiohttp" },
     { name = "aiosqlite" },
     { name = "chromadb" },
     { name = "google-api-python-client" },
@@ -2459,6 +2460,7 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "ragas" },
     { name = "tavily-python" },
+    { name = "tenacity" },
 ]
 
 [package.dev-dependencies]
@@ -2470,6 +2472,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiohttp", specifier = ">=3.11" },
     { name = "aiosqlite", specifier = ">=0.22.1" },
     { name = "chromadb", specifier = ">=0.6.0" },
     { name = "google-api-python-client", specifier = ">=2.0.0" },
@@ -2494,6 +2497,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "ragas", specifier = ">=0.4.3" },
     { name = "tavily-python", specifier = ">=0.5.0" },
+    { name = "tenacity", specifier = ">=9.1" },
 ]
 
 [package.metadata.requires-dev]

@@ -5,8 +5,9 @@ These are the simplest possible tools — no auth, no network, no state.
 Good for learning the tool definition pattern before adding complexity.
 """
 
+import os
 from pathlib import Path
-from langchain_core.tools import tool
+from langchain_core.tools import StructuredTool, tool
 from pydantic import BaseModel, Field
 
 
@@ -124,3 +125,51 @@ def list_directory(path: str) -> str:
         return f"Error: permission denied accessing {path}"
     except Exception as e:
         return f"Error listing directory: {type(e).__name__}: {e}"
+
+# --- Eval stand-ins ---
+# Same names, arguments and descriptions as the tools above, but confined to the folder named
+# by FILES_ROOT_ENV (an eval run's own Downloads folder): a relative path resolves inside it,
+# and a path outside it is reported as not found. The eval harness binds these in place of the
+# real tools, so a scenario never reads the owner's real files.
+
+FILES_ROOT_ENV = "FIXTURE_WORLD_FILES_ROOT"
+
+
+def _inside_files_root(path: str) -> Path | None:
+    """`path` resolved inside the files root, or None if it is outside it or no root is set."""
+    root = os.environ.get(FILES_ROOT_ENV)
+    if not root:
+        return None
+    root_path = Path(root).resolve()
+    candidate = Path(path).expanduser()
+    resolved = (candidate if candidate.is_absolute() else root_path / candidate).resolve()
+    return resolved if resolved.is_relative_to(root_path) else None
+
+
+def _read_fixture_file(path: str) -> str:
+    resolved = _inside_files_root(path)
+    if resolved is None:
+        return f"Error: file not found: {Path(path).expanduser()}"
+    return read_file.func(str(resolved))
+
+
+def _list_fixture_directory(path: str) -> str:
+    resolved = _inside_files_root(path)
+    if resolved is None:
+        return f"Error: path not found: {Path(path).expanduser()}"
+    return list_directory.func(str(resolved))
+
+
+fixture_read_file = StructuredTool.from_function(
+    func=_read_fixture_file,
+    name=read_file.name,
+    description=read_file.description,
+    args_schema=ReadFileInput,
+)
+
+fixture_list_directory = StructuredTool.from_function(
+    func=_list_fixture_directory,
+    name=list_directory.name,
+    description=list_directory.description,
+    args_schema=ListDirectoryInput,
+)

@@ -5,11 +5,11 @@ Prices are USD per 1M tokens, dated: each entry holds from `valid_from` until th
 for the same model. A model not in the table, or usage the table has no price for (e.g. a
 cache write on a model without a cache-write price), has no cost (None), not a guess.
 
-Prices checked on 2026-10-07 against:
+Prices checked on 2026-11-19 against:
 - https://ai.google.dev/gemini-api/docs/pricing (Gemini 3.8 Flash, paid tier, standard;
-  page last updated 2026-10-07; prices double from 2027-01-01)
+  prices double from 2027-01-01)
 - https://platform.claude.com/docs/en/about-claude/pricing (Claude Sonnet 5.5, global
-  endpoint, standard speed, no batch)
+  endpoint, standard speed, no batch; cache hits at 0.05× base input, $0.10 / MTok)
 """
 
 import re
@@ -33,7 +33,7 @@ PRICES: dict[str, list[Price]] = {
         Price(date(2027, 1, 1), input=1.50, output=7.50, cache_read=0.15),
     ],
     "claude-sonnet-5-5": [
-        Price(date(2026, 1, 1), input=2.00, output=10.00, cache_read=0.20, cache_write_5m=2.50, cache_write_1h=4.00),
+        Price(date(2026, 1, 1), input=2.00, output=10.00, cache_read=0.10, cache_write_5m=2.50, cache_write_1h=4.00),
     ],
 }
 
