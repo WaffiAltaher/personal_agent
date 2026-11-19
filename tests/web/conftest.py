@@ -18,6 +18,9 @@ def _chromium_installed() -> bool:
 
 def pytest_collection_modifyitems(config, items):
     journeys = [item for item in items if item.path.name == "test_web_browser.py"]
+    # Playwright's sync API keeps an event loop running in the main thread until the session ends,
+    # which breaks asyncio.run() in any test after it: run the journeys last.
+    items[:] = [item for item in items if item not in journeys] + journeys
     if journeys and not _chromium_installed():
         skip = pytest.mark.skip(reason=f"no Playwright browser installed; run `{INSTALL}`")
         for item in journeys:
