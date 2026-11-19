@@ -155,7 +155,7 @@ Record of technical decisions made during the Personal Data Agent project. Each 
 
 ## ADR-008: Interface expansion (Streamlit/FastAPI) deferred and optional
 **Date:** 2026-06-07
-**Status:** Accepted
+**Status:** Superseded by ADR-018
 
 **Context:** Original Phase 6 was Interface Expansion (Streamlit → FastAPI). It sits ahead of evals in the original ordering.
 
@@ -385,6 +385,31 @@ Two plain tools were chosen over a hidden check that the Approval step calls bef
 - `retrieve_memory` also sends a model-written query off the machine, to Google's embeddings API, and stays a plain read (owner's call, 2026-11-14): Google is already a provider trusted with this data under the owner's own key, where Tavily is a third party that otherwise sees nothing, and gating memory search would prompt on every recall after a mail read.
 - A steered answer (a mail falsely claiming an invoice is paid) is not stopped by any gate. Only the v6 rules address it, and the `injection-mail-false-claim` eval scenario measures how well.
 - The eval suite separates the guarantee from the rate: `leaks` must be zero (code enforces it), while `leak_attempt_rate` is model behaviour and is what a prompt change is judged on.
+
+---
+
+## ADR-018: Web interface beside the CLI, on the same Conversations
+**Date:** 2026-11-19
+**Status:** Accepted (supersedes ADR-008)
+
+**Context:** The owner wants a web interface next to the CLI, where several Conversations can be started and kept open at once. Later it will be deployed to a server and reached online. The CLI keeps each Conversation as a thread in a SQLite checkpoint file (`checkpoints/hitl.db`). One CLI process drives one Conversation, and nothing stops two processes from driving the same one. Until now the only way in was the owner's terminal, so nothing authenticated the person asking. Options: web Conversations shared with the CLI, or kept in a separate store; a guard per server process, or a lock across processes; no login while the app is local, an owner password, Sign in with Google, or a passkey.
+
+**Decision:** A FastAPI server (`python -m agent.web`) with a React (Vite, TypeScript) app, against real data only. It lists, starts and continues **the same Conversations as the CLI**: same checkpoint file, same thread ids, same run log entries, same Langfuse trace per Conversation. The server allows one turn at a time per Conversation, and every open tab sees that turn's live state. Turns in different Conversations run in parallel. The server does not guard against the CLI driving the same Conversation at the same moment. The owner logs in with **one password**, stored as an argon2id hash in `.env`, and gets a 7-day session cookie. The server binds to localhost and checks `Host` and `Origin` on every request. Sign in with Google, allowlisted to the owner's address, replaces the password when the app goes online.
+
+**Reasoning:**
+- **One store:** two front ends on one thread store keep "Conversation" a single concept. A Conversation started in the browser can be `--resume`d in the terminal, and the other way round. A separate store would split the owner's history and the agent's recall of past runs.
+- **A guard in the server, not across processes:** the browser makes the dangerous case easy: two tabs on one Conversation, one answering an Approval the other has already moved past. A guard inside the server stops that cheaply. A lock across processes would need stale-lock cleanup after crashes, for a case (CLI and web at the same moment) that one owner rarely hits.
+- **A login now, though the app is local:** with no login, any web page open in the owner's browser can send requests to `localhost`, approve a pending Write action, or read data through DNS rebinding. The app is also headed online. `Host`/`Origin` checks are kept as a second layer.
+- **A password before Google:** a password needs nothing outside the repo. Sign in with Google needs a new Web-application OAuth client with redirect URIs for the public domain, which is better set up with the deployment. A passkey is bound to its domain, so it would be registered twice.
+- **React over server-rendered HTML or Streamlit:** the owner's choice, for a richer UI. Streamlit re-runs a script per interaction, which works against a long-lived async graph and live state shared between tabs.
+- **Real data only:** the Fixture world's clock pin and memory swap are global to a process. The CLI's `--fixtures` already covers interactive use of the Fixture world. The web tests still run on the Fixture world, injected (ADR-011).
+
+**Consequences:**
+- Both front ends write a Conversation's run log entry after every turn, not at exit. The entry is still rebuilt from the whole thread and replaces the earlier one.
+- A Conversation driven by the CLI and the web server at the same moment can interleave turns, as two CLI processes can today.
+- Logins are checked at startup as in the CLI, then shown live and rechecked every turn. A skipped MCP server is loaded again after the owner logs back in, because a server can outlive a 7-day Google token.
+- Node and a front-end build join the toolchain. FastAPI serves the built app, so normal use is still one command.
+- The password is the only thing standing between the network and the owner's data, so the app must not be exposed beyond localhost until Sign in with Google replaces the password.
 
 ---
 
