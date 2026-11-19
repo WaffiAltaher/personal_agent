@@ -12,7 +12,7 @@ import agent.cli as cli
 
 
 @pytest.mark.asyncio
-async def test_cli_logs_error_outcome_and_flushes_traces(monkeypatch, scripted_model, startup_login_checks_pass):
+async def test_cli_logs_error_outcome_and_flushes_traces(monkeypatch, scripted_model, startup_login_checks_pass, capsys):
     logged = []
     flushed = {"n": 0}
 
@@ -43,4 +43,8 @@ async def test_cli_logs_error_outcome_and_flushes_traces(monkeypatch, scripted_m
         await cli.main()
 
     assert logged[0]["error"] == "RuntimeError: boom"
+    # The session ends naming the Conversation id, so it can be resumed later.
+    out = capsys.readouterr().out
+    conversation_id = out.split("Conversation ", 1)[1].split()[0]
+    assert f"Session ended by an error. Conversation to resume: {conversation_id}" in out
     assert flushed["n"] == 1

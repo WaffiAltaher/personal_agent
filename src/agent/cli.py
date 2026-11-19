@@ -64,6 +64,9 @@ def _parse_args(argv: list[str]) -> tuple[bool, bool, str | None]:
 
 EXIT_WORDS = ("exit", "quit")
 
+STEP_LIMIT_STOPPED = ("Stopped: the agent hit its step limit (~10 tool rounds) without a final answer. "
+                      "Try a narrower question.")
+
 
 def _read_line(prompt: str) -> str:
     """Read one line at the session prompt; raises EOFError on Ctrl-D. Tests replace this."""
@@ -212,6 +215,7 @@ async def main():
     result: dict = {"messages": []}
     run_error: str | None = None
     questions: list[str] = []
+    known_failures: list[str] = []
 
     try:
         with memory_ctx:
@@ -250,27 +254,39 @@ async def main():
                         questions.append(question)
                         turn_start = len(result["messages"])
 
-                        result = await run_conversation(
-                            agent_graph,
-                            config,
-                            tools=tools,
-                            user_message=question,
-                            today=today,
-                        )
-                        # HITL loop — handle zero or more interrupts per turn.
-                        while "__interrupt__" in result:
-                            for interrupt_obj in result["__interrupt__"]:
-                                _display_interrupt(interrupt_obj.value)
-
-                            decision = _prompt_decision()
-                            print(f"\nResuming with: {decision}\n")
-
+                        # A known failure ends the turn, not the session: the thread still ends on
+                        # answered messages (these are raised before a node writes anything).
+                        try:
                             result = await run_conversation(
                                 agent_graph,
                                 config,
                                 tools=tools,
-                                resume_decision=decision,
+                                user_message=question,
+                                today=today,
                             )
+                            # HITL loop — handle zero or more interrupts per turn.
+                            while "__interrupt__" in result:
+                                for interrupt_obj in result["__interrupt__"]:
+                                    _display_interrupt(interrupt_obj.value)
+
+                                decision = _prompt_decision()
+                                print(f"\nResuming with: {decision}\n")
+
+                                result = await run_conversation(
+                                    agent_graph,
+                                    config,
+                                    tools=tools,
+                                    resume_decision=decision,
+                                )
+                        except ClaudeCodeError as exc:
+                            # A Claude Code call that couldn't produce a turn already says what to do (ADR-016).
+                            print(f"Stopped: {exc}")
+                            known_failures.append(f"{type(exc).__name__}: {exc}")
+                            continue
+                        except GraphRecursionError as exc:
+                            print(STEP_LIMIT_STOPPED)
+                            known_failures.append(f"{type(exc).__name__}: {exc}")
+                            continue
 
                         last = result["messages"][-1]
                         print(_stringify_content(last.content))
@@ -282,7 +298,12 @@ async def main():
         # A Fixture-world run is about seeded stand-in data, not the owner's: keep it out of real memory.
         # The whole Conversation is one run log entry; a session with no question leaves none.
         if not fixtures and questions:
-            log_run_to_memory(result, "\n".join(questions), model_name=settings.model_name)
+            log_run_to_memory(
+                result,
+                "\n".join(questions),
+                model_name=settings.model_name,
+                error="; ".join(known_failures) or None,
+            )
     except Exception as exc:
         run_error = f"{type(exc).__name__}: {exc}"
         if not fixtures and questions:
@@ -292,10 +313,8 @@ async def main():
                 model_name=settings.model_name,
                 error=run_error,
             )
-        # A Claude Code call that couldn't produce a turn already says what to do (ADR-016).
-        if isinstance(exc, ClaudeCodeError):
-            print(f"Stopped: {exc}")
-            sys.exit(1)
+        # The session ends: name the Conversation so it can be resumed (`--resume <id>` once that exists).
+        print(f"Session ended by an error. Conversation to resume: {thread_id}")
         raise
     finally:
         print(f"Conversation {thread_id}")
@@ -306,8 +325,7 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except GraphRecursionError:
-        print("Stopped: the agent hit its step limit (~10 tool rounds) without a final answer. "
-              "Try a narrower question.")
+        print(STEP_LIMIT_STOPPED)
         sys.exit(1)
     except ModelConfigError as exc:
         print(f"Cannot start: {exc}")
