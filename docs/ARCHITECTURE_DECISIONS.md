@@ -410,6 +410,7 @@ Two plain tools were chosen over a hidden check that the Approval step calls bef
 - Logins are checked at startup as in the CLI, then shown live and rechecked every turn. A skipped MCP server is loaded again after the owner logs back in, because a server can outlive a 7-day Google token.
 - Node and a front-end build join the toolchain. FastAPI serves the built app, so normal use is still one command.
 - The password is the only thing standing between the network and the owner's data, so the app must not be exposed beyond localhost until Sign in with Google replaces the password.
+- Amended 2026-11-19: a browser may leave `Origin` off a same-origin `EventSource` GET, so an event stream (known by its route, not its `Accept` header) with no `Origin` is accepted when `Sec-Fetch-Site: same-origin`, which no other web page can make the browser send. A foreign `Origin` is still refused, and state-changing requests always need `Origin`.
 
 ---
 

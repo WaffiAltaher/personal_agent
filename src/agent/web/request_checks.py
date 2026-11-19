@@ -2,17 +2,21 @@
 request_checks.py — ``Host`` and ``Origin`` checks on every request (ADR-018), as ASGI middleware.
 
 Every request is refused (400) unless ``Host`` is one of the app's own hosts, which defeats DNS
-rebinding. Every state-changing request (any method but GET, HEAD and OPTIONS) and every event
-stream (``Accept: text/event-stream``) is refused (403) unless ``Origin`` is the app's own, so
+rebinding. Every state-changing request (any method but GET, HEAD and OPTIONS) and every request
+to an event stream's route (``/api/conversations/{id}/events``, whatever its ``Accept`` header says)
+is refused (403) unless ``Origin`` is the app's own, so
 another web page in the owner's browser can't act through the owner's session. An event stream
 with no ``Origin`` is accepted when ``Sec-Fetch-Site: same-origin`` says the app itself opened it. No CORS headers
 are ever sent.
 """
 
+import re
+
 from starlette.responses import PlainTextResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+EVENT_STREAM_ROUTE = re.compile(r"/api/conversations/[^/]+/events/?")
 
 
 class RequestChecks:
@@ -29,7 +33,7 @@ class RequestChecks:
         if host not in self.allowed_hosts:
             await PlainTextResponse("Invalid Host header.", status_code=400)(scope, receive, send)
             return
-        is_event_stream = "text/event-stream" in headers.get("accept", "")
+        is_event_stream = EVENT_STREAM_ROUTE.fullmatch(scope["path"]) is not None
         if scope["method"] not in SAFE_METHODS or is_event_stream:
             origin = headers.get("origin")
             # A browser may leave Origin off a same-origin EventSource GET; its fetch metadata,

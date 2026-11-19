@@ -30,7 +30,7 @@ from agent.auth.claude_code import (
     check_claude_code_login,
 )
 from agent.auth.google import GOOGLE_LOGIN_COMMAND, GoogleLoginRequired, check_google_login
-from agent.tools.mcp_loader import LoginRequired, McpServer, check_mcp_login, load_mcp_server
+from agent.tools.mcp_loader import LoginNotice, LoginRequired, McpServer, check_mcp_login, load_mcp_server
 
 logger = logging.getLogger(__name__)
 
@@ -119,11 +119,14 @@ def claude_code_login(binary: str) -> Integration:
 
 def mcp_login(server: McpServer, *, loaded: bool, notice: str | None, logins: Logins) -> Integration:
     """An MCP server as startup left it. A server with a login check is rechecked; one skipped at
-    startup is loaded again when its login passes, and its tools go to ``logins.tools_loaded``."""
+    startup for its login (a ``LoginNotice``) is loaded again when its login passes, and its tools
+    go to ``logins.tools_loaded``. One skipped for another reason stays skipped."""
     command = server.login.command if server.login else SETUP_COMMAND
     integration = Integration(server.name, command, None, alive=loaded, detail=None if loaded else notice)
     if server.login is None or server.connection is None:
         return integration  # no login to recheck: loaded or not, it stays so
+    if not loaded and not isinstance(notice, LoginNotice):
+        return integration  # it failed to start for another reason: a new login won't bring it up
 
     async def check_loaded() -> str | None:
         return await check_mcp_login(server)

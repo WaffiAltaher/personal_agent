@@ -184,14 +184,29 @@ def test_a_foreign_or_missing_origin_is_refused_on_state_changing_requests(web, 
     assert client.get("/api/session").status_code == 200  # the refused logout did not log out
 
 
+EVENTS = "/api/conversations/no-such-thread/events"  # passes the checks -> 404 (no such Conversation)
+
+
 def test_a_foreign_or_missing_origin_is_refused_on_event_streams(web):
     client, _ = web()
     login(client)
 
     for headers in ({}, {"Origin": "http://evil.example"}):
-        response = client.get("/api/session", headers={"Accept": "text/event-stream", **headers})
+        response = client.get(EVENTS, headers={"Accept": "text/event-stream", **headers})
         assert response.status_code == 403
-    assert client.get("/api/session", headers={"Accept": "text/event-stream", "Origin": ORIGIN}).status_code == 200
+    assert client.get(EVENTS, headers={"Accept": "text/event-stream", "Origin": ORIGIN}).status_code == 404
+
+
+def test_an_event_stream_is_known_by_its_route_not_its_accept_header(web):
+    """Leaving ``Accept: text/event-stream`` off must not skip the Origin check."""
+    client, _ = web()
+    login(client)
+
+    for accept in ({}, {"Accept": "*/*"}):
+        assert client.get(EVENTS, headers=accept).status_code == 403
+        assert client.get(EVENTS, headers={"Sec-Fetch-Site": "cross-site", **accept}).status_code == 403
+    # Another read asking for an event stream is a plain read.
+    assert client.get("/api/session", headers={"Accept": "text/event-stream"}).status_code == 200
 
 
 def test_a_same_origin_event_stream_without_origin_is_accepted_by_its_fetch_metadata(web):
@@ -200,14 +215,15 @@ def test_a_same_origin_event_stream_without_origin_is_accepted_by_its_fetch_meta
     client, _ = web()
     login(client)
 
-    def stream(headers):
-        return client.get("/api/session", headers={"Accept": "text/event-stream", **headers}).status_code
+    def stream(headers, method="GET"):
+        return client.request(method, EVENTS, headers={"Accept": "text/event-stream", **headers}).status_code
 
-    assert stream({"Sec-Fetch-Site": "same-origin"}) == 200
+    assert stream({"Sec-Fetch-Site": "same-origin"}) == 404
     assert stream({"Sec-Fetch-Site": "cross-site"}) == 403
     assert stream({"Sec-Fetch-Site": "same-site"}) == 403
     assert stream({"Sec-Fetch-Site": "same-origin", "Origin": "http://evil.example"}) == 403  # a foreign Origin wins
-    # A state-changing request still needs its Origin.
+    # A state-changing request still needs its Origin, on the event stream's route too.
+    assert stream({"Sec-Fetch-Site": "same-origin"}, method="POST") == 403
     assert client.post("/api/logout", headers={"Sec-Fetch-Site": "same-origin"}).status_code == 403
 
 

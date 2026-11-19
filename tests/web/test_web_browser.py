@@ -4,14 +4,19 @@ Browser journeys on the built app (ticket web-interface/07).
 Chromium (Playwright) drives ``web/dist`` served by uvicorn from the real app factory, on the
 Fixture tools with a stand-in model and a temp checkpoint file (ADR-011: no live model). Build
 first (``cd web && npm run build``); install the browser with ``uv run playwright install chromium``.
+The journeys carry the ``browser`` marker: ``-m "not browser"`` leaves them out.
+
+They use Playwright's async API on each test's own event loop, which closes with the test: the
+sync API would keep a loop running in the main thread and break every asyncio test after it.
 """
 
 import asyncio
 import threading
 
 import pytest
+import pytest_asyncio
 import uvicorn
-from playwright.sync_api import Page, expect
+from playwright.async_api import Page, async_playwright, expect
 from web.test_web_turns import FAST_HASHER, PASSWORD, TOOLS, StandInModel, ai, free_port
 
 import agent.graph as graph_module
@@ -25,6 +30,8 @@ SCRIPTS = {
     "Send the report": [ai("", ("c2", "send_mail", {"to": "boss@example.com"})), "The report is sent."],
     "Send it twice": [ai("", ("c3", "send_mail", {"to": "team@example.com"})), "Sent to the team."],
 }
+
+pytestmark = [pytest.mark.browser, pytest.mark.asyncio]
 
 
 @pytest.fixture(scope="module")
@@ -66,57 +73,68 @@ def app_url(tmp_path_factory):
     graph_module.get_episodic_memory = original
 
 
-def log_in(page: Page, url: str):
-    page.goto(url)
-    page.locator("input[type=password]").fill(PASSWORD)
-    page.get_by_role("button", name="Log in").click()
-    expect(page.get_by_role("button", name="New Conversation")).to_be_visible()
+@pytest_asyncio.fixture
+async def page():
+    """A fresh Chromium page, on this test's event loop."""
+    async with async_playwright() as playwright:
+        browser = await playwright.chromium.launch()
+        try:
+            yield await (await browser.new_context()).new_page()
+        finally:
+            await browser.close()
 
 
-def ask(page: Page, question: str):
-    page.get_by_label("Question").fill(question)
-    page.get_by_role("button", name="Send", exact=True).click()
+async def log_in(page: Page, url: str):
+    await page.goto(url)
+    await page.locator("input[type=password]").fill(PASSWORD)
+    await page.get_by_role("button", name="Log in").click()
+    await expect(page.get_by_role("button", name="New Conversation")).to_be_visible()
 
 
-def test_log_in_and_out(page: Page, app_url):
-    page.goto(app_url)
-    page.locator("input[type=password]").fill("wrong password")
-    page.get_by_role("button", name="Log in").click()
-    expect(page.get_by_role("button", name="New Conversation")).to_have_count(0)
-    log_in(page, app_url)
-    page.get_by_role("button", name="Log out").click()
-    expect(page.get_by_role("button", name="Log in")).to_be_visible()
+async def ask(page: Page, question: str):
+    await page.get_by_label("Question").fill(question)
+    await page.get_by_role("button", name="Send", exact=True).click()
 
 
-def test_a_question_shows_its_tool_step_then_the_answer(page: Page, app_url):
-    log_in(page, app_url)
-    ask(page, "Look up my notes")
-    expect(page.locator("details.step", has_text="read_notes")).to_be_visible()
-    expect(page.locator(".answer")).to_have_text("Your notes are about budget.")
-    expect(page.locator("details.step.done")).to_have_count(1)
+async def test_log_in_and_out(page: Page, app_url):
+    await page.goto(app_url)
+    await page.locator("input[type=password]").fill("wrong password")
+    await page.get_by_role("button", name="Log in").click()
+    await expect(page.get_by_role("button", name="New Conversation")).to_have_count(0)
+    await log_in(page, app_url)
+    await page.get_by_role("button", name="Log out").click()
+    await expect(page.get_by_role("button", name="Log in")).to_be_visible()
 
 
-def test_approving_a_write_action_runs_it(page: Page, app_url):
-    log_in(page, app_url)
-    ask(page, "Send the report")
+async def test_a_question_shows_its_tool_step_then_the_answer(page: Page, app_url):
+    await log_in(page, app_url)
+    await ask(page, "Look up my notes")
+    await expect(page.locator("details.step", has_text="read_notes")).to_be_visible()
+    await expect(page.locator(".answer")).to_have_text("Your notes are about budget.")
+    await expect(page.locator("details.step.done")).to_have_count(1)
+
+
+async def test_approving_a_write_action_runs_it(page: Page, app_url):
+    await log_in(page, app_url)
+    await ask(page, "Send the report")
     card = page.locator('aside[aria-label="Approval"]')
-    expect(card).to_contain_text("send_mail")
-    card.get_by_role("button", name="Approve").click()
-    expect(page.locator(".answer")).to_have_text("The report is sent.")
-    expect(card).to_have_count(0)
+    await expect(card).to_contain_text("send_mail")
+    await card.get_by_role("button", name="Approve").click()
+    await expect(page.locator(".answer")).to_have_text("The report is sent.")
+    await expect(card).to_have_count(0)
 
 
-def test_answering_in_one_tab_updates_and_disables_the_other(page: Page, app_url):
-    log_in(page, app_url)
-    ask(page, "Send it twice")
-    expect(page.locator('aside[aria-label="Approval"]')).to_be_visible()
-    second = page.context.new_page()
-    second.goto(app_url)
-    second.get_by_role("button", name="Send it twice").first.click()
+async def test_answering_in_one_tab_updates_and_disables_the_other(page: Page, app_url):
+    await log_in(page, app_url)
+    await ask(page, "Send it twice")
+    await expect(page.locator('aside[aria-label="Approval"]')).to_be_visible()
+    second = await page.context.new_page()
+    await second.goto(app_url)
+    await second.get_by_role("button", name="Send it twice").first.click()
     card_two = second.locator('aside[aria-label="Approval"]')
-    expect(card_two).to_be_visible()
+    await expect(card_two).to_be_visible()
 
-    page.locator('aside[aria-label="Approval"]').get_by_role("button", name="Approve").click()
+    await page.locator('aside[aria-label="Approval"]').get_by_role("button", name="Approve").click()
 
-    expect(card_two).to_have_count(0)  # the other tab's card is gone, so it cannot be answered twice
-    expect(second.locator(".answer")).to_have_text("Sent to the team.")
+    await expect(card_two).to_have_count(0)  # the other tab's card is gone, so it cannot be answered twice
+    await expect(second.locator(".answer")).to_have_text("Sent to the team.")

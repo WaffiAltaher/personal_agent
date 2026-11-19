@@ -9,6 +9,7 @@ Claude Code CLI, the stand-in MS365 server switched logged out and back in. No l
 import asyncio
 import datetime
 import json
+import sys
 import time
 
 import pytest
@@ -17,7 +18,7 @@ from google.oauth2.credentials import Credentials
 import agent.auth.google as google_auth
 from agent.auth.claude_code import CLAUDE_CODE_LOGIN_COMMAND
 from agent.auth.google import GOOGLE_LOGIN_COMMAND, SCOPES
-from agent.tools.mcp_loader import load_mcp_tools
+from agent.tools.mcp_loader import LoginCheck, McpServer, load_mcp_tools
 from agent.tools.ms365_mcp import LOGIN, ms365_fixture_server
 from agent.web.logins import Integration, Logins, claude_code_login, google_login, startup_logins
 from fixture_world import claude_code as fake_cli
@@ -142,3 +143,23 @@ async def test_an_ms365_server_skipped_at_startup_is_loaded_once_its_login_passe
     seen = await follow_up_events(web, thread, "q3")  # a later turn has its tools
     step, = [data["step"] for name, data in seen if name == "step_finished"]
     assert step["name"] == "ms365_list-mail-messages" and not step["error"], step
+
+
+async def test_an_mcp_server_that_failed_to_start_for_another_reason_is_not_retried(tmp_path):
+    starts = tmp_path / "starts"
+    crashing = McpServer(
+        name="crashy",
+        connection={"transport": "stdio", "command": sys.executable,
+                    "args": ["-c", f"open({str(starts)!r}, 'a').write('x'); raise SystemExit(1)"]},
+        login=LoginCheck(service="Crashy", command="crashy login", check_tool="verify-login"),
+    )
+    mcp_tools, notices = await load_mcp_tools([crashing])
+    assert mcp_tools == [] and "failed to start" in notices[0]
+    logins = startup_logins([crashing], tools=[], notices=notices)
+    logins.turn_wait_s = 30
+
+    await logins.refresh_for_turn()
+
+    assert starts.read_text() == "x"  # started once, at startup: no login to wait for, so no retry
+    crashy = by_name(logins.status())["crashy"]
+    assert (crashy["alive"], crashy["detail"]) == (False, notices[0])
