@@ -7,12 +7,12 @@ tools are loaded as `--fixtures` loads them, the chat model is injected into the
 every approval prompt is answered with the scenario's approval policy through
 `run_conversation`, as the CLI does with the owner's answer.
 
-Only tools that stay inside the Fixture world are bound: the Fixture world's MCP tools plus
-the local tools in EVAL_LOCAL_TOOLS (the seeded web search), and the Gmail stand-ins in
-EVAL_GMAIL_TOOLS only in a scenario that requires one of them. The other local tools reach the
-owner's real Gmail, Google Calendar, memory store or files, and an auto-approved Write action
-there would be real. The agent folder, where attachments are saved, is the run's own
-`Downloads/personal_agent`, inside the Downloads folder the Informer upload accepts.
+Every scenario gets the same tools the agent has in production, so the model chooses among
+all of them, as it does for the owner. None of them touches anything real: the MCP servers, web
+search, Gmail and Google Calendar are the Fixture world's stand-ins; the file tools are confined
+to the run's own Downloads folder; and episodic and semantic memory are temporary stores (the
+episodic one seeded from EVAL_EPISODIC_SEED). The agent folder, where attachments are saved, is
+the run's own `Downloads/personal_agent`, inside the Downloads folder the Informer upload accepts.
 """
 
 import json
@@ -46,11 +46,16 @@ from fixture_world.purchase_handover import HANDOVER_FAIL_ENV, UPLOAD_LOG_ENV
 from agent.conversation import run_conversation
 from agent.graph import build_graph, is_step_limit_answer
 from agent.tracing import TraceAttributes
-from agent.tools import LOCAL_TOOLS, load_all_tools
-from agent.tools.classification import is_outbound_read
-from agent.tools.gmail import get_gmail_message, save_gmail_attachment, search_gmail
-from agent.tools.memory import retrieve_episodic_memory
-from agent.tools.web import web_search
+from agent.memory import fixtures_semantic_memory
+from agent.tools import load_all_tools
+from agent.tools.classification import action_class, classify_as, is_outbound_read
+from agent.tools.filesystem import (
+    FILES_ROOT_ENV,
+    fixture_list_directory,
+    fixture_read_file,
+    list_directory,
+    read_file,
+)
 from fixture_world import clock, informer as fixture_informer, ms365 as fixture_ms365
 
 # Backstop only: the graph's model-call counter enforces settings.max_iterations.
@@ -77,11 +82,8 @@ def _seed_eval_downloads(downloads_path: Path) -> None:
 
 
 @contextmanager
-def _isolated_eval_episodic(workdir: Path, scenario: Scenario) -> Iterator[None]:
-    """Point episodic memory at a temp DB seeded for memory scenarios; restore after."""
-    if scenario.workflow != "memory":
-        yield
-        return
+def _isolated_eval_episodic(workdir: Path) -> Iterator[None]:
+    """Point episodic memory at a temp DB seeded with the eval run history; restore after."""
     prev = memory_module._episodic
     mem = EpisodicMemory(db_path=str(workdir / "episodic.db"))
     for row in json.loads(EVAL_EPISODIC_SEED.read_text()):
@@ -93,14 +95,9 @@ def _isolated_eval_episodic(workdir: Path, scenario: Scenario) -> Iterator[None]
         mem.close()
         memory_module._episodic = prev
 
-# Local tools that touch nothing real in Fixture-world mode: safe to bind in an eval. (The web
-# search is the Fixture world's seeded one there, under the real tool's name.)
-EVAL_LOCAL_TOOLS = frozenset({web_search.name, retrieve_episodic_memory.name})
-
-# The Fixture world's Gmail stand-ins, under the real tools' names (the save writes into the
-# run's agent folder). Safe too, but bound only in a scenario whose required_tools names one,
-# so that every other scenario keeps the tool set it was written against.
-EVAL_GMAIL_TOOLS = frozenset({search_gmail.name, get_gmail_message.name, save_gmail_attachment.name})
+# The real file tools read the owner's disk even in Fixture-world mode; an eval binds stand-ins
+# confined to the run's Downloads folder under the same names instead.
+EVAL_FILE_STAND_INS = {read_file.name: fixture_read_file, list_directory.name: fixture_list_directory}
 
 ModelFactory = Callable[[Scenario], BaseChatModel]
 ToolLoader = Callable[[], Awaitable[tuple[list[BaseTool], list[str]]]]
@@ -125,19 +122,13 @@ def trace_attributes(scenario: Scenario, *, model_name: str, eval_run_id: str, r
 
 
 async def load_fixture_world_tools() -> tuple[list[BaseTool], list[str]]:
-    """The Fixture world's MCP tools plus the local tools in EVAL_LOCAL_TOOLS and EVAL_GMAIL_TOOLS,
-    and any notices. `run_scenario` drops the Gmail ones unless the scenario needs them."""
+    """Every tool `--fixtures` loads, with the file tools swapped for EVAL_FILE_STAND_INS (same
+    classification), and any notices."""
     tools, notices = await load_all_tools(fixtures=True)
-    local = {t.name for t in LOCAL_TOOLS}
-    allowed = EVAL_LOCAL_TOOLS | EVAL_GMAIL_TOOLS
-    return [t for t in tools if t.name not in local or t.name in allowed], notices
-
-
-def scenario_tools(scenario: Scenario, tools: list[BaseTool]) -> list[BaseTool]:
-    """`tools` without the Gmail stand-ins, unless the scenario requires one of them."""
-    if EVAL_GMAIL_TOOLS & set(scenario.required_tools):
-        return tools
-    return [t for t in tools if t.name not in EVAL_GMAIL_TOOLS]
+    return [
+        classify_as(EVAL_FILE_STAND_INS[t.name], action_class(t)) if t.name in EVAL_FILE_STAND_INS else t
+        for t in tools
+    ], notices
 
 
 @contextmanager
@@ -252,15 +243,16 @@ async def run_scenario(
             UPLOAD_LOG_ENV: str(upload_log_path),
             fixture_informer.DOWNLOADS_ENV: str(downloads_path),  # the server process only sees FIXTURE_WORLD_* vars
             "INFORMER_DOWNLOADS_DIR": str(downloads_path),
+            FILES_ROOT_ENV: str(downloads_path),  # the file tools see only the run's Downloads folder
             HANDOVER_FAIL_ENV: (
                 failure.mode
                 if failure and failure.server == "handover"
                 else os.environ.get(HANDOVER_FAIL_ENV)
             ),
         }
-        with _isolated_eval_episodic(work, scenario), _environment(env), _agent_folder(agent_folder):
+        with (_isolated_eval_episodic(work), fixtures_semantic_memory(), _environment(env),
+              _agent_folder(agent_folder)):
             tools, notices = await load_tools()
-            tools = scenario_tools(scenario, tools)
             if failure and failure.server == "ms365":
                 switch.set(failure.mode, failure.times)  # after loading: it hits the run, not startup
 

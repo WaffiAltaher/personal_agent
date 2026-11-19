@@ -265,13 +265,40 @@ async def test_eval_runs_write_nothing_to_the_owners_memory(evaluate, monkeypatc
     from agent.memory.episodic import EpisodicMemory
     from agent.memory.semantic import SemanticMemory
 
-    written = []
-    monkeypatch.setattr(EpisodicMemory, "log_run", lambda self, run: written.append(run))
-    monkeypatch.setattr(SemanticMemory, "remember", lambda self, *a, **k: written.append(a))
+    from agent.config import settings
+
+    # Every store records the path it opened; a store that skipped __init__ is the owner's.
+    owner_paths = {Path(settings.sqlite_path).resolve(), Path(settings.chroma_path).resolve()}
+    real_episodic_init, real_semantic_init = EpisodicMemory.__init__, SemanticMemory.__init__
+    real_log_run, real_remember = EpisodicMemory.log_run, SemanticMemory.remember
+
+    def episodic_init(self, db_path=None):
+        self._spy_path = Path(db_path or settings.sqlite_path).resolve()
+        real_episodic_init(self, db_path)
+
+    def semantic_init(self, persist_dir=None):
+        self._spy_path = Path(persist_dir or settings.chroma_path).resolve()
+        real_semantic_init(self, persist_dir)
+
+    written_to = []
+
+    def log_run(self, run):
+        written_to.append(getattr(self, "_spy_path", None))
+        return real_log_run(self, run)
+
+    def remember(self, *a, **k):
+        written_to.append(getattr(self, "_spy_path", None))
+        return real_remember(self, *a, **k)
+
+    monkeypatch.setattr(EpisodicMemory, "__init__", episodic_init)
+    monkeypatch.setattr(SemanticMemory, "__init__", semantic_init)
+    monkeypatch.setattr(EpisodicMemory, "log_run", log_run)
+    monkeypatch.setattr(SemanticMemory, "remember", remember)
 
     await evaluate("reply-flaky-mailbox")
 
-    assert written == []
+    assert written_to, "the eval's own episodic store is seeded"
+    assert all(path is not None and path not in owner_paths for path in written_to)
 
 
 @pytest.mark.asyncio
