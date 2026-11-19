@@ -13,13 +13,15 @@ mid-turn gets the current ``state`` and then exactly the events after it.
 
 Events (name: data):
 - ``state``: ``{status, transcript}`` (first on every stream; ``transcript`` as GET /conversations/{id})
-- ``turn_started``: ``{question}``: a new turn with no steps and no answer
+- ``turn_started``: ``{question}``: a new turn with no steps and no answer (a Follow-up sent while an
+  Approval waits: after ``approval_decided`` and the events that end the earlier turn)
 - ``step_started``: ``{step}``: a tool call the model made (``result`` null)
 - ``step_finished``: ``{step}``: that call with its ``result`` and ``error``
 - ``approval_pending``: ``{pending}``: the Approval the turn parked at (as the transcript's ``pending``)
+- ``approval_decided``: ``{interrupt_id, decision}``: that Approval was answered (``approve`` | ``reject``)
 - ``answer``: ``{text}``: the turn's answer, whole
 - ``turn_ended``: ``{status, outcome, message}``: outcome ``answered`` | ``approval`` | ``failed`` |
-  ``error``; ``message`` is what the CLI would print for a failure, else null
+  ``error`` | ``cancelled`` (Stop); ``message`` is what the CLI would print for a failure or a Stop, else null
 """
 
 import asyncio
@@ -33,17 +35,18 @@ from langgraph.errors import GraphRecursionError
 from agent.claude_code_model import ClaudeCodeError
 from agent.cli import STEP_LIMIT_STOPPED, write_run_log
 from agent.config import settings
-from agent.conversation import stream_conversation
+from agent.conversation import APPROVAL_ABANDONED, close_interrupted_turn, stream_conversation
 from agent.tracing import get_callback_handler
 from agent.web.conversations import message_text, pending_approval, tool_step, transcript
 
 logger = logging.getLogger(__name__)
 
 IDLE, RUNNING, AWAITING_APPROVAL = "idle", "running", "awaiting_approval"
+STOPPED_BY_OWNER = "Interrupted."  # what the CLI prints after Ctrl-C cancels a turn
 
 
 class TurnRefused(Exception):
-    """A turn the thread can't take now (one is running)."""
+    """A turn the thread can't take now (one is running, or a decision answers no pending Approval)."""
 
 
 def apply_event(conversation: dict, name: str, data: dict) -> None:
@@ -63,6 +66,8 @@ def apply_event(conversation: dict, name: str, data: dict) -> None:
             steps[at] = data["step"]
     elif name == "approval_pending":
         conversation["pending"] = data["pending"]
+    elif name == "approval_decided":
+        conversation["pending"] = None
     elif name == "answer":
         turns[-1]["answer"] = data["text"]
     elif name == "turn_ended" and data.get("message") and turns:
@@ -78,6 +83,8 @@ class ThreadState:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     task: asyncio.Task | None = None
     callbacks: list | None = None  # one Langfuse handler per Conversation, made on its first web turn
+    streaming: bool = False  # the running turn is in the driver (Stop may cancel it)
+    stopping: bool = False  # Stop cancelled the running turn
 
     def publish(self, name: str, data: dict) -> None:
         apply_event(self.transcript, name, data)
@@ -136,6 +143,12 @@ class Turns:
         if thread is not None:
             thread.subscribers.discard(queue)
 
+    def _ensure_callbacks(self, thread: ThreadState) -> None:
+        if thread.callbacks is None:
+            # The CLI's rule: the trace id is the thread id without dashes (Langfuse wants 32 hex chars).
+            thread.callbacks = ([get_callback_handler(trace_id=thread.thread_id.replace("-", ""))]
+                                if self.langfuse_connected else [])
+
     async def ask(self, thread_id: str, question: str) -> None:
         """Start a turn on the thread with this question; refused while one runs."""
         thread = self._thread(thread_id)
@@ -143,22 +156,59 @@ class Turns:
             if thread.status == RUNNING:
                 raise TurnRefused("A turn is already running in this Conversation.")
             await self._reload(thread)
-            if thread.callbacks is None:
-                # The CLI's rule: the trace id is the thread id without dashes (Langfuse wants 32 hex chars).
-                thread.callbacks = ([get_callback_handler(trace_id=thread_id.replace("-", ""))]
-                                    if self.langfuse_connected else [])
+            self._ensure_callbacks(thread)
+            pending = thread.transcript["pending"]
             thread.status = RUNNING
-            thread.publish("turn_started", {"question": question})
-            thread.task = asyncio.create_task(self._run(thread, question))
+            if pending is None:
+                thread.publish("turn_started", {"question": question})
+            else:
+                # As in the CLI, the Follow-up rejects the pending Approval (the driver abandons it,
+                # which ends the earlier turn); the Follow-up's own turn starts after that.
+                thread.publish("approval_decided", {"interrupt_id": pending["interrupt_id"], "decision": "reject"})
+            thread.task = asyncio.create_task(self._run(thread, question, abandoning=pending is not None))
 
-    async def _run(self, thread: ThreadState, question: str) -> None:
+    async def decide(self, thread_id: str, interrupt_id: str, decision: str) -> None:
+        """Answer the thread's pending Approval ("approve" or "reject") and continue its turn.
+        Refused unless the thread waits at the Approval with this interrupt id (a stale tab's
+        decision must not resume a checkpoint that has moved on)."""
+        thread = self._thread(thread_id)
+        async with thread.lock:
+            if thread.status == RUNNING:
+                raise TurnRefused("A turn is already running in this Conversation.")
+            await self._reload(thread)
+            pending = thread.transcript["pending"]
+            if pending is None or pending["interrupt_id"] != interrupt_id:
+                raise TurnRefused("This Approval is no longer pending.")
+            self._ensure_callbacks(thread)
+            thread.status = RUNNING
+            thread.publish("approval_decided", {"interrupt_id": interrupt_id, "decision": decision})
+            thread.task = asyncio.create_task(self._run(thread, resume_decision=decision))
+
+    def stop(self, thread_id: str) -> None:
+        """Cancel the thread's running turn, as Ctrl-C does in the CLI; refused unless one runs."""
+        thread = self.threads.get(thread_id)
+        if thread is None or thread.task is None or not thread.streaming or thread.stopping:
+            raise TurnRefused("No turn is running in this Conversation.")
+        thread.stopping = True
+        thread.task.cancel()
+
+    async def _run(self, thread: ThreadState, question: str | None = None, *,
+                   resume_decision: str | None = None, abandoning: bool = False) -> None:
         outcome, message, error = "answered", None, None
+        thread.streaming = True
         try:
             with propagate_attributes(user_id="waffi", trace_name="web-run",
                                       metadata={"prompt-version": settings.prompt_version}):
                 async for chunk in stream_conversation(self.graph, self._config(thread), tools=self.tools,
-                                                       user_message=question):
-                    if "__interrupt__" in chunk:
+                                                       user_message=question, resume_decision=resume_decision):
+                    if APPROVAL_ABANDONED in chunk:
+                        abandoning = False
+                        thread.publish("turn_started", {"question": question})
+                        continue
+                    if abandoning:
+                        # An Approval met while abandoning is rejected in turn: no card for it.
+                        chunk = {node: update for node, update in chunk.items() if node != "__interrupt__"}
+                    elif "__interrupt__" in chunk:
                         outcome = "approval"
                     self._publish_chunk(thread, chunk)
         except ClaudeCodeError as exc:
@@ -166,16 +216,38 @@ class Turns:
             outcome, message, error = "failed", f"Stopped: {exc}", f"{type(exc).__name__}: {exc}"
         except GraphRecursionError as exc:
             outcome, message, error = "failed", STEP_LIMIT_STOPPED, f"{type(exc).__name__}: {exc}"
+        except asyncio.CancelledError:
+            if not thread.stopping:
+                raise  # the server is shutting down, not a Stop
+            asyncio.current_task().uncancel()
+            # As Ctrl-C: tool calls the cancel left open are answered, so the thread takes the next question.
+            await close_interrupted_turn(self.graph, self._config(thread))
+            await self._publish_closed_steps(thread)
+            outcome, message = "cancelled", STOPPED_BY_OWNER
         except Exception as exc:
             logger.exception("Web turn failed on thread %s", thread.thread_id)
             outcome, message, error = "error", f"Error: {type(exc).__name__}: {exc}", f"{type(exc).__name__}: {exc}"
+        finally:
+            thread.streaming = False
         try:
-            await write_run_log(self.checkpoint_path, thread.thread_id, error=error, questions=[question])
+            await write_run_log(self.checkpoint_path, thread.thread_id, error=error,
+                                  questions=[question] if question else [])
         except Exception:
             logger.exception("Run log write failed on thread %s", thread.thread_id)
         thread.status = AWAITING_APPROVAL if outcome == "approval" else IDLE
         thread.task = None
+        thread.stopping = False
         thread.publish("turn_ended", {"status": thread.status, "outcome": outcome, "message": message})
+
+    async def _publish_closed_steps(self, thread: ThreadState) -> None:
+        """A step_finished for each running step of the last turn that now has its result."""
+        state = await self.graph.aget_state(self._config(thread))
+        results = {m.tool_call_id: m for m in state.values.get("messages", []) if isinstance(m, ToolMessage)}
+        if not thread.transcript["turns"]:
+            return
+        for step in list(thread.transcript["turns"][-1]["steps"]):
+            if step["result"] is None and step["id"] in results:
+                thread.publish("step_finished", {"step": tool_step(step, results[step["id"]])})
 
     def _publish_chunk(self, thread: ThreadState, chunk: dict) -> None:
         for node, update in chunk.items():

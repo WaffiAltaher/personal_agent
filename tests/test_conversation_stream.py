@@ -6,7 +6,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.tools import tool
 from langgraph.checkpoint.memory import InMemorySaver
 
-from agent.conversation import ConversationDriverError, run_conversation, stream_conversation
+from agent.conversation import APPROVAL_ABANDONED, ConversationDriverError, run_conversation, stream_conversation
 from agent.graph import build_graph
 from agent.tools.classification import read_tool, write_action
 
@@ -78,6 +78,20 @@ async def test_a_follow_up_rejects_the_pending_approval_as_in_run_conversation(s
     rejected = next(m for m in messages if isinstance(m, ToolMessage) and m.tool_call_id == "w1")
     assert rejected.status == "error"
     assert messages[-1].content == "Hello."
+
+
+async def test_a_follow_up_yields_the_abandonment_then_a_marker_then_its_own_turn(scripted_model):
+    graph = build_graph(InMemorySaver(), TOOLS, scripted_model([ai("", ("w1", "send_mail")), ai("Ok, not sent."),
+                                                                ai("Hello.")]))
+    await run_conversation(graph, CONFIG, tools=TOOLS, user_message="Mail Ann")
+
+    chunks = await collect(graph, user_message="Never mind, say hello")
+
+    at = next(i for i, chunk in enumerate(chunks) if APPROVAL_ABANDONED in chunk)
+    before, after = messages_of(chunks[:at]), messages_of(chunks[at + 1:])
+    assert [(m.type, m.content if m.type == "ai" else m.tool_call_id) for m in before] == [
+        ("tool", "w1"), ("ai", "Ok, not sent.")]
+    assert [m.content for m in after] == ["Hello."]
 
 
 async def test_a_resume_without_a_pending_approval_is_refused(scripted_model):

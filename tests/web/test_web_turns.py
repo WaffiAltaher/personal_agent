@@ -159,7 +159,7 @@ class EventStream:
 
 @pytest_asyncio.fixture
 async def serve(tmp_path, monkeypatch):
-    """serve(scripts, langfuse_connected=False) -> Web: the app on the Fixture tools, a stand-in
+    """serve(scripts, langfuse_connected=False, tools=TOOLS) -> Web: the app on the Fixture tools, a stand-in
     model and a real checkpoint file, served on a free local port. The run log is a temp file."""
     dist = tmp_path / "dist"
     dist.mkdir()
@@ -169,14 +169,14 @@ async def serve(tmp_path, monkeypatch):
     monkeypatch.setattr(graph_module, "get_episodic_memory", lambda: memory)
     started = []
 
-    async def make(scripts, *, langfuse_connected=False):
+    async def make(scripts, *, langfuse_connected=False, tools=TOOLS):
         port = free_port()
         origin = f"http://127.0.0.1:{port}"
         checkpointer_cm = get_checkpointer(db)
         checkpointer = await checkpointer_cm.__aenter__()
         model = StandInModel(messages=iter([]), scripts=scripts)
         app = create_app(
-            graph=build_graph(checkpointer, TOOLS, model), tools=TOOLS, model=model, checkpoint_path=db,
+            graph=build_graph(checkpointer, tools, model), tools=tools, model=model, checkpoint_path=db,
             web=WebConfig(password_hash=FAST_HASHER.hash(PASSWORD), port=port, dist_dir=dist),
             langfuse_connected=langfuse_connected,
         )
