@@ -36,7 +36,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.errors import GraphRecursionError
 from agent.config import settings
 from agent.evals.efficiency import efficiency, efficiency_totals
-from agent.evals.generation import GenerationScorer, generation_means, generation_sample
+from agent.evals.generation import GenerationScorer, RagasScorer, generation_means, generation_sample
 from agent.evals.records import EvalResults, InterruptRecord, RunResult, ToolCallRecord
 from agent.evals.report import render_report
 from agent.evals.scenarios import Dataset, Scenario
@@ -214,6 +214,7 @@ async def run_scenario(
     scorer: GenerationScorer | None = None,
     tracer: Tracer | None = None,
     eval_run_id: str = "",
+    judge_model: str | None = None,
 ) -> RunResult:
     """Run one scenario in a fresh Fixture world and score it. Never raises for agent failures:
     a crash or the step limit is recorded in the result's status. With a `scorer`, the final
@@ -347,6 +348,13 @@ async def run_scenario(
         trace_id=trace.trace_id if tracer else None,
     )
     if scorer is not None:
+        if isinstance(scorer, RagasScorer) and judge_model:
+            scorer.begin_scenario_run(
+                eval_run_id=eval_run_id,
+                scenario_id=scenario.id,
+                repeat=repeat,
+                judge_model=judge_model,
+            )
         run.generation = await scorer.score(generation_sample(scenario, run))
     return run
 
@@ -374,8 +382,17 @@ async def run_eval(
     started = datetime.now(timezone.utc)
     eval_run_id = f"{started:%Y%m%dT%H%M%SZ}-{uuid.uuid4().hex[:6]}"
     runs = [
-        await run_scenario(scenario, model=model_factory(scenario), model_name=model_name, load_tools=load_tools,
-                           repeat=repeat, scorer=scorer, tracer=tracer, eval_run_id=eval_run_id)
+        await run_scenario(
+            scenario,
+            model=model_factory(scenario),
+            model_name=model_name,
+            load_tools=load_tools,
+            repeat=repeat,
+            scorer=scorer,
+            tracer=tracer,
+            eval_run_id=eval_run_id,
+            judge_model=judge_model,
+        )
         for scenario in dataset.select(scenario_filter)
         for repeat in range(repeats)
     ]

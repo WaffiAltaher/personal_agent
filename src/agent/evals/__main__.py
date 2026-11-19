@@ -13,7 +13,8 @@ version, scenario and eval-run id.
 
 The judge model grades the answers (RAGAS). It is --judge-model, else EVAL_JUDGE_MODEL, else
 the model under test itself: the command then says so, as the model grades its own answers.
---no-ragas skips the generation metrics (and the judge). --repeats N runs every scenario N
+--no-ragas skips the generation metrics (and the judge). --judge-log <file.jsonl> records every
+RAGAS judge LLM call (prompt and raw reply) for the run. --repeats N runs every scenario N
 times, so the results show the run-to-run variation.
 
 Compare two models from their results files (writes `compare-<run A>-vs-<run B>.md` to --out):
@@ -35,6 +36,7 @@ from agent.chat_model import create_embeddings as create_chat_embeddings
 from agent.config import settings
 from agent.evals.compare import ResultsError, write_comparison
 from agent.evals.generation import RagasScorer
+from agent.evals.judge_log import JudgeCallLog
 from agent.evals.harness import run_eval, write_results
 from agent.evals.scenarios import DEFAULT_DATASET, ScenarioError, load_dataset
 from agent.tracing import flush_traces, langfuse_trace
@@ -53,6 +55,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
                         help="model grading the answers (RAGAS), as provider:model "
                              "(default: EVAL_JUDGE_MODEL from settings, else the model under test)")
     parser.add_argument("--no-ragas", action="store_true", help="skip the generation metrics and the judge")
+    parser.add_argument("--judge-log", type=Path, default=None,
+                        help="append every RAGAS judge prompt and reply to this JSONL file (needs RAGAS)")
     parser.add_argument("--repeats", type=_positive_int, default=1,
                         help="runs per scenario, to measure run-to-run variation (default: 1)")
     return parser.parse_args(argv)
@@ -94,12 +98,21 @@ async def main(
     model = create_model(args.model)  # fails fast on a missing API key, before any run
 
     scorer, judge_model = None, None
+    judge_log_path = args.judge_log
+    if judge_log_path is not None and args.no_ragas:
+        print("Warning: --judge-log has no effect with --no-ragas.")
+        judge_log_path = None
     if not args.no_ragas:
         judge_model = args.judge_model or args.model
         if judge_model == args.model:
             print(f"Warning: no judge model set (--judge-model or EVAL_JUDGE_MODEL), so {judge_model} "
                   "grades its own answers.")
-        scorer = RagasScorer(judge=create_model(judge_model), embeddings=create_embeddings())
+        judge_log = JudgeCallLog(judge_log_path) if judge_log_path is not None else None
+        scorer = RagasScorer(
+            judge=create_model(judge_model),
+            embeddings=create_embeddings(),
+            judge_log=judge_log,
+        )
 
     try:
         results = await run_eval(
@@ -121,6 +134,8 @@ async def main(
     print(f"{results.model}: {s.passed}/{s.runs} passed (recall {s.mean_recall:.2f}, precision {s.mean_precision:.2f})")
     print(f"Results: {json_path}")
     print(f"Report:  {report_path}")
+    if judge_log_path is not None:
+        print(f"Judge log: {judge_log_path}")
 
 
 if __name__ == "__main__":

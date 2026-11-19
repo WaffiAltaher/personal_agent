@@ -19,6 +19,7 @@ from langchain_core.messages import AIMessage
 import agent.graph as graph_module
 from agent.evals.__main__ import main
 from agent.evals.generation import RagasScorer
+from agent.evals.judge_log import JudgeCallLog
 from agent.evals.harness import run_eval, write_results
 from agent.evals.records import EvalResults
 from agent.evals.scenarios import ScenarioError, load_dataset
@@ -393,6 +394,31 @@ def evaluate_with_judge(scripted_model, judge):
             judge_model="scripted-judge",
         )
     return evaluate
+
+
+@pytest.mark.asyncio
+async def test_judge_log_records_every_ragas_call_with_prompt_and_reply(
+        scripted_model, judge, tmp_path,
+):
+    log_path = tmp_path / "judge.jsonl"
+    results = await run_eval(
+        load_dataset(DATASET),
+        model_name="scripted",
+        model_factory=lambda scenario: scripted_model(SCRIPTS[scenario.id]),
+        scenario_filter="reply-flaky-mailbox",
+        scorer=RagasScorer(judge=judge, embeddings=ScriptedEmbeddings(), judge_log=JudgeCallLog(log_path)),
+        judge_model="scripted-judge",
+    )
+
+    assert len(results.runs) == 1
+    rows = [json.loads(line) for line in log_path.read_text().splitlines() if line.strip()]
+    assert rows
+    assert {r["scenario_id"] for r in rows} == {"reply-flaky-mailbox"}
+    assert all(r["judge_model"] == "scripted-judge" for r in rows)
+    assert all(r["prompt"] and r["response"] for r in rows)
+    metrics = {r["metric"] for r in rows}
+    assert "faithfulness" in metrics
+    assert all(r["call_index"] >= 1 for r in rows)
 
 
 @pytest.mark.asyncio
