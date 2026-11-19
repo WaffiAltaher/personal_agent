@@ -51,6 +51,10 @@ class LoginRequired(Exception):
     """The server's login is missing or expired."""
 
 
+class LoginNotice(str):
+    """A notice from ``load_mcp_tools`` that a server was skipped for its login (not for another failure)."""
+
+
 @dataclass(frozen=True)
 class LoginCheck:
     """How to tell that a server's login is missing or expired, and how the user logs in."""
@@ -156,7 +160,9 @@ async def _list_tools(session: ClientSession) -> list[MCPTool]:
             return listed
 
 
-async def _load_server(server: McpServer) -> list[BaseTool]:
+async def load_mcp_server(server: McpServer) -> list[BaseTool]:
+    """One configured server's classified tools, as at startup. Raises LoginRequired when its login
+    is missing or expired, or the server's own failure when it fails to start."""
     client = MultiServerMCPClient({server.name: server.connection})
     # One session serves both the tool listing and the login check, so the server starts once.
     # Each tool opens its own session per call (as the adapter's tools do), so they outlive this one.
@@ -198,12 +204,6 @@ async def _load_server(server: McpServer) -> list[BaseTool]:
     return classified
 
 
-async def load_mcp_server(server: McpServer) -> list[BaseTool]:
-    """One configured server's classified tools, as at startup. Raises LoginRequired when its login
-    is missing or expired, or the server's own failure when it fails to start."""
-    return await _load_server(server)
-
-
 async def check_mcp_login(server: McpServer) -> str | None:
     """Why a configured server's login is missing or expired, or None when it is fine (or it has no
     login, or no check tool to ask)."""
@@ -222,9 +222,9 @@ async def load_mcp_tools(servers: list[McpServer]) -> tuple[list[BaseTool], list
         if server.connection is None:
             return [], f"{server.name} tools unavailable: {server.unavailable_reason}"
         try:
-            return await _load_server(server), None
+            return await load_mcp_server(server), None
         except LoginRequired as exc:
-            return [], f"{server.name} tools unavailable: {exc}"
+            return [], LoginNotice(f"{server.name} tools unavailable: {exc}")
         except Exception as exc:  # isolate: one broken server must not stop the others
             logger.warning("MCP server %s failed to start", server.name, exc_info=exc)
             while isinstance(exc, BaseExceptionGroup) and len(exc.exceptions) == 1:
