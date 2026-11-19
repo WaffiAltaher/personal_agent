@@ -83,7 +83,7 @@ async def test_run_completes_and_warns_with_the_base_url_when_langfuse_refuses_c
     out = capsys.readouterr().out
     assert "Your calendar is empty on Monday." in out
     assert "Langfuse" in out and OUTAGE_BASE_URL in out
-    assert seen["logged_to_memory"] == ["Is my calendar empty on Monday?"]
+    assert seen["logged_to_memory"] == ["Is my calendar empty on Monday?"] * 2  # after the turn and at exit
 
 
 @pytest.mark.asyncio
@@ -98,7 +98,7 @@ async def test_any_other_auth_check_failure_is_treated_the_same_way(
     out = capsys.readouterr().out
     assert "Your calendar is empty on Monday." in out
     assert "Langfuse" in out and OUTAGE_BASE_URL in out
-    assert seen["logged_to_memory"] == ["Is my calendar empty on Monday?"]
+    assert seen["logged_to_memory"] == ["Is my calendar empty on Monday?"] * 2  # after the turn and at exit
 
 
 @pytest.mark.asyncio

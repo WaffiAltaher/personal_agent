@@ -4,16 +4,16 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] After each turn in a CLI session, the thread's run log entry exists and reflects every turn so far (questions, answers, tools, summed tokens and cost, outcome)
-- [ ] A turn stopped by a `ClaudeCodeError` or the step limit leaves an entry with that error; a later successful turn in the same Conversation keeps it
-- [ ] A Conversation resumed in a new process keeps earlier errors in its entry after the next turn
-- [ ] A Ctrl-C-cancelled turn leaves an entry
-- [ ] Still exactly one entry per thread; `--fixtures` still writes none
-- [ ] The helper takes the checkpoint path and thread id and needs no CLI state
-- [ ] Existing CLI tests pass; new tests use the shared CLI harness with a scripted model
-- [ ] `CLAUDE.md` and the `cli.py` docstring say the entry is written after every turn
+- [x] After each turn in a CLI session, the thread's run log entry exists and reflects every turn so far (questions, answers, tools, summed tokens and cost, outcome)
+- [x] A turn stopped by a `ClaudeCodeError` or the step limit leaves an entry with that error; a later successful turn in the same Conversation keeps it
+- [x] A Conversation resumed in a new process keeps earlier errors in its entry after the next turn
+- [x] A Ctrl-C-cancelled turn leaves an entry
+- [x] Still exactly one entry per thread; `--fixtures` still writes none
+- [x] The helper takes the checkpoint path and thread id and needs no CLI state
+- [x] Existing CLI tests pass; new tests use the shared CLI harness with a scripted model
+- [x] `CLAUDE.md` and the `cli.py` docstring say the entry is written after every turn
 
 Spec: `../spec.md` (Run log after every turn).
 

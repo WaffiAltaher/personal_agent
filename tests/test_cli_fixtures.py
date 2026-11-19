@@ -96,4 +96,5 @@ async def test_fixtures_mode_writes_nothing_to_the_owners_memory(run_cli):
 async def test_without_fixtures_the_run_is_logged_to_memory(run_cli):
     seen = await run_cli("What day is it?")
 
-    assert seen["logged_to_memory"] == ["What day is it?"]
+    # Written after the turn and again at exit: the same entry, replaced.
+    assert seen["logged_to_memory"] == ["What day is it?"] * 2

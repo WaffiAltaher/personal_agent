@@ -48,7 +48,7 @@ def cli_run(monkeypatch, tmp_path, scripted_model, startup_login_checks_pass):
     monkeypatch.setattr(graph, "CHECKPOINT_DB", str(tmp_path / "hitl.db"))
     monkeypatch.setattr(graph, "FIXTURE_CHECKPOINT_DB", str(tmp_path / "fixtures.db"))
     seen = {"ran": [], "flushed": 0, "handler": RecordingHandler(), "configs": [], "logged": [],
-            "tools": []}  # a test adds its own tools here before start()
+            "writes": [], "tools": []}  # a test adds its own tools here before start()
 
     @write_action
     @tool("send_mail")
@@ -67,10 +67,14 @@ def cli_run(monkeypatch, tmp_path, scripted_model, startup_login_checks_pass):
         return [send_mail, lookup, *seen["tools"]], []
 
     class EpisodicMemory(episodic.EpisodicMemory):
-        """The real run log in a temp file; `seen["logged"]` gets each entry as it was stored."""
+        """The real run log in a temp file. `seen["writes"]` gets each entry as it was stored;
+        `seen["logged"]` the entries now held, one per Conversation (a later write replaces its earlier one)."""
         def log_run(self, run):
             super().log_run(run)
-            seen["logged"].append(next(r for r in self.get_recent_runs(1000) if r.id == run.id))
+            stored = next(r for r in self.get_recent_runs(1000) if r.id == run.id)
+            seen["writes"].append(stored)
+            seen["logged"][:] = [r for r in seen["logged"] if run.thread_id is None or r.thread_id != run.thread_id]
+            seen["logged"].append(stored)
 
     memory = EpisodicMemory(str(tmp_path / "memory.db"))
 
