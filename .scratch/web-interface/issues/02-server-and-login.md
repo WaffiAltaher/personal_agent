@@ -4,19 +4,19 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] With no `WEB_PASSWORD_HASH`, startup stops naming `python -m agent.web.set_password`; with a missing `web/dist`, it stops naming the build command
-- [ ] `set_password` reads the password twice without echo and writes or replaces only that line in `.env`
-- [ ] A correct password sets the cookie with the stated flags; a wrong one is refused; repeated failures are rate-limited
-- [ ] Changing the password ends existing sessions (signing key derived from the hash)
-- [ ] Every API endpoint except login refuses requests without a session
-- [ ] Wrong `Host` is refused everywhere; a foreign or missing `Origin` is refused on state-changing requests and event streams; no CORS headers
-- [ ] Dead Google or Claude Code logins stop startup with the same message as the CLI; skipped MCP servers print the same notices
-- [ ] The bind host is a setting defaulting to `127.0.0.1`
-- [ ] Vite dev server proxies to FastAPI; one build command produces `web/dist`
-- [ ] pytest covers all of the above with FastAPI's test client; no live calls
-- [ ] The setup wizard has a step that runs `set_password`; `CLAUDE.md` documents the run and build commands and the `WEB_*` settings
+- [x] With no `WEB_PASSWORD_HASH`, startup stops naming `python -m agent.web.set_password`; with a missing `web/dist`, it stops naming the build command
+- [x] `set_password` reads the password twice without echo and writes or replaces only that line in `.env`
+- [x] A correct password sets the cookie with the stated flags; a wrong one is refused; repeated failures are rate-limited
+- [x] Changing the password ends existing sessions (signing key derived from the hash)
+- [x] Every API endpoint except login refuses requests without a session
+- [x] Wrong `Host` is refused everywhere; a foreign or missing `Origin` is refused on state-changing requests and event streams; no CORS headers
+- [x] Dead Google or Claude Code logins stop startup with the same message as the CLI; skipped MCP servers print the same notices
+- [x] The bind host is a setting defaulting to `127.0.0.1`
+- [x] Vite dev server proxies to FastAPI; one build command produces `web/dist`
+- [x] pytest covers all of the above with FastAPI's test client; no live calls
+- [x] The setup wizard has a step that runs `set_password`; `CLAUDE.md` documents the run and build commands and the `WEB_*` settings
 
 Spec: `../spec.md` (Server and app, Login).
 

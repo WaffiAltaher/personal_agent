@@ -13,6 +13,13 @@ uv sync
 # --resume <id> continues an earlier Conversation (the id is printed at start and exit); a bare --resume the most recent.
 python -m agent.cli [--resume [<id>]] ["<first question>"]
 
+# Web interface (real data only) on http://127.0.0.1:<WEB_PORT>: set the password once, build the app, start the server
+python -m agent.web.set_password
+cd web && npm install && npm run build   # produces web/dist, which the server serves
+python -m agent.web
+# Front-end development: the Vite dev server on :5173 proxies /api to the running server
+cd web && npm run dev
+
 # Log in to Google (Gmail/Calendar) when startup says the token is missing or dead
 python -m agent.auth.google
 
@@ -51,11 +58,13 @@ CLI → graph.py (LangGraph) → agent_node (LLM) → human_review_node → tool
 
 **`src/agent/tools/`** — local tools return strings (success or `"Error: ..."` on failure) and raise only transient failures (`transient.py`: network blips, HTTP 429/5xx), so the graph retries them. `LOCAL_TOOLS` in `__init__.py` lists local tools, each wrapped in `read_tool(...)`, `outbound_read(...)` or `write_action(...)` (`classification.py`). `load_all_tools(fixtures=...)` adds MCP tools from the servers in `mcp_servers()`, loaded by `mcp_loader.py` (prefixed `ms365_` / `informer_`, classified per server; a server that fails to start is skipped with a notice).
 
+**`src/agent/web/`** — the web interface beside the CLI (ADR-018). `create_app(graph=, tools=, model=, checkpoint_path=, web=WebConfig(...))` builds the FastAPI app, so tests inject the Fixture world and the stand-in model; `server.py` runs the startup and uvicorn. Endpoints that need the owner depend on `require_session`; `RequestChecks` refuses a foreign `Host` everywhere and a foreign or missing `Origin` on state-changing requests and event streams. The React app (Vite, TypeScript) is in top-level `web/`. Startup steps shared with the CLI, with the same messages, are in `src/agent/startup.py`.
+
 **`src/fixture_world/`** — seeded stand-ins (MS365 MCP server, fake Informer API, web search) used by tests, evals and `--fixtures`.
 
 **`src/agent/evals/`** — eval harness: scenarios over the Fixture world, trajectory metrics, RAGAS generation metrics, cost/latency, model-comparison reports.
 
-**`src/agent/config.py`** — Pydantic Settings loading from `.env`. Required: `GOOGLE_API_KEY` (embeddings; use a key from a Google project with billing turned off), `TAVILY_API_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`. Optional: `ANTHROPIC_API_KEY` (required for `anthropic:` models), `CLAUDE_CODE_BINARY` and `CLAUDE_CODE_TIMEOUT_S` (`claude_code:` models), `MODEL_TIMEOUT_S` (per API request for `google_genai:`/`anthropic:` models and embeddings; default 120), `MODEL_ATTEMPTS` (tries per failed request, first included, for every model and the embeddings; default 2), `MS365_MCP_*`, `INFORMER_*`, `EVAL_JUDGE_MODEL`.
+**`src/agent/config.py`** — Pydantic Settings loading from `.env`. Required: `GOOGLE_API_KEY` (embeddings; use a key from a Google project with billing turned off), `TAVILY_API_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`. Optional: `ANTHROPIC_API_KEY` (required for `anthropic:` models), `CLAUDE_CODE_BINARY` and `CLAUDE_CODE_TIMEOUT_S` (`claude_code:` models), `MODEL_TIMEOUT_S` (per API request for `google_genai:`/`anthropic:` models and embeddings; default 120), `MODEL_ATTEMPTS` (tries per failed request, first included, for every model and the embeddings; default 2), `MS365_MCP_*`, `INFORMER_*`, `EVAL_JUDGE_MODEL`, `WEB_PASSWORD_HASH` (set by `python -m agent.web.set_password`; the web server needs it), `WEB_PORT` (default 8000), `WEB_HOST` (bind host, default `127.0.0.1`; keep it until Sign in with Google replaces the password).
 
 **`src/agent/auth/claude_code.py`** — Claude Code login check. With a `claude_code:` agent or judge model, real-mode CLI startup runs `claude auth status` and stops unless it is logged in with a claude.ai subscription, naming `claude auth login`. Tests never call the real `claude`: they point `CLAUDE_CODE_BINARY` at the stand-in `src/fixture_world/claude_code.py`, and `tests/conftest.py` sets it to a missing binary otherwise.
 

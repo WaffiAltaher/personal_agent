@@ -189,7 +189,7 @@ finish() {
 # and the real model comparison (ticket 18).
 # Run from anywhere: ./scripts/setup_wizard.sh. Values go to .env only (no CI here).
 
-TOTAL_STAGES=9
+TOTAL_STAGES=10
 
 cd "$(dirname "$0")/.."
 
@@ -377,6 +377,19 @@ for notice in notices:
 print("  all integrations loaded" if not notices else "  some integrations are unavailable (see above)")
 PY
 note "Next: ticket 16 (live read-only check), then ticket 17 (manual live path testing), then ticket 18 (real model comparison)."
+pause
+
+# ── 10 ───────────────────────────────────────────────────────────────────────
+stage "Web interface: password"
+say "The web interface (python -m agent.web) asks for one password; only its argon2id hash is kept, in .env."
+say "Setting a new password ends every browser session. Type it twice; it isn't shown."
+if confirm "Set or change the web password now?"; then
+  if uv run python -m agent.web.set_password; then step "password set"
+  else warn "the password was not set (see above)"; SKIPPED+=("Web password: run python -m agent.web.set_password"); fi
+else
+  _existing WEB_PASSWORD_HASH >/dev/null || SKIPPED+=("Web password: run python -m agent.web.set_password")
+fi
+note "Build the app once (and after each web/ change): cd web && npm install && npm run build"
 pause "Press Enter for the summary"
 
 finish

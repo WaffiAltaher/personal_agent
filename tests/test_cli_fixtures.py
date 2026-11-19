@@ -19,6 +19,8 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 import agent.cli as cli
 
+import agent.startup as startup
+
 
 @pytest.fixture
 def run_cli(monkeypatch, scripted_model, startup_login_checks_pass):
@@ -38,7 +40,7 @@ def run_cli(monkeypatch, scripted_model, startup_login_checks_pass):
         yield InMemorySaver()
 
     monkeypatch.setattr(cli, "create_chat_model", lambda: scripted_model([reply]))
-    monkeypatch.setattr(cli, "verify_connection", lambda: True)
+    monkeypatch.setattr(startup, "verify_connection", lambda: True)
     monkeypatch.setattr(cli, "get_callback_handler", lambda **kwargs: BaseCallbackHandler())
     monkeypatch.setattr(cli, "load_all_tools", load_all_tools)
     monkeypatch.setattr(cli, "get_checkpointer", get_checkpointer)

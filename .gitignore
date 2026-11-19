@@ -29,3 +29,8 @@ docs/*
 !docs/ARCHITECTURE_DECISIONS.md
 .agents/skills/
 .claude/skills/
+
+# Web app (web/): dependencies and the build FastAPI serves
+web/node_modules/
+web/dist/
+web/*.tsbuildinfo

@@ -19,6 +19,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 import agent.auth.claude_code as claude_code_auth
 import agent.cli as cli
+import agent.startup as startup
 from agent.config import settings
 from fixture_world import claude_code as fake_cli
 
@@ -44,13 +45,13 @@ def run_cli(monkeypatch, scripted_model, tmp_path):
         yield InMemorySaver()
 
     monkeypatch.setattr(cli, "create_chat_model", lambda: scripted_model([lambda _m: AIMessage(content="ok")]))
-    monkeypatch.setattr(cli, "verify_connection", lambda: True)
+    monkeypatch.setattr(startup, "verify_connection", lambda: True)
     monkeypatch.setattr(cli, "get_callback_handler", lambda **kwargs: BaseCallbackHandler())
     monkeypatch.setattr(cli, "load_all_tools", load_all_tools)
     monkeypatch.setattr(cli, "get_checkpointer", get_checkpointer)
     monkeypatch.setattr(cli, "log_run_to_memory", lambda *args, **kwargs: None)
     monkeypatch.setattr(cli, "flush_traces", lambda: None)
-    monkeypatch.setattr(cli, "check_google_login", lambda: None)
+    monkeypatch.setattr(startup, "check_google_login", lambda: None)
 
     class Run:
         @staticmethod

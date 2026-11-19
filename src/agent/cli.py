@@ -27,14 +27,13 @@ from dataclasses import dataclass
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langfuse import propagate_attributes
 from langgraph.errors import GraphRecursionError
-from agent.auth.claude_code import ClaudeCodeLoginCheckTimeout, ClaudeCodeLoginRequired, check_claude_code_login
-from agent.auth.google import GoogleLoginRequired, check_google_login
-from agent.chat_model import ModelConfigError, create_chat_model, is_claude_code_model
+from agent import startup
+from agent.chat_model import ModelConfigError, create_chat_model
 from agent.claude_code_model import ClaudeCodeError
 from agent.conversation import close_interrupted_turn, run_conversation
 from agent.graph import build_graph, checkpoint_db, get_checkpointer, log_run_to_memory
 from agent.memory import fixtures_semantic_memory
-from agent.tracing import flush_traces, get_callback_handler, verify_connection
+from agent.tracing import flush_traces, get_callback_handler
 from agent.config import settings
 from agent.tools import load_all_tools
 from fixture_world import clock
@@ -262,27 +261,10 @@ async def main():
 
     # Verify Langfuse is reachable before we do any work. If it isn't, say which address
     # was tried and run untraced: observability failing shouldn't block the agent.
-    langfuse_connected = verify_connection()
-    if not langfuse_connected:
-        print(f"Warning: Langfuse connection failed at {settings.langfuse_base_url}. "
-              "Traces will not be recorded.")
+    langfuse_connected = startup.check_langfuse()
 
     if not fixtures:
-        try:
-            check_google_login()
-        except GoogleLoginRequired as exc:
-            print(f"Cannot start: {exc}")
-            sys.exit(1)
-        except FileNotFoundError as exc:
-            print(f"Cannot start: {exc}")
-            sys.exit(1)
-        # A claude_code: agent or judge model runs on the Claude Code login; check it the same way.
-        if any(is_claude_code_model(m) for m in (settings.model_name, settings.eval_judge_model)):
-            try:
-                check_claude_code_login(settings.claude_code_binary)
-            except (ClaudeCodeLoginRequired, ClaudeCodeLoginCheckTimeout, FileNotFoundError) as exc:
-                print(f"Cannot start: {exc}")
-                sys.exit(1)
+        startup.check_logins()
 
     # Each CLI session gets a fresh thread_id: one Conversation, independent of other sessions.
     # The checkpointer uses this to namespace the checkpoint. --resume reuses an earlier one.
@@ -333,8 +315,7 @@ async def main():
                         f"today {today}."
                     )
                 # An unavailable integration doesn't stop the run; say which one and why.
-                for notice in notices:
-                    print(f"Notice: {notice}")
+                startup.print_notices(notices)
                 agent_graph = build_graph(checkpointer, tools, model, today=today)
                 if resume:
                     # The run log entry covers the whole Conversation, earlier sessions included.

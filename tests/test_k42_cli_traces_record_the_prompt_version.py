@@ -7,6 +7,8 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 import agent.cli as cli
 
+import agent.startup as startup
+
 
 @pytest.mark.asyncio
 async def test_a_cli_run_is_traced_with_the_prompt_version(monkeypatch, scripted_model):
@@ -27,7 +29,7 @@ async def test_a_cli_run_is_traced_with_the_prompt_version(monkeypatch, scripted
     monkeypatch.setattr(cli.settings, "prompt_version", "v2")
     monkeypatch.setattr(cli, "propagate_attributes", propagate_attributes)
     monkeypatch.setattr(cli, "create_chat_model", lambda: scripted_model(["ok"]))
-    monkeypatch.setattr(cli, "verify_connection", lambda: True)
+    monkeypatch.setattr(startup, "verify_connection", lambda: True)
     monkeypatch.setattr(cli, "get_callback_handler", lambda **kwargs: BaseCallbackHandler())
     monkeypatch.setattr(cli, "load_all_tools", load_all_tools)
     monkeypatch.setattr(cli, "get_checkpointer", get_checkpointer)
