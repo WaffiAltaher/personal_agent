@@ -2,8 +2,8 @@ import { FormEvent, useEffect, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
-  ApiError, ConversationRow, LiveConversation, LiveEvent, PendingApproval, ToolStep, Transcript, Turn,
-  applyEvent, askFollowUp, conversationEvents, listConversations, startConversation,
+  ApiError, ConversationRow, Decision, LiveConversation, LiveEvent, PendingApproval, ToolStep, Transcript, Turn,
+  applyEvent, askFollowUp, conversationEvents, decideApproval, listConversations, startConversation, stopTurn,
 } from "./api";
 
 // `refreshKey` changes when the list may have changed (a turn started or ended): it loads again.
@@ -61,22 +61,51 @@ export function TurnView({ turn }: { turn: Turn }) {
   );
 }
 
-// Read-only for now: ticket 04 adds the Approve and Reject buttons.
-export function ApprovalCard({ pending }: { pending: PendingApproval }) {
+// Every proposed Write action and gated Outbound read, approved or rejected together. Without
+// `onDecide` (or once a decision is sent) it is read-only.
+export function ApprovalCard({ pending, onDecide }:
+                             { pending: PendingApproval; onDecide?: (decision: Decision) => Promise<void> }) {
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function decide(decision: Decision) {
+    if (!onDecide) return;
+    setSending(true);
+    setError(null);
+    try {
+      await onDecide(decision);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not reach the server.");
+      setSending(false);
+    }
+  }
+
   return (
-    <aside className="approval" aria-label="Approval">
+    <aside className="approval" aria-label="Approval" data-interrupt-id={pending.interrupt_id}>
       <p>{pending.message}</p>
       <pre>{pending.actions}</pre>
-      {pending.instructions && <p className="muted">{pending.instructions}</p>}
+      {onDecide && (
+        <div className="decisions">
+          <button type="button" disabled={sending} onClick={() => decide("approve")}>Approve</button>
+          <button type="button" className="secondary" disabled={sending} onClick={() => decide("reject")}>
+            Reject
+          </button>
+          <span className="muted">Or send a follow-up: it rejects these actions and is answered instead.</span>
+        </div>
+      )}
+      {error && <p role="alert" className="error">{error}</p>}
     </aside>
   );
 }
 
-export function TranscriptView({ transcript }: { transcript: Transcript }) {
+export function TranscriptView({ transcript, onDecide }:
+                               { transcript: Transcript; onDecide?: (decision: Decision) => Promise<void> }) {
   return (
     <div>
       {transcript.turns.map((turn, index) => <TurnView key={index} turn={turn} />)}
-      {transcript.pending && <ApprovalCard pending={transcript.pending} />}
+      {/* keyed by interrupt: each new Approval of a turn gets a fresh card */}
+      {transcript.pending && <ApprovalCard key={transcript.pending.interrupt_id} pending={transcript.pending}
+                                           onDecide={onDecide} />}
     </div>
   );
 }
@@ -147,14 +176,37 @@ export function OpenConversation({ threadId, onTurnEnded }: { threadId: string; 
 
   if (live === null) return disconnected ? <p role="alert" className="error">Cannot open this Conversation.</p> : null;
   const running = live.status === "running";
+  const pending = live.status === "awaiting_approval" ? live.transcript.pending : null;
   return (
     <div>
-      <TranscriptView transcript={live.transcript} />
-      {running && <p className="muted" aria-live="polite">Working…</p>}
+      <TranscriptView transcript={live.transcript}
+                      onDecide={pending ? async (decision) => {
+                        await decideApproval(threadId, pending.interrupt_id, decision);
+                      } : undefined} />
+      {running && (
+        <p className="working" aria-live="polite">
+          <span className="muted">Working…</span>
+          <StopButton threadId={threadId} />
+        </p>
+      )}
       {disconnected && <p role="alert" className="error">Connection lost. Reconnecting…</p>}
       <QuestionBox placeholder="Ask a follow-up" disabled={running}
                    onAsk={async (question) => { await askFollowUp(threadId, question); }} />
     </div>
+  );
+}
+
+// Cancels the running turn, as Ctrl-C does in the CLI.
+function StopButton({ threadId }: { threadId: string }) {
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <>
+      <button type="button" className="secondary" onClick={() => {
+        setError(null);
+        stopTurn(threadId).catch((err) => setError(err instanceof ApiError ? err.message : "Could not reach the server."));
+      }}>Stop</button>
+      {error && <span role="alert" className="error">{error}</span>}
+    </>
   );
 }
 

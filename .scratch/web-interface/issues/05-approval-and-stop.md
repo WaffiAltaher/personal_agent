@@ -4,15 +4,15 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Approve runs the Write actions and continues the turn; Reject injects the rejection and the agent acknowledges
-- [ ] A turn with several interrupts shows a card for each in turn
-- [ ] A decision with a stale interrupt id is refused; answering in one tab disables the card in the other
-- [ ] A Follow-up sent while an Approval waits rejects it and is answered as the next turn
-- [ ] Stop cancels a running turn; the thread ends on answered messages and accepts the next question
-- [ ] The run log entry is written after an Approval-parked, approved, rejected and stopped turn
-- [ ] pytest on the Fixture world covers each path
+- [x] Approve runs the Write actions and continues the turn; Reject injects the rejection and the agent acknowledges
+- [x] A turn with several interrupts shows a card for each in turn
+- [x] A decision with a stale interrupt id is refused; answering in one tab disables the card in the other
+- [x] A Follow-up sent while an Approval waits rejects it and is answered as the next turn
+- [x] Stop cancels a running turn; the thread ends on answered messages and accepts the next question
+- [x] The run log entry is written after an Approval-parked, approved, rejected and stopped turn
+- [x] pytest on the Fixture world covers each path
 
 Spec: `../spec.md` (Approval, Conversations: Stop).
 

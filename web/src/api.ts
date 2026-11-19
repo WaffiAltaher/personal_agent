@@ -62,21 +62,30 @@ export const startConversation = (question: string) =>
   request<{ thread_id: string }>("POST", "/api/conversations", { question });
 export const askFollowUp = (threadId: string, question: string) =>
   request<{ ok: boolean }>("POST", `/api/conversations/${encodeURIComponent(threadId)}/turns`, { question });
+export type Decision = "approve" | "reject";
+// Refused (409) when `interruptId` is no longer the pending one, e.g. another tab answered it.
+export const decideApproval = (threadId: string, interruptId: string, decision: Decision) =>
+  request<{ ok: boolean }>("POST", `/api/conversations/${encodeURIComponent(threadId)}/approval`,
+                           { interrupt_id: interruptId, decision });
+export const stopTurn = (threadId: string) =>
+  request<{ ok: boolean }>("POST", `/api/conversations/${encodeURIComponent(threadId)}/stop`);
 
 // Live events of one Conversation (src/agent/web/turns.py). Every tab on a thread gets the same
 // events; the first is always `state`, the thread's current status and transcript.
 export type ThreadStatus = "idle" | "running" | "awaiting_approval";
-export type TurnOutcome = "answered" | "approval" | "failed" | "error";
+export type TurnOutcome = "answered" | "approval" | "failed" | "error" | "cancelled";
 export type LiveEvent =
   | { name: "state"; data: { status: ThreadStatus; transcript: Transcript } }
   | { name: "turn_started"; data: { question: string } }
   | { name: "step_started"; data: { step: ToolStep } }
   | { name: "step_finished"; data: { step: ToolStep } }
   | { name: "approval_pending"; data: { pending: PendingApproval } }
+  | { name: "approval_decided"; data: { interrupt_id: string; decision: Decision } }
   | { name: "answer"; data: { text: string } }
   | { name: "turn_ended"; data: { status: ThreadStatus; outcome: TurnOutcome; message: string | null } };
 export const LIVE_EVENT_NAMES: LiveEvent["name"][] = [
-  "state", "turn_started", "step_started", "step_finished", "approval_pending", "answer", "turn_ended",
+  "state", "turn_started", "step_started", "step_finished", "approval_pending", "approval_decided", "answer",
+  "turn_ended",
 ];
 
 export type LiveConversation = { status: ThreadStatus; transcript: Transcript };
@@ -108,6 +117,10 @@ export function applyEvent(live: LiveConversation | null, event: LiveEvent): Liv
     }
     case "approval_pending":
       transcript.pending = event.data.pending;
+      break;
+    case "approval_decided":
+      transcript.pending = null;
+      status = "running";
       break;
     case "answer":
       if (last) last.answer = event.data.text;

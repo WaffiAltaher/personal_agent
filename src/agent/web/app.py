@@ -14,6 +14,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, Depends, FastAPI, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -52,6 +53,11 @@ class LoginRequest(BaseModel):
 
 class QuestionRequest(BaseModel):
     question: str
+
+
+class DecisionRequest(BaseModel):
+    interrupt_id: str
+    decision: Literal["approve", "reject"]
 
 
 KEEPALIVE_S = 15.0
@@ -142,6 +148,30 @@ def create_app(
             return JSONResponse({"detail": "No such Conversation."}, status_code=404)
         try:
             await turns.ask(thread_id, question)
+        except TurnRefused as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=409)
+        return {"ok": True}
+
+    @api.post("/conversations/{thread_id}/approval", status_code=202)
+    async def approval(thread_id: str, body: DecisionRequest, request: Request):
+        """Approve or reject the pending Approval named by its interrupt id; refused if it is no longer pending."""
+        turns: Turns = request.app.state.turns
+        if not await turns.exists(thread_id):
+            return JSONResponse({"detail": "No such Conversation."}, status_code=404)
+        try:
+            await turns.decide(thread_id, body.interrupt_id, body.decision)
+        except TurnRefused as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=409)
+        return {"ok": True}
+
+    @api.post("/conversations/{thread_id}/stop", status_code=202)
+    async def stop(thread_id: str, request: Request):
+        """Cancel the Conversation's running turn, as Ctrl-C does; refused if none runs."""
+        turns: Turns = request.app.state.turns
+        if not await turns.exists(thread_id):
+            return JSONResponse({"detail": "No such Conversation."}, status_code=404)
+        try:
+            turns.stop(thread_id)
         except TurnRefused as exc:
             return JSONResponse({"detail": str(exc)}, status_code=409)
         return {"ok": True}
