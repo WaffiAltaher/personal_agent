@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
 from agent.memory.episodic import RunRecord
 from agent.chat_model import is_claude_code_model
@@ -24,6 +24,16 @@ def _final_output(messages: list[BaseMessage]) -> str:
                     if isinstance(block, dict) and block.get("type") == "text"
                 )
     return ""
+
+
+def _answers(messages: list[BaseMessage]) -> str:
+    """Each turn's final answer, one per line: a Conversation's Follow-ups each start a turn."""
+    turns: list[list[BaseMessage]] = [[]]
+    for msg in messages:
+        if isinstance(msg, HumanMessage) and turns[-1]:
+            turns.append([])
+        turns[-1].append(msg)
+    return "\n".join(answer for turn in turns if (answer := _final_output(turn)))
 
 
 def _tools_called(messages: list[BaseMessage]) -> list[str]:
@@ -127,6 +137,7 @@ def build_run_record(
     model_name: str,
     run_date: date,
     error: str | None = None,
+    thread_id: str | None = None,
 ) -> RunRecord:
     messages: list[BaseMessage] = result.get("messages", [])
     token_usage, priced_usage = _sum_usage_metadata(messages)
@@ -138,10 +149,11 @@ def build_run_record(
         )
     return RunRecord(
         user_input=user_input,
-        final_output=_final_output(messages),
+        final_output=_answers(messages),
         tools_called=_tools_called(messages),
         token_usage=token_usage,
         cost_usd=run_cost,
         outcome=_detect_outcome(messages, error=error),
         error_message=error,
+        thread_id=thread_id,
     )

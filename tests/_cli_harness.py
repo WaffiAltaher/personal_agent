@@ -1,15 +1,36 @@
 """Shared CLI harness for the concept 4-5 killing tests: everything outside the run is replaced."""
 import sys
-from contextlib import asynccontextmanager
 
 import pytest
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import AIMessage
 from langchain_core.tools import tool
-from langgraph.checkpoint.memory import InMemorySaver
 
 import agent.cli as cli
+import agent.graph as graph
+import agent.memory.episodic as episodic
 from agent.tools.classification import read_tool, write_action
+
+
+def type_lines(monkeypatch, lines):
+    """Stand in for the owner at the `> ` prompt: each read returns the next line, then Ctrl-D (EOF).
+    A line that is an exception (KeyboardInterrupt for Ctrl-C) is raised instead.
+
+    Returns the prompts the CLI showed, in order."""
+    remaining = list(lines)
+    prompts = []
+
+    def read_line(prompt):
+        prompts.append(prompt)
+        if not remaining:
+            raise EOFError
+        line = remaining.pop(0)
+        if isinstance(line, BaseException):
+            raise line
+        return line
+
+    monkeypatch.setattr(cli, "_read_line", read_line)
+    return prompts
 
 
 class RecordingHandler(BaseCallbackHandler):
@@ -22,8 +43,12 @@ class RecordingHandler(BaseCallbackHandler):
 
 
 @pytest.fixture
-def cli_run(monkeypatch, scripted_model):
-    seen = {"ran": [], "flushed": 0, "handler": RecordingHandler(), "configs": []}
+def cli_run(monkeypatch, tmp_path, scripted_model, startup_login_checks_pass):
+    # Real sqlite checkpoint files in a temp dir: Conversations persist across start() calls.
+    monkeypatch.setattr(graph, "CHECKPOINT_DB", str(tmp_path / "hitl.db"))
+    monkeypatch.setattr(graph, "FIXTURE_CHECKPOINT_DB", str(tmp_path / "fixtures.db"))
+    seen = {"ran": [], "flushed": 0, "handler": RecordingHandler(), "configs": [], "logged": [],
+            "tools": []}  # a test adds its own tools here before start()
 
     @write_action
     @tool("send_mail")
@@ -39,22 +64,27 @@ def cli_run(monkeypatch, scripted_model):
         return "nothing found"
 
     async def load_all_tools(*, fixtures=False):
-        return [send_mail, lookup], []
+        return [send_mail, lookup, *seen["tools"]], []
 
-    @asynccontextmanager
-    async def get_checkpointer():
-        yield InMemorySaver()
+    class EpisodicMemory(episodic.EpisodicMemory):
+        """The real run log in a temp file; `seen["logged"]` gets each entry as it was stored."""
+        def log_run(self, run):
+            super().log_run(run)
+            seen["logged"].append(next(r for r in self.get_recent_runs(1000) if r.id == run.id))
 
-    def start(replies):
+    memory = EpisodicMemory(str(tmp_path / "memory.db"))
+
+    def start(replies, *args, lines=()):
+        """Run main() with `args` (default: a question against the Fixture world), then `lines` at `> `."""
         monkeypatch.setattr(cli, "create_chat_model", lambda: scripted_model(replies))
         monkeypatch.setattr(cli, "verify_connection", lambda: True)
         monkeypatch.setattr(cli, "get_callback_handler", lambda **kwargs: seen["handler"])
         monkeypatch.setattr(cli, "load_all_tools", load_all_tools)
-        monkeypatch.setattr(cli, "get_checkpointer", get_checkpointer)
-        monkeypatch.setattr(cli, "log_run_to_memory", lambda result, user_input, **kwargs: None)
+        monkeypatch.setattr(cli, "get_checkpointer", graph.get_checkpointer)
+        monkeypatch.setattr(graph, "get_episodic_memory", lambda: memory)
         monkeypatch.setattr(cli, "flush_traces", lambda: seen.__setitem__("flushed", seen["flushed"] + 1))
-        monkeypatch.setattr(cli, "_prompt_decision", lambda: "approve")
-        monkeypatch.setattr(sys, "argv", ["agent.cli", "--fixtures", "Mail Ann, then Bob."])
+        seen["prompts"] = type_lines(monkeypatch, lines)
+        monkeypatch.setattr(sys, "argv", ["agent.cli", *(args or ("--fixtures", "Mail Ann, then Bob."))])
         return cli.main()
     return seen, start
 

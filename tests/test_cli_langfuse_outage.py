@@ -48,7 +48,7 @@ def run_cli_against_langfuse(monkeypatch, scripted_model, langfuse_spans, startu
         return [], []
 
     @asynccontextmanager
-    async def get_checkpointer():
+    async def get_checkpointer(db_path=None):
         yield InMemorySaver()
 
     monkeypatch.setattr(cli, "create_chat_model", lambda: scripted_model([reply]))

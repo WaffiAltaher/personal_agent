@@ -56,6 +56,15 @@ def no_real_claude_code(request, monkeypatch):
     monkeypatch.setattr(settings, "claude_code_binary", NO_REAL_CLAUDE)
 
 
+@pytest.fixture(autouse=True)
+def owner_types_nothing_more(monkeypatch):
+    """A CLI session in a test ends at its first `> ` prompt (Ctrl-D) unless the test types
+    lines with `_cli_harness.type_lines`."""
+    from _cli_harness import type_lines
+
+    type_lines(monkeypatch, [])
+
+
 @pytest.fixture
 def startup_login_checks_pass(monkeypatch):
     """Every real-mode CLI startup login check passes without running. A test of one check

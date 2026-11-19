@@ -42,6 +42,16 @@ _Avoid_: BTW, tax, VAT balance
 An unsent message saved in the ITtopia Outlook mailbox for the owner to review and send.
 _Avoid_: email (when unsent), message
 
+## Conversations
+
+**Conversation**:
+The owner's questions and the agent's answers on one thread, from the first question to the last Follow-up, however many times the owner comes back to it. The agent remembers it as one past run.
+_Avoid_: session, chat, run
+
+**Follow-up**:
+A question the owner asks within an existing Conversation, which the agent answers with everything said earlier in it.
+_Avoid_: next question, new request
+
 ## Agent actions
 
 **Write action**:
@@ -53,7 +63,7 @@ A read that sends text the agent wrote to a service outside the owner's own acco
 _Avoid_: external call, egress
 
 **Approval**:
-The owner's single approve-or-reject answer covering every Write action the agent proposes at once, and every Outbound read proposed after the agent has read the owner's data; other reads proposed alongside them are not part of it. Sending a new request instead of answering counts as a rejection.
+The owner's single approve-or-reject answer covering every Write action the agent proposes at once, and every Outbound read proposed after the agent has read the owner's data; other reads proposed alongside them are not part of it. Asking a Follow-up instead of answering counts as a rejection.
 _Avoid_: confirmation, consent
 
 **Agent folder**:

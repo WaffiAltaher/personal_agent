@@ -327,11 +327,11 @@ def check_context_budget(state: AgentState) -> dict:
     return _check_context_budget(state, [], None)
 
 
-def _answered_tool_call_ids(messages: list[BaseMessage]) -> set[str]:
+def answered_tool_call_ids(messages: list[BaseMessage]) -> set[str]:
     return {m.tool_call_id for m in messages if isinstance(m, ToolMessage)}
 
 
-def _latest_ai_tool_batch(messages: list[BaseMessage]) -> AIMessage | None:
+def latest_ai_tool_batch(messages: list[BaseMessage]) -> AIMessage | None:
     for message in reversed(messages):
         if isinstance(message, AIMessage) and getattr(message, "tool_calls", None):
             return message
@@ -358,12 +358,12 @@ def pending_approval_tool_calls(
     Only results from before that AIMessage count: an Outbound read proposed alongside the
     first read of the owner's data was written before the model saw that data.
     """
-    last_ai = _latest_ai_tool_batch(messages)
+    last_ai = latest_ai_tool_batch(messages)
     if last_ai is None:
         return []
     earlier = messages[: messages.index(last_ai)]
     gate_outbound = holds_owner_data(earlier, outbound_read_names)
-    answered = _answered_tool_call_ids(messages)
+    answered = answered_tool_call_ids(messages)
     return [
         tc for tc in last_ai.tool_calls
         if tc["id"] not in answered
@@ -491,10 +491,17 @@ def should_continue(state: AgentState) -> str:
 _CHECKPOINT_DIR = Path(__file__).resolve().parents[2] / "checkpoints"
 _CHECKPOINT_DIR.mkdir(exist_ok=True)
 CHECKPOINT_DB = str(_CHECKPOINT_DIR / "hitl.db")
+# The Fixture world keeps its own Conversations: a resume never crosses between it and real data.
+FIXTURE_CHECKPOINT_DB = str(_CHECKPOINT_DIR / "fixtures.db")
+
+
+def checkpoint_db(fixtures: bool) -> str:
+    """The checkpoint file of the Fixture world or of real data."""
+    return FIXTURE_CHECKPOINT_DB if fixtures else CHECKPOINT_DB
 
 
 @asynccontextmanager
-async def get_checkpointer():
+async def get_checkpointer(db_path: str | None = None):
     """
     Async context manager that opens an AsyncSqliteSaver, yields it, then
     closes the underlying sqlite connection when the caller's block exits.
@@ -504,7 +511,7 @@ async def get_checkpointer():
             graph = build_graph(checkpointer)
             await graph.ainvoke(...)
     """
-    async with AsyncSqliteSaver.from_conn_string(CHECKPOINT_DB) as checkpointer:
+    async with AsyncSqliteSaver.from_conn_string(db_path or CHECKPOINT_DB) as checkpointer:
         yield checkpointer
 
 
@@ -614,12 +621,12 @@ def build_graph(
         the next LLM invocation.
         """
         try:
-            last_batch = _latest_ai_tool_batch(state["messages"])
+            last_batch = latest_ai_tool_batch(state["messages"])
             if last_batch is None:
                 return {}
 
             tool_calls = last_batch.tool_calls or []
-            answered = _answered_tool_call_ids(state["messages"])
+            answered = answered_tool_call_ids(state["messages"])
             pending = [tc for tc in tool_calls if tc["id"] not in answered]
             if not pending:
                 return {}
@@ -639,9 +646,9 @@ def build_graph(
         except GraphBubbleUp:
             raise  # interrupt() from a tool must pause the graph, not become an error
         except Exception as exc:
-            last_batch = _latest_ai_tool_batch(state["messages"])
+            last_batch = latest_ai_tool_batch(state["messages"])
             tool_calls = (last_batch.tool_calls or []) if last_batch is not None else []
-            answered = _answered_tool_call_ids(state["messages"])
+            answered = answered_tool_call_ids(state["messages"])
             pending = [tc for tc in tool_calls if tc["id"] not in answered]
 
             logger.exception(
@@ -743,6 +750,7 @@ def log_run_to_memory(
     model_name: str | None = None,
     run_date: date | None = None,
     error: str | None = None,
+    thread_id: str | None = None,
 ) -> None:
     """
     Persist an episodic run log entry from a completed (or failed) graph result.
@@ -759,6 +767,7 @@ def log_run_to_memory(
             model_name=model_name or _settings.model_name,
             run_date=run_date or date.today(),
             error=error,
+            thread_id=thread_id,
         )
         get_episodic_memory().log_run(run)
     except Exception as exc:

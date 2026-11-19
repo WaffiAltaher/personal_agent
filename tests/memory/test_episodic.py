@@ -128,3 +128,39 @@ def test_empty_search_terms_returns_no_rows(mem):
 
     assert mem.search_runs("") == []
     assert mem.search_runs("   ") == []
+
+
+def test_a_conversations_entry_is_replaced_not_added(mem):
+    mem.log_run(_sample_run(user_input="Is Monday free?", final_output="Yes.", thread_id="t-1"))
+    mem.log_run(_sample_run(user_input="Other question", final_output="Other answer", thread_id="t-2"))
+    mem.log_run(_sample_run(user_input="Is Monday free?\nAnd Tuesday?", final_output="Yes.\nAlso.", thread_id="t-1"))
+
+    runs = mem.get_recent_runs(n=10)
+    assert sorted(r.user_input for r in runs) == ["Is Monday free?\nAnd Tuesday?", "Other question"]
+    assert {r.thread_id for r in runs} == {"t-1", "t-2"}
+    assert [r.user_input for r in mem.search_runs("Monday")] == ["Is Monday free?\nAnd Tuesday?"]
+
+
+def test_runs_logged_before_conversations_had_ids_are_still_read(tmp_path):
+    import sqlite3
+
+    db_path = str(tmp_path / "old.db")
+    conn = sqlite3.connect(db_path)
+    conn.execute("""CREATE TABLE runs (
+        id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, user_input TEXT NOT NULL,
+        final_output TEXT NOT NULL, tools_called TEXT NOT NULL DEFAULT '[]', token_usage TEXT,
+        cost_usd REAL, outcome TEXT NOT NULL DEFAULT 'completed', error_message TEXT)""")
+    conn.execute("INSERT INTO runs (id, timestamp, user_input, final_output) "
+                 "VALUES ('r1', '2026-01-01T00:00:00+00:00', 'Old question', 'Old answer')")
+    conn.commit()
+    conn.close()
+
+    mem = EpisodicMemory(db_path=db_path)
+    mem.log_run(_sample_run(user_input="New question", thread_id="t-1"))
+    mem.log_run(_sample_run(user_input="Untracked question"))
+    mem.log_run(_sample_run(user_input="Another untracked question"))
+
+    runs = {r.user_input: r.thread_id for r in mem.get_recent_runs(n=10)}
+    assert runs == {"Old question": None, "New question": "t-1",
+                    "Untracked question": None, "Another untracked question": None}
+    mem.close()

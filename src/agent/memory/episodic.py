@@ -4,6 +4,7 @@ Episodic memory — persists every agent run to a local SQLite DB.
 
 Each row in `runs` captures: what the user asked, what the agent answered,
 which tools were called, token usage, cost, and the run outcome.
+A row with a thread_id is its Conversation's one entry, replaced each time it is logged again.
 Past runs are searched with FTS5 (BM25 ranking) over user_input and final_output.
 """
 
@@ -29,6 +30,7 @@ class RunRecord:
     cost_usd: float | None = None
     outcome: str = "completed"  # completed | error | rejected | step limit (ticket 20)
     error_message: str | None = None
+    thread_id: str | None = None  # the Conversation's; its entry is replaced at each session's exit
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     timestamp: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
@@ -100,6 +102,10 @@ class EpisodicMemory:
                     """UPDATE runs SET outcome = CASE WHEN success = 0 THEN 'error' ELSE 'completed' END"""
                 )
             self._conn.commit()
+        if "thread_id" not in cols:
+            # Rows logged before Conversations had ids keep NULL: each stays its own entry.
+            self._conn.execute("ALTER TABLE runs ADD COLUMN thread_id TEXT")
+            self._conn.commit()
 
     def _ensure_fts(self) -> None:
         self._conn.execute("""
@@ -113,9 +119,11 @@ class EpisodicMemory:
               INSERT INTO runs_fts(rowid, user_input, final_output)
               VALUES (new.rowid, new.user_input, new.final_output);
             END;
-            CREATE TRIGGER IF NOT EXISTS runs_ad AFTER DELETE ON runs BEGIN
-              INSERT INTO runs_fts(runs_fts, rowid, user_input, final_output)
-              VALUES ('delete', old.rowid, old.user_input, old.final_output);
+            -- runs_fts keeps its own content, so the FTS5 'delete' command fails on it: delete
+            -- the row instead. Recreated so databases with the old trigger get this one.
+            DROP TRIGGER IF EXISTS runs_ad;
+            CREATE TRIGGER runs_ad AFTER DELETE ON runs BEGIN
+              DELETE FROM runs_fts WHERE rowid = old.rowid;
             END;
         """)
         run_count = self._conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
@@ -131,12 +139,24 @@ class EpisodicMemory:
         self._conn.commit()
 
     def log_run(self, run: RunRecord) -> str:
-        """Insert a new run record. Returns the run_id."""
+        """Insert a new run record, replacing its Conversation's earlier entry. Returns the run_id.
+
+        The replacing entry keeps the errors of the Conversation's earlier sessions: they are not
+        in the thread, so the new record could not know them."""
+        if run.thread_id is not None:
+            earlier = self._conn.execute(
+                "SELECT error_message FROM runs WHERE thread_id = ? AND error_message IS NOT NULL",
+                (run.thread_id,),
+            ).fetchone()
+            if earlier is not None:
+                run.error_message = "; ".join(e for e in (earlier[0], run.error_message) if e)
+                run.outcome = "error"
+            self._conn.execute("DELETE FROM runs WHERE thread_id = ?", (run.thread_id,))
         self._conn.execute(
             """INSERT INTO runs
                (id, timestamp, user_input, final_output, tools_called,
-                token_usage, cost_usd, outcome, error_message)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                token_usage, cost_usd, outcome, error_message, thread_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 run.id,
                 run.timestamp,
@@ -147,6 +167,7 @@ class EpisodicMemory:
                 run.cost_usd,
                 run.outcome,
                 run.error_message,
+                run.thread_id,
             ),
         )
         self._conn.commit()
@@ -208,6 +229,7 @@ class EpisodicMemory:
             cost_usd=row["cost_usd"],
             outcome=outcome or "completed",
             error_message=row["error_message"],
+            thread_id=row["thread_id"] if "thread_id" in keys else None,
         )
 
     def close(self) -> None:

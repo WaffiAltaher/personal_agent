@@ -11,13 +11,15 @@ from langgraph.checkpoint.memory import InMemorySaver
 import agent.cli as cli
 
 
+@pytest.mark.parametrize("flags", [[], ["--fixtures"]])
 @pytest.mark.asyncio
-async def test_cli_logs_error_outcome_and_flushes_traces(monkeypatch, scripted_model, startup_login_checks_pass):
+async def test_cli_logs_error_outcome_and_flushes_traces(monkeypatch, scripted_model, startup_login_checks_pass, capsys,
+                                                         flags):
     logged = []
     flushed = {"n": 0}
 
     @asynccontextmanager
-    async def get_checkpointer():
+    async def get_checkpointer(db_path=None):
         yield InMemorySaver()
 
     async def load_all_tools(*, fixtures=False):
@@ -37,10 +39,16 @@ async def test_cli_logs_error_outcome_and_flushes_traces(monkeypatch, scripted_m
         "run_conversation",
         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")),
     )
-    monkeypatch.setattr(sys, "argv", ["agent.cli", "hello"])
+    monkeypatch.setattr(sys, "argv", ["agent.cli", *flags, "hello"])
 
     with pytest.raises(RuntimeError, match="boom"):
         await cli.main()
 
-    assert logged[0]["error"] == "RuntimeError: boom"
+    # A Fixture-world run is kept out of real memory.
+    assert logged == ([] if flags else [{"error": "RuntimeError: boom"}])
+    # The session ends naming the command that resumes the Conversation, in the same world.
+    out = capsys.readouterr().out
+    conversation_id = out.split("Conversation ", 1)[1].split()[0]
+    resume_cmd = f"python -m agent.cli {' '.join([*flags, '--resume'])} {conversation_id}"
+    assert f"Conversation ended by an error. Resume it with: {resume_cmd}" in out
     assert flushed["n"] == 1
