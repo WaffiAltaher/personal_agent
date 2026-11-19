@@ -52,7 +52,7 @@ Record of technical decisions made during the Personal Data Agent project. Each 
 **Decision:** LangGraph.
 
 **Reasoning:**
-- [Fill in]
+- will force me to handle lower level of details - good for initial understanding, and later I will switch to a higher level of abstraction once I am confident with the details. 
 
 **Consequences:**
 - Approval (`interrupt()`), resumable runs (`SqliteSaver` checkpoints) and the per-tool retry policy are built on LangGraph features, so they are tied to it (ADR-010)

@@ -390,9 +390,9 @@ def test_system_prompt_goes_to_the_flag_and_the_rest_of_the_view_to_stdin_as_jso
 
 # One call's usage as the CLI reports it: 1,000 uncached input tokens, a 4,000-token cache read, a
 # 2,000-token cache write (1,500 for 5 minutes, 500 for 1 hour) and 300 output tokens (100 thinking).
-# At Claude Sonnet 5.5 rates ($2 in / $10 out / $0.20 cache read / $2.50 5-minute and $4 1-hour
-# cache write per 1M): 1000×2 + 4000×0.2 + 1500×2.5 + 500×4 + 300×10 = 11,550 per 1M = $0.01155.
-SONNET_CALL_COST = 0.01155
+# At Claude Sonnet 5.5 rates ($2 in / $10 out / $0.10 cache read / $2.50 5-minute and $4 1-hour
+# cache write per 1M): 1000×2 + 4000×0.1 + 1500×2.5 + 500×4 + 300×10 = 11,150 per 1M = $0.01115.
+SONNET_CALL_COST = 0.01115
 
 
 def cli_result(model_id="claude-sonnet-5-5"):
