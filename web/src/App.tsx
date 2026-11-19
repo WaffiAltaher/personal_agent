@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { ApiError, loggedIn, login, logout } from "./api";
-import { ConversationList, OpenConversation } from "./Conversations";
+import { ConversationList, NewConversation, OpenConversation } from "./Conversations";
 
 type View = "loading" | "login" | "shell";
 
@@ -55,6 +55,8 @@ function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
 
 function Shell({ onLoggedOut }: { onLoggedOut: () => void }) {
   const [selected, setSelected] = useState<string | null>(null);
+  const [listKey, setListKey] = useState(0);
+  const refreshList = () => setListKey((key) => key + 1);
 
   async function signOut() {
     try {
@@ -72,10 +74,13 @@ function Shell({ onLoggedOut }: { onLoggedOut: () => void }) {
       </header>
       <div className="body">
         <nav className="conversations" aria-label="Conversations">
-          <ConversationList selected={selected} onSelect={setSelected} />
+          <button className="new" onClick={() => setSelected(null)}>New Conversation</button>
+          <ConversationList selected={selected} onSelect={setSelected} refreshKey={listKey} />
         </nav>
         <main className="conversation">
-          {selected && <OpenConversation threadId={selected} />}
+          {selected
+            ? <OpenConversation key={selected} threadId={selected} onTurnEnded={refreshList} />
+            : <NewConversation onStarted={(threadId) => { setSelected(threadId); refreshList(); }} />}
         </main>
       </div>
     </div>

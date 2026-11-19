@@ -4,7 +4,8 @@ request_checks.py — ``Host`` and ``Origin`` checks on every request (ADR-018),
 Every request is refused (400) unless ``Host`` is one of the app's own hosts, which defeats DNS
 rebinding. Every state-changing request (any method but GET, HEAD and OPTIONS) and every event
 stream (``Accept: text/event-stream``) is refused (403) unless ``Origin`` is the app's own, so
-another web page in the owner's browser can't act through the owner's session. No CORS headers
+another web page in the owner's browser can't act through the owner's session. An event stream
+with no ``Origin`` is accepted when ``Sec-Fetch-Site: same-origin`` says the app itself opened it. No CORS headers
 are ever sent.
 """
 
@@ -30,7 +31,12 @@ class RequestChecks:
             return
         is_event_stream = "text/event-stream" in headers.get("accept", "")
         if scope["method"] not in SAFE_METHODS or is_event_stream:
-            if headers.get("origin") not in (f"http://{host}", f"https://{host}"):
+            origin = headers.get("origin")
+            # A browser may leave Origin off a same-origin EventSource GET; its fetch metadata,
+            # which no other page can forge, then says the request is same-origin.
+            same_origin_stream = (is_event_stream and scope["method"] in SAFE_METHODS and origin is None
+                                  and headers.get("sec-fetch-site") == "same-origin")
+            if origin not in (f"http://{host}", f"https://{host}") and not same_origin_stream:
                 await PlainTextResponse("Missing or foreign Origin.", status_code=403)(scope, receive, send)
                 return
         await self.app(scope, receive, send)
