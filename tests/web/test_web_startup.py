@@ -150,3 +150,22 @@ async def test_langfuse_down_warns_as_the_cli_does_and_still_starts(web_start, m
     assert warning and warning == [line for line in cli_out.splitlines() if line.startswith("Warning:")]
     (app, _), = seen["apps"]
     assert app.state.langfuse_connected is False
+
+
+@pytest.mark.parametrize("model_name,names", [
+    ("claude_code:claude-sonnet-5-5", ["Google", "Claude Code", "ms365", "informer"]),
+    ("google_genai:gemini-3.8-flash", ["Google", "ms365", "informer"]),
+])
+async def test_the_login_status_strip_starts_from_what_startup_found(web_start, monkeypatch, model_name, names):
+    start, seen = web_start
+    monkeypatch.setattr(settings, "model_name", model_name)
+    monkeypatch.setattr(settings, "eval_judge_model", None)
+    seen["notices"] = ["ms365 tools unavailable: not logged in to Microsoft 365 (No valid token found)."]
+
+    await start()
+
+    (app, _), = seen["apps"]
+    status = {row["name"]: row for row in app.state.logins.status()}
+    assert list(status) == names
+    assert status["Google"]["alive"] is True
+    assert (status["ms365"]["alive"], status["ms365"]["detail"]) == (False, seen["notices"][0])

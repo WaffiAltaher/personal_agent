@@ -4,13 +4,13 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] The strip shows each integration's state after login
-- [ ] A Google token that dies while the server runs shows as dead with `python -m agent.auth.google`; a fresh token shows alive on the next turn
-- [ ] An MS365 server skipped at startup is loaded on the next turn after its login passes, and its tools are bound from then on
-- [ ] A slow or hanging check doesn't block a turn beyond the timeout
-- [ ] pytest uses Fixture-world stand-ins for the checks; no live logins
+- [x] The strip shows each integration's state after login
+- [x] A Google token that dies while the server runs shows as dead with `python -m agent.auth.google`; a fresh token shows alive on the next turn
+- [x] An MS365 server skipped at startup is loaded on the next turn after its login passes, and its tools are bound from then on
+- [x] A slow or hanging check doesn't block a turn beyond the timeout
+- [x] pytest uses Fixture-world stand-ins for the checks; no live logins
 
 Spec: `../spec.md` (Login status).
 

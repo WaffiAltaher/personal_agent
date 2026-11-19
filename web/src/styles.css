@@ -51,6 +51,14 @@ button:disabled { opacity: 0.5; cursor: default; }
   padding: 0.6rem 1rem; border-bottom: 1px solid var(--line);
 }
 .shell .body { display: flex; flex: 1; min-height: 0; }
+.login-strip {
+  display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; list-style: none; margin: 0 1rem; padding: 0;
+  flex: 1; font-size: 0.85rem; color: var(--muted);
+}
+.login-strip li { display: flex; align-items: center; gap: 0.35rem; }
+.login-strip .dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: #2e7d32; }
+.login-strip .dead { color: var(--error); }
+.login-strip .dead .dot { background: var(--error); }
 .conversations { width: 280px; border-right: 1px solid var(--line); overflow-y: auto; }
 .conversation { flex: 1; overflow-y: auto; }
 
