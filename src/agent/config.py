@@ -87,6 +87,10 @@ class Settings(BaseSettings):
     # Optional: without them the agent starts without Informer tools, with a notice.
     informer_api_key: str | None = None
     informer_security_code: str | None = None
+    # The Informer server's e-mail addresses for Purchase invoices (ADR-019). Declared only because this
+    # `.env` is shared: the Informer server reads them itself, and the agent never uses them.
+    informer_incoming_address: str | None = None
+    informer_invoice_mailbox: str | None = None
     # Web interface (python -m agent.web, ADR-018). The owner's password as an argon2id hash, set
     # with `python -m agent.web.set_password`; the server refuses to start without it.
     web_password_hash: str | None = None
