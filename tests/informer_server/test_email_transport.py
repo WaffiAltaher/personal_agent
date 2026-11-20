@@ -98,6 +98,23 @@ async def test_an_upload_sends_one_email_from_the_invoice_mailbox_to_the_incomin
 
 
 @pytest.mark.asyncio
+async def test_the_upload_says_the_invoice_was_sent_to_informer_not_uploaded_or_booked(
+    connect, settings, ms365, downloads, call_tool,
+):
+    pdf = downloads / "factuur.pdf"
+    pdf.write_bytes(PDF)
+
+    async with connect(settings, handover=email_handover(settings, ms365.connect)) as session:
+        tools = {tool.name: tool for tool in (await session.list_tools()).tools}
+        _, payload = await call_tool(session, "upload_purchase_invoice", path=str(pdf))
+
+    for text in (payload["message"], tools["upload_purchase_invoice"].description):
+        words = " ".join(text.lower().split())
+        assert re.search(r"\bsen[dt]\b.*\bto informer\b", words), text
+        assert not re.search(r"\b(upload|uploaded|booked)\b", words), text
+
+
+@pytest.mark.asyncio
 async def test_reads_never_start_the_ms365_server(connect, settings, ms365, downloads, call_tool):
     pdf = downloads / "factuur.pdf"
     pdf.write_bytes(PDF)
