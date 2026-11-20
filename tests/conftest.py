@@ -69,10 +69,10 @@ def owner_types_nothing_more(monkeypatch):
 def startup_login_checks_pass(monkeypatch):
     """Every real-mode CLI startup login check passes without running. A test of one check
     sets that check again after requesting this."""
-    import agent.cli as cli
+    import agent.startup as startup
 
-    monkeypatch.setattr(cli, "check_google_login", lambda: None)
-    monkeypatch.setattr(cli, "check_claude_code_login", lambda binary: None)
+    monkeypatch.setattr(startup, "check_google_login", lambda: None)
+    monkeypatch.setattr(startup, "check_claude_code_login", lambda binary: None)
 
 
 @pytest.fixture

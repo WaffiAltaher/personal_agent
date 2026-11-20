@@ -9,6 +9,9 @@ from langchain_core.messages import AIMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
 import agent.cli as cli
+import agent.turn_rules as turn_rules
+
+import agent.startup as startup
 
 
 @pytest.mark.parametrize("flags", [[], ["--fixtures"]])
@@ -29,10 +32,11 @@ async def test_cli_logs_error_outcome_and_flushes_traces(monkeypatch, scripted_m
         logged.append({"error": kwargs.get("error")})
 
     monkeypatch.setattr(cli, "create_chat_model", lambda: scripted_model([AIMessage(content="x")]))
-    monkeypatch.setattr(cli, "verify_connection", lambda: False)
+    monkeypatch.setattr(startup, "verify_connection", lambda: False)
     monkeypatch.setattr(cli, "get_checkpointer", get_checkpointer)
+    monkeypatch.setattr(turn_rules, "get_checkpointer", get_checkpointer)
     monkeypatch.setattr(cli, "load_all_tools", load_all_tools)
-    monkeypatch.setattr(cli, "log_run_to_memory", capture_log)
+    monkeypatch.setattr(turn_rules, "log_run_to_memory", capture_log)
     monkeypatch.setattr(cli, "flush_traces", lambda: flushed.__setitem__("n", flushed["n"] + 1))
     monkeypatch.setattr(
         cli,

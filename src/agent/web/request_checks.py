@@ -1,0 +1,46 @@
+"""
+request_checks.py — ``Host`` and ``Origin`` checks on every request (ADR-018), as ASGI middleware.
+
+Every request is refused (400) unless ``Host`` is one of the app's own hosts, which defeats DNS
+rebinding. Every state-changing request (any method but GET, HEAD and OPTIONS) and every request
+to an event stream's route (``/api/conversations/{id}/events``, whatever its ``Accept`` header says)
+is refused (403) unless ``Origin`` is the app's own, so
+another web page in the owner's browser can't act through the owner's session. An event stream
+with no ``Origin`` is accepted when ``Sec-Fetch-Site: same-origin`` says the app itself opened it. No CORS headers
+are ever sent.
+"""
+
+import re
+
+from starlette.responses import PlainTextResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
+
+SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+EVENT_STREAM_ROUTE = re.compile(r"/api/conversations/[^/]+/events/?")
+
+
+class RequestChecks:
+    def __init__(self, app: ASGIApp, *, allowed_hosts: frozenset[str]):
+        self.app = app
+        self.allowed_hosts = allowed_hosts
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope["headers"]}
+        host = headers.get("host", "")
+        if host not in self.allowed_hosts:
+            await PlainTextResponse("Invalid Host header.", status_code=400)(scope, receive, send)
+            return
+        is_event_stream = EVENT_STREAM_ROUTE.fullmatch(scope["path"]) is not None
+        if scope["method"] not in SAFE_METHODS or is_event_stream:
+            origin = headers.get("origin")
+            # A browser may leave Origin off a same-origin EventSource GET; its fetch metadata,
+            # which no other page can forge, then says the request is same-origin.
+            same_origin_stream = (is_event_stream and scope["method"] in SAFE_METHODS and origin is None
+                                  and headers.get("sec-fetch-site") == "same-origin")
+            if origin not in (f"http://{host}", f"https://{host}") and not same_origin_stream:
+                await PlainTextResponse("Missing or foreign Origin.", status_code=403)(scope, receive, send)
+                return
+        await self.app(scope, receive, send)

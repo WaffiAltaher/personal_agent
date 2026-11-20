@@ -18,6 +18,9 @@ from langchain_core.messages import AIMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
 import agent.cli as cli
+import agent.turn_rules as turn_rules
+
+import agent.startup as startup
 
 
 @pytest.fixture
@@ -38,12 +41,13 @@ def run_cli(monkeypatch, scripted_model, startup_login_checks_pass):
         yield InMemorySaver()
 
     monkeypatch.setattr(cli, "create_chat_model", lambda: scripted_model([reply]))
-    monkeypatch.setattr(cli, "verify_connection", lambda: True)
+    monkeypatch.setattr(startup, "verify_connection", lambda: True)
     monkeypatch.setattr(cli, "get_callback_handler", lambda **kwargs: BaseCallbackHandler())
     monkeypatch.setattr(cli, "load_all_tools", load_all_tools)
     monkeypatch.setattr(cli, "get_checkpointer", get_checkpointer)
+    monkeypatch.setattr(turn_rules, "get_checkpointer", get_checkpointer)
     monkeypatch.setattr(
-        cli,
+        turn_rules,
         "log_run_to_memory",
         lambda result, user_input, **kwargs: seen["logged_to_memory"].append(user_input),
     )
@@ -96,4 +100,5 @@ async def test_fixtures_mode_writes_nothing_to_the_owners_memory(run_cli):
 async def test_without_fixtures_the_run_is_logged_to_memory(run_cli):
     seen = await run_cli("What day is it?")
 
-    assert seen["logged_to_memory"] == ["What day is it?"]
+    # Written after the turn and again at exit: the same entry, replaced.
+    assert seen["logged_to_memory"] == ["What day is it?"] * 2
