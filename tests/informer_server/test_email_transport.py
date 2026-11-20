@@ -1,0 +1,187 @@
+# tests/informer_server/test_email_transport.py
+"""The e-mail transport (ADR-019): an approved upload is one e-mail from the Invoice mailbox to the
+Informer incoming address, sent through an MS365 server the Informer server starts per upload.
+
+Seam: the Informer server over an in-memory MCP session, with the Fixture world's MS365 stand-in
+as its MS365 server; what was sent is read back from the stand-in's sent log."""
+
+import re
+from contextlib import asynccontextmanager
+from datetime import date
+from pathlib import Path
+
+import pytest
+from mcp.shared.memory import create_connected_server_and_client_session
+
+from agent.tools.ms365_mcp import LOGIN
+from fixture_world import ms365 as stand_in
+from informer_mcp.email_handover import LOGIN_ERRORS, email_handover
+
+# Not the Fixture world's defaults, so a hard-coded address fails.
+INVOICE_MAILBOX = "inkoop-scan@bedrijf.example"
+INCOMING_ADDRESS = "adm-91x2@scan.informer.example"
+PACKAGE = "@softeria/ms-365-mcp-server@0.159.1"
+PDF = b"%PDF-1.4\n\x00\xff binary \x80 bytes\n%%EOF\n"
+
+
+class StandInMs365:
+    """The MS365 stand-in as the transport's MS365 server, counting how often it is started."""
+
+    def __init__(self, sent_log: Path):
+        self.sent_log = sent_log
+        self.starts = 0
+
+    def connect(self):
+        @asynccontextmanager
+        async def session():
+            self.starts += 1
+            async with create_connected_server_and_client_session(stand_in.create_server()) as client:
+                yield client
+
+        return session()
+
+    def sent(self) -> list[dict]:
+        return stand_in.sent_messages(self.sent_log)
+
+
+@pytest.fixture
+def ms365(tmp_path, monkeypatch) -> StandInMs365:
+    sent_log = tmp_path / "sent.jsonl"
+    monkeypatch.setenv(stand_in.SENT_ENV, str(sent_log))
+    return StandInMs365(sent_log)
+
+
+@pytest.fixture
+def downloads(tmp_path) -> Path:
+    folder = tmp_path / "Downloads"
+    folder.mkdir()
+    return folder
+
+
+@pytest.fixture
+def settings(informer_settings, downloads, tmp_path):
+    return informer_settings.model_copy(update={
+        "downloads_dir": downloads,
+        "purchase_upload_log": tmp_path / "state" / "purchase-uploads.jsonl",
+        "today": date(2026, 10, 7),
+        "incoming_address": INCOMING_ADDRESS,
+        "invoice_mailbox": INVOICE_MAILBOX,
+        "ms365_package": PACKAGE,
+        "ms365_client_id": "client-id",
+        "ms365_tenant_id": "tenant-id",
+    })
+
+
+@pytest.mark.asyncio
+async def test_an_upload_sends_one_email_from_the_invoice_mailbox_to_the_incoming_address_only(
+    connect, settings, ms365, downloads, call_tool,
+):
+    pdf = downloads / "factuur-2026-031.pdf"
+    pdf.write_bytes(PDF)
+
+    async with connect(settings, handover=email_handover(settings, ms365.connect)) as session:
+        is_error, payload = await call_tool(session, "upload_purchase_invoice", path=str(pdf))
+
+    assert not is_error, payload
+    assert ms365.sent() == [{
+        "sender": INVOICE_MAILBOX,
+        "to": [INCOMING_ADDRESS],
+        "cc": [],
+        "bcc": [],
+        "subject": "Purchase invoice: factuur-2026-031.pdf",
+        "body": "Sent by ITtopia's personal agent.",
+        "attachments": [{"name": "factuur-2026-031.pdf", "content_type": "application/pdf", "content": PDF}],
+        "save_to_sent_items": True,
+    }]
+
+
+@pytest.mark.asyncio
+async def test_reads_never_start_the_ms365_server(connect, settings, ms365, downloads, call_tool):
+    pdf = downloads / "factuur.pdf"
+    pdf.write_bytes(PDF)
+
+    async with connect(settings, handover=email_handover(settings, ms365.connect)) as session:
+        results = [
+            await call_tool(session, "revenue", year=2026),
+            await call_tool(session, "trial_balance", year=2026),
+            await call_tool(session, "list_relations"),
+            await call_tool(session, "check_purchase_invoice", path=str(pdf)),
+        ]
+        await session.read_resource("informer://administration")
+
+    assert [is_error for is_error, _ in results] == [False] * 4
+    assert ms365.starts == 0
+
+
+@pytest.mark.asyncio
+async def test_a_login_error_is_the_uploads_error_names_the_login_command_and_logs_nothing(
+    connect, settings, ms365, downloads, call_tool, monkeypatch,
+):
+    monkeypatch.setenv(stand_in.FAILURE_ENV, "logged-out")
+    pdf = downloads / "factuur.pdf"
+    pdf.write_bytes(PDF)
+
+    async with connect(settings, handover=email_handover(settings, ms365.connect)) as session:
+        is_error, text = await call_tool(session, "upload_purchase_invoice", path=str(pdf))
+        _, checked = await call_tool(session, "check_purchase_invoice", path=str(pdf))
+
+    assert is_error
+    assert stand_in.NO_TOKEN in text
+    assert f"npx -y {PACKAGE} --login" in text
+    assert ms365.starts == 1
+    assert ms365.sent() == []
+    assert "already_uploaded_on" not in checked
+    assert not settings.purchase_upload_log.exists()
+
+
+def test_the_transport_recognises_a_login_error_as_the_agent_does():
+    assert LOGIN_ERRORS == LOGIN.error_patterns
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("switch,mode", [
+    (stand_in.FAILURE_ENV, "transient"),
+    (stand_in.FAILURE_ENV, "throttled"),
+    (stand_in.SEND_FAILURE_ENV, "transient"),
+])
+async def test_a_transient_error_is_the_uploads_error_sent_at_most_once_and_logs_nothing(
+    connect, settings, ms365, downloads, call_tool, monkeypatch, switch, mode,
+):
+    monkeypatch.setenv(switch, mode)
+    pdf = downloads / "factuur.pdf"
+    pdf.write_bytes(PDF)
+
+    async with connect(settings, handover=email_handover(settings, ms365.connect)) as session:
+        is_error, text = await call_tool(session, "upload_purchase_invoice", path=str(pdf))
+
+    assert is_error
+    assert re.search(r"Microsoft Graph API error: (429|503)\b", text)
+    assert "--login" not in text
+    assert ms365.starts == 1
+    assert ms365.sent() == []
+    assert not settings.purchase_upload_log.exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing", [
+    "incoming_address", "invoice_mailbox", "ms365_package", "ms365_client_id", "ms365_tenant_id",
+])
+async def test_with_a_required_setting_missing_neither_upload_tool_is_listed(connect, settings, ms365, missing):
+    incomplete = settings.model_copy(update={missing: None})
+
+    async with connect(incomplete, handover=email_handover(incomplete, ms365.connect)) as session:
+        init = await session.initialize()
+        names = {tool.name for tool in (await session.list_tools()).tools}
+
+    assert not names & {"check_purchase_invoice", "upload_purchase_invoice"}
+    assert "upload" not in (init.instructions or "").lower()
+    assert "revenue" in names  # the reads stay
+
+
+@pytest.mark.asyncio
+async def test_without_the_expected_username_the_upload_tools_are_listed(connect, settings, ms365):
+    async with connect(settings, handover=email_handover(settings, ms365.connect)) as session:
+        names = {tool.name for tool in (await session.list_tools()).tools}
+
+    assert settings.ms365_expected_username is None
+    assert {"check_purchase_invoice", "upload_purchase_invoice"} <= names

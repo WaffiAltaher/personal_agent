@@ -39,6 +39,15 @@ class InformerSettings(BaseSettings):
     # repeat of the same contents is noticed. Every server process shares it, so it is a file.
     # Unset means ~/.informer_mcp/purchase-uploads.jsonl.
     purchase_upload_log: Path | None = None
+    # Purchase invoice hand-over by e-mail (ADR-019): from the Invoice mailbox to the Informer
+    # incoming address, both set in `.env` only, through the MS365 server package (pinned by the
+    # agent) logged in as the owner. The upload tools exist only when all but the username are set.
+    incoming_address: str | None = None
+    invoice_mailbox: str | None = None
+    ms365_package: str | None = None
+    ms365_client_id: str | None = None
+    ms365_tenant_id: str | None = None
+    ms365_expected_username: str | None = None
 
     model_config = SettingsConfigDict(
         env_prefix="INFORMER_",
