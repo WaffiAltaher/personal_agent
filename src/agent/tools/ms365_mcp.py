@@ -8,7 +8,8 @@ The model sees exactly EXPOSED_TOOLS: the read tools that `--read-only --preset 
 exposes, plus two Write actions that save Drafts. Nothing can send mail, and every other
 write (delete, move, update, calendar changes, rules, folders, permissions) is unreachable.
 The set is enforced twice: by the server's `--enabled-tools` (which also keeps the Graph
-scopes it asks for to these tools: no Mail.Send) and by the loader, by name, whatever
+scopes it requests to these tools, so it asks for no Mail.Send; the token it gets may still
+carry every permission granted to the app, ADR-019) and by the loader, by name, whatever
 annotations the server sets.
 
 The loader also binds `ms365_save_attachment`, the agent's own Write action over the server's

@@ -80,7 +80,8 @@ def test_each_server_receives_its_own_settings_and_nothing_else(clean_environmen
     assert own == {
         "ms365": {"MS365_MCP_CLIENT_ID", "MS365_MCP_TENANT_ID"},
         "ms365 stand-in": {"FIXTURE_WORLD_TODAY"},
-        "informer": {"INFORMER_API_KEY", "INFORMER_SECURITY_CODE", "INFORMER_PAGE_SIZE"},
+        "informer": {"INFORMER_API_KEY", "INFORMER_SECURITY_CODE", "INFORMER_PAGE_SIZE",
+                     "INFORMER_MS365_PACKAGE", "INFORMER_MS365_CLIENT_ID", "INFORMER_MS365_TENANT_ID"},
         "informer stand-in": {"FIXTURE_WORLD_TODAY"},
     }
 
@@ -165,6 +166,19 @@ def test_expected_ms365_username_is_optional(monkeypatch):
     settings = Settings(_env_file=None, ms365_mcp_client_id="client", ms365_mcp_tenant_id="tenant")
 
     assert "MS365_MCP_EXPECTED_USERNAME" not in ms365_server(settings).connection["env"]
+
+
+def test_the_informer_server_gets_the_ms365_pin_and_ids_for_its_email_transport(clean_environment):
+    settings = _real_settings().model_copy(update={"ms365_mcp_expected_username": "jendo@example.com"})
+
+    env = informer_server(settings).connection["env"]
+
+    assert {key: env[key] for key in env if key.startswith("INFORMER_MS365_")} == {
+        "INFORMER_MS365_PACKAGE": "@softeria/ms-365-mcp-server@0.159.1",
+        "INFORMER_MS365_CLIENT_ID": "client",
+        "INFORMER_MS365_TENANT_ID": "tenant",
+        "INFORMER_MS365_EXPECTED_USERNAME": "jendo@example.com",
+    }
 
 
 @pytest.mark.asyncio

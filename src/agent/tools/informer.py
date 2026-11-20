@@ -9,6 +9,7 @@ import re
 import sys
 
 from agent.config import Settings, settings as default_settings
+from agent.tools import ms365_mcp
 from agent.tools.mcp_environment import fixture_environment, inherited, system_environment
 from agent.tools.mcp_loader import McpServer
 from informer_mcp.client import TRANSIENT_ERROR_PREFIX
@@ -44,6 +45,18 @@ def _informer_setting_names() -> list[str]:
     return [prefix + name.upper() for name in InformerSettings.model_fields]
 
 
+def _ms365_settings(settings: Settings) -> dict[str, str]:
+    """What the Informer server's e-mail transport needs to start its own MS365 server (ADR-019):
+    the agent's one package pin and its Microsoft login's IDs (identifiers, not secrets)."""
+    values = {
+        "INFORMER_MS365_PACKAGE": ms365_mcp.PACKAGE,
+        "INFORMER_MS365_CLIENT_ID": settings.ms365_mcp_client_id,
+        "INFORMER_MS365_TENANT_ID": settings.ms365_mcp_tenant_id,
+        "INFORMER_MS365_EXPECTED_USERNAME": settings.ms365_mcp_expected_username,
+    }
+    return {name: value for name, value in values.items() if value}
+
+
 def informer_server(settings: Settings = default_settings) -> McpServer:
     """The real server, over stdio, against Informer API v2 with ITtopia's API key."""
     if not (settings.informer_api_key and settings.informer_security_code):
@@ -63,6 +76,7 @@ def informer_server(settings: Settings = default_settings) -> McpServer:
                 **inherited(_informer_setting_names()),
                 "INFORMER_API_KEY": settings.informer_api_key,
                 "INFORMER_SECURITY_CODE": settings.informer_security_code,
+                **_ms365_settings(settings),
             },
         },
         read_allowlist=READ_TOOLS,
