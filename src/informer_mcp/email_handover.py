@@ -3,11 +3,14 @@
 mailbox to the Informer incoming address, sent through an MS365 server started per upload."""
 
 import base64
+import os
 import re
+import tempfile
 from collections.abc import Callable
-from contextlib import AbstractAsyncContextManager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 
-from mcp import ClientSession
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
 from mcp.types import TextContent
 
 from informer_mcp.config import InformerSettings
@@ -63,6 +66,40 @@ class EmailHandover:
             text += (f"\nNot logged in to Microsoft 365. Log in with `{self.login_command}`, "
                      "then upload the invoice again.")
         raise RuntimeError(text)
+
+
+def ms365_server_parameters(settings: InformerSettings) -> StdioServerParameters:
+    """The real MS365 server, through npx, with only the send tool enabled. `--org-mode` is needed:
+    without it the pinned server doesn't register work-scoped tools such as this one."""
+    # This process's environment is already the agent's allowlist (system basics and INFORMER_*);
+    # the server gets the basics and its own settings, never Informer's API key. ENABLED_TOOLS
+    # would override --enabled-tools, and MS365_MCP_USE_KEYTAR would move the token cache.
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith(("INFORMER_", "MS365_MCP_")) and key != "ENABLED_TOOLS"}
+    for name, value in (("MS365_MCP_CLIENT_ID", settings.ms365_client_id),
+                        ("MS365_MCP_TENANT_ID", settings.ms365_tenant_id),
+                        ("MS365_MCP_EXPECTED_USERNAME", settings.ms365_expected_username)):
+        if value:
+            env[name] = value
+    return StdioServerParameters(
+        command="npx",
+        args=["-y", settings.ms365_package or "", "--org-mode", "--enabled-tools", f"^(?:{SEND_TOOL})$"],
+        env=env,
+        # Outside the repo: the server reads a `.env` from its working directory on its own.
+        cwd=tempfile.gettempdir(),
+    )
+
+
+def stdio_connection(params: StdioServerParameters) -> Ms365Connection:
+    """Starts the server in `params` for each session, over stdio."""
+
+    @asynccontextmanager
+    async def session():
+        async with stdio_client(params) as (read, write), ClientSession(read, write) as client:
+            await client.initialize()
+            yield client
+
+    return session
 
 
 def email_handover(settings: InformerSettings, ms365: Ms365Connection) -> EmailHandover | None:

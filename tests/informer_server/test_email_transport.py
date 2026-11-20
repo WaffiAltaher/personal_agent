@@ -15,7 +15,9 @@ from mcp.shared.memory import create_connected_server_and_client_session
 
 from agent.tools.ms365_mcp import LOGIN
 from fixture_world import ms365 as stand_in
-from informer_mcp.email_handover import LOGIN_ERRORS, email_handover
+from informer_mcp.email_handover import LOGIN_ERRORS, email_handover, ms365_server_parameters
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Not the Fixture world's defaults, so a hard-coded address fails.
 INVOICE_MAILBOX = "inkoop-scan@bedrijf.example"
@@ -185,3 +187,31 @@ async def test_without_the_expected_username_the_upload_tools_are_listed(connect
 
     assert settings.ms365_expected_username is None
     assert {"check_purchase_invoice", "upload_purchase_invoice"} <= names
+
+
+def test_the_real_ms365_server_is_the_pinned_package_with_only_the_send_tool_outside_the_repo(
+    settings, monkeypatch,
+):
+    monkeypatch.setenv("INFORMER_API_KEY", "informer-key-decoy")  # the Informer process has it
+    monkeypatch.setenv("ENABLED_TOOLS", ".*")  # would override --enabled-tools
+    monkeypatch.setenv("MS365_MCP_USE_KEYTAR", "false")  # would move the token cache out of the keychain
+    settings = settings.model_copy(update={"ms365_expected_username": "jendo@example.com"})
+
+    params = ms365_server_parameters(settings)
+
+    assert params.command == "npx"
+    assert params.args[:2] == ["-y", PACKAGE]
+    assert "--org-mode" in params.args
+    # The server tests each tool name against the pattern case-insensitively, without anchoring.
+    pattern = re.compile(params.args[params.args.index("--enabled-tools") + 1], re.IGNORECASE)
+    assert pattern.search("send-shared-mailbox-mail")
+    for other in ("send-mail", "send-shared-mailbox-mail-x", "create-draft-email", "list-mail-messages"):
+        assert not pattern.search(other), other
+    cwd = Path(params.cwd).resolve()
+    assert cwd.is_dir() and not cwd.is_relative_to(REPO_ROOT)
+    assert {key: params.env[key] for key in params.env if key.startswith("MS365_MCP_")} == {
+        "MS365_MCP_CLIENT_ID": "client-id",
+        "MS365_MCP_TENANT_ID": "tenant-id",
+        "MS365_MCP_EXPECTED_USERNAME": "jendo@example.com",
+    }
+    assert not [key for key in params.env if key.startswith("INFORMER_") or key == "ENABLED_TOOLS"]
