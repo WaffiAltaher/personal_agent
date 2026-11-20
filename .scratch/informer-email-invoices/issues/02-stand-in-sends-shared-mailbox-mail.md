@@ -6,14 +6,17 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Calling the tool records one entry with sender, recipients, CC, BCC, subject, body and attachments (name, content type, decoded bytes available through the helper)
-- [ ] The argument shape matches the pinned server's schema: check it against the real server's tool listing, not from memory
-- [ ] The logged-out and transient failure modes make the send fail as the real server reports it, recording no message
-- [ ] The send-only failure switch fails the send without affecting reads or Drafts
-- [ ] A test pins that `send-shared-mailbox-mail` (and `send-mail`) are not in the agent's `EXPOSED_TOOLS` or `ENABLED_TOOLS`
+- [x] Calling the tool records one entry with sender, recipients, CC, BCC, subject, body and attachments (name, content type, decoded bytes available through the helper)
+- [x] The argument shape matches the pinned server's schema: check it against the real server's tool listing, not from memory
+- [x] The logged-out and transient failure modes make the send fail as the real server reports it, recording no message
+- [x] The send-only failure switch fails the send without affecting reads or Drafts
+- [x] A test pins that `send-shared-mailbox-mail` (and `send-mail`) are not in the agent's `EXPOSED_TOOLS` or `ENABLED_TOOLS`
 
 Spec: `../spec.md` (Fixture world and evals). ADR-019.
 
 ## Comments
+
+- Built `send-shared-mailbox-mail` in `src/fixture_world/ms365.py`: arguments `userId`, `body` (`Message`, `SaveToSentItems`), `includeHeaders`, `excludeResponse`, `confirm`, as in the pinned server's listing; answers `{"message": "OK!"}`. Records accepted calls to the file named by `FIXTURE_WORLD_MS365_SENT`; `sent_messages(path)` reads them back (sender, to, cc, bcc, subject, body, attachments with decoded bytes, save_to_sent_items), `recorded_send_calls(path)` the raw calls. A `contentType` other than `text`/`html` and a body without `Message` are rejected, recording nothing. The existing failure modes apply through the shared wrapper; `FIXTURE_WORLD_MS365_SEND_FAILURE=transient` fails only the send (Graph 503).
+- Tests: 9 in `tests/test_fixture_world_ms365_send.py` (recording, listing shape and annotations, two rejections, logged-out, transient and throttled, send-only switch, the policy pin). The listing and the policy-pin tests passed on first run (they pin behaviour the stand-in's framework and the unchanged policy already gave); the rest were red first.
