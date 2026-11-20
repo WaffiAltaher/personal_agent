@@ -29,6 +29,7 @@ def test_search_score_equals_cosine_similarity(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "memory_score_threshold", 0.0)
     hits = mem.search_memories(query_text, k=1)
 
+    mem.close()
     assert len(hits) == 1
     assert hits[0].score == pytest.approx(target, abs=1e-3)
 
@@ -53,6 +54,7 @@ def test_calibration_queries_match_labels_at_configured_threshold(tmp_path, monk
             expected_text = CALIBRATION_FACTS[expected_fact]
             assert hits[0].content == expected_text
             assert hits[0].score >= threshold
+    mem.close()
 
 
 def test_memory_threshold_lives_only_in_settings():
@@ -84,6 +86,7 @@ def test_l2_store_is_reindexed_to_cosine_on_open(tmp_path, monkeypatch):
         metadatas=[{"memory_id": "m1"}],
     )
     assert l2._collection.configuration["hnsw"]["space"] == "l2"
+    l2._client.close()
 
     with patch(
         "agent.memory.semantic.create_embeddings",
@@ -94,5 +97,6 @@ def test_l2_store_is_reindexed_to_cosine_on_open(tmp_path, monkeypatch):
     assert reopened._memories._collection.configuration["hnsw"]["space"] == "cosine"
     monkeypatch.setattr(settings, "memory_score_threshold", 0.0)
     hits = reopened.search_memories("VAT Netherlands", k=1)
+    reopened.close()
     assert hits and "21%" in hits[0].content
     assert hits[0].score == pytest.approx(1.0, abs=1e-3)

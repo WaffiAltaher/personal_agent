@@ -44,14 +44,20 @@ print(take_failure(Failure.TRANSIENT) or "")
 
 def _run_at_once(script: str, go: Path, env: dict[str, str]) -> list[str]:
     """Start PROCESSES copies of `script`, release them together, and return their stdout."""
-    procs = [
-        subprocess.Popen([sys.executable, "-c", script, str(go)], env={**os.environ, **env},
-                         stdout=subprocess.PIPE, text=True)
-        for _ in range(PROCESSES)
-    ]
-    time.sleep(2)  # let every process import and reach the wait
-    go.touch()
-    outputs = [p.communicate(timeout=60)[0] for p in procs]
+    procs = []
+    try:
+        for _ in range(PROCESSES):
+            procs.append(subprocess.Popen([sys.executable, "-c", script, str(go)], env={**os.environ, **env},
+                                          stdout=subprocess.PIPE, text=True))
+        time.sleep(2)  # let every process import and reach the wait
+        go.touch()
+        outputs = [p.communicate(timeout=60)[0] for p in procs]
+    finally:
+        # A failed start or a timeout must not leave children spinning on the "go" file.
+        for p in procs:
+            if p.poll() is None:
+                p.kill()
+            p.communicate()
     assert all(p.returncode == 0 for p in procs)
     return outputs
 
