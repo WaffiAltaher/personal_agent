@@ -92,7 +92,8 @@ def cli_run(monkeypatch, tmp_path, scripted_model, startup_login_checks_pass):
         seen["prompts"] = type_lines(monkeypatch, lines)
         monkeypatch.setattr(sys, "argv", ["agent.cli", *(args or ("--fixtures", "Mail Ann, then Bob."))])
         return cli.main()
-    return seen, start
+    yield seen, start
+    memory.close()
 
 
 def mail(to, call_id):

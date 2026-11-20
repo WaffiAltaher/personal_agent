@@ -32,7 +32,9 @@ def mem(tmp_path):
         "agent.memory.semantic.create_embeddings",
         return_value=_FakeEmbeddings(),
     ):
-        yield SemanticMemory(persist_dir=str(tmp_path / "chroma"))
+        semantic = SemanticMemory(persist_dir=str(tmp_path / "chroma"))
+    yield semantic
+    semantic.close()
 
 
 def test_ingest_and_search_documents(mem, monkeypatch):

@@ -56,6 +56,7 @@ class SemanticMemory:
             collection_metadata=COSINE_COLLECTION_METADATA,
         )
         if not _collection_uses_cosine(store):
+            store._client.close()
             return self._reindex_collection(name)
         return store
 
@@ -71,6 +72,7 @@ class SemanticMemory:
         texts = payload["documents"]
         metadatas = payload["metadatas"]
         legacy._client.delete_collection(name)
+        legacy._client.close()
         store = Chroma(
             collection_name=name,
             embedding_function=self._embeddings,
@@ -154,3 +156,8 @@ class SemanticMemory:
                 combined.append(chunk)
 
         return combined[:k]
+
+    def close(self) -> None:
+        """Release the Chroma clients (their SQLite files and threads)."""
+        self._documents._client.close()
+        self._memories._client.close()

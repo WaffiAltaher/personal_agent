@@ -51,5 +51,6 @@ def fixtures_semantic_memory():
     try:
         yield
     finally:
+        _semantic.close()
         _semantic = prev
         shutil.rmtree(tmp, ignore_errors=True)

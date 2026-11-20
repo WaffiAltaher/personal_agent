@@ -27,7 +27,9 @@ def episodic(tmp_path):
 @pytest.fixture
 def semantic(tmp_path):
     with patch("agent.memory.semantic.create_embeddings", return_value=FixedEmbeddings()):
-        yield SemanticMemory(persist_dir=str(tmp_path / "chroma"))
+        mem = SemanticMemory(persist_dir=str(tmp_path / "chroma"))
+    yield mem
+    mem.close()
 
 
 @pytest.fixture
