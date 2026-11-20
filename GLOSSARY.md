@@ -17,8 +17,12 @@ An invoice ITtopia issued to a Client.
 _Avoid_: bill, invoice (unqualified)
 
 **Purchase invoice**:
-An invoice a supplier issued to ITtopia. The owner only hands its file to Informer; the accountant books it.
+An invoice a supplier issued to ITtopia. The owner only hands its file to Informer, by e-mail from the Invoice mailbox to the Informer incoming address; the accountant books it.
 _Avoid_: bill, receipt, expense
+
+**Informer incoming address**:
+The e-mail address Informer generated for ITtopia's administration, where Informer reads Purchase invoices sent to it.
+_Avoid_: Informer inbox, Informer email, upload address
 
 **Due date**:
 The date by which a sales invoice must be paid (Informer's `expiry_date`).
@@ -41,6 +45,10 @@ _Avoid_: BTW, tax, VAT balance
 **Draft**:
 An unsent message saved in the ITtopia Outlook mailbox for the owner to review and send.
 _Avoid_: email (when unsent), message
+
+**Invoice mailbox**:
+ITtopia's shared mailbox that sends Purchase invoices to the Informer incoming address and may send nowhere else.
+_Avoid_: shared inbox, sender mailbox
 
 ## Conversations
 
