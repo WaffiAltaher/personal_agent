@@ -6,12 +6,10 @@ Seam: the Informer server over an in-memory MCP session, with the Fixture world'
 as its MS365 server; what was sent is read back from the stand-in's sent log."""
 
 import re
-from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
 
 import pytest
-from mcp.shared.memory import create_connected_server_and_client_session
 
 from agent.tools.ms365_mcp import LOGIN
 from fixture_world import ms365 as stand_in
@@ -24,33 +22,6 @@ INVOICE_MAILBOX = "inkoop-scan@bedrijf.example"
 INCOMING_ADDRESS = "adm-91x2@scan.informer.example"
 PACKAGE = "@softeria/ms-365-mcp-server@0.159.1"
 PDF = b"%PDF-1.4\n\x00\xff binary \x80 bytes\n%%EOF\n"
-
-
-class StandInMs365:
-    """The MS365 stand-in as the transport's MS365 server, counting how often it is started."""
-
-    def __init__(self, sent_log: Path):
-        self.sent_log = sent_log
-        self.starts = 0
-
-    def connect(self):
-        @asynccontextmanager
-        async def session():
-            self.starts += 1
-            async with create_connected_server_and_client_session(stand_in.create_server()) as client:
-                yield client
-
-        return session()
-
-    def sent(self) -> list[dict]:
-        return stand_in.sent_messages(self.sent_log)
-
-
-@pytest.fixture
-def ms365(tmp_path, monkeypatch) -> StandInMs365:
-    sent_log = tmp_path / "sent.jsonl"
-    monkeypatch.setenv(stand_in.SENT_ENV, str(sent_log))
-    return StandInMs365(sent_log)
 
 
 @pytest.fixture
