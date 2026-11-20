@@ -6,12 +6,14 @@
 
 **Blocked by:** 03
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] The wizard step is skippable and writes or replaces only those two lines in `.env`
-- [ ] `CLAUDE.md` lists the two settings under the optional settings
-- [ ] Neither address appears in any tracked file
+- [x] The wizard step is skippable and writes or replaces only those two lines in `.env`
+- [x] `CLAUDE.md` lists the two settings under the optional settings
+- [x] Neither address appears in any tracked file
 
 Spec: `../spec.md` (Setup and docs).
 
 ## Comments
+
+- 2026-11-20 (claude): Added stage 5 "Informer: e-mail upload of Purchase invoices (optional)" to `scripts/setup_wizard.sh` (later stages renumbered, `TOTAL_STAGES=11`). A `y/N` gate skips it; otherwise it opens `https://app.informer.eu/settings/email/`, warns the incoming address is a write key (hidden input, never echoed), asks for the Invoice mailbox, and writes both lines with `write_env` only when both are non-empty. `CLAUDE.md` lists both settings under the optional ones. No address is in any tracked file (tests use `.example` addresses). Tests: `tests/test_setup_wizard.py` (5), running the script with stand-in tools on PATH and a temp `ENV_FILE`. Suite: 724 passed, 6 deselected.
