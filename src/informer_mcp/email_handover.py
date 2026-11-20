@@ -17,6 +17,9 @@ from informer_mcp.config import InformerSettings
 
 SEND_TOOL = "send-shared-mailbox-mail"
 BODY = "Sent by ITtopia's personal agent."
+# The MS365 server's arguments after the package. `--org-mode` is needed: without it the pinned
+# server doesn't register work-scoped tools such as this one.
+SERVER_ARGS = ["--org-mode", "--enabled-tools", f"^(?:{SEND_TOOL})$"]
 
 # The MS365 server's wording for a missing or expired login, as in agent.tools.ms365_mcp.LOGIN
 # (not imported: this server runs without the agent's settings).
@@ -69,8 +72,7 @@ class EmailHandover:
 
 
 def ms365_server_parameters(settings: InformerSettings) -> StdioServerParameters:
-    """The real MS365 server, through npx, with only the send tool enabled. `--org-mode` is needed:
-    without it the pinned server doesn't register work-scoped tools such as this one."""
+    """The real MS365 server, through npx, with only the send tool enabled."""
     # This process's environment is already the agent's allowlist (system basics and INFORMER_*);
     # the server gets the basics and its own settings, never Informer's API key. ENABLED_TOOLS
     # would override --enabled-tools, and MS365_MCP_USE_KEYTAR would move the token cache.
@@ -83,7 +85,7 @@ def ms365_server_parameters(settings: InformerSettings) -> StdioServerParameters
             env[name] = value
     return StdioServerParameters(
         command="npx",
-        args=["-y", settings.ms365_package or "", "--org-mode", "--enabled-tools", f"^(?:{SEND_TOOL})$"],
+        args=["-y", settings.ms365_package or "", *SERVER_ARGS],
         env=env,
         # Outside the repo: the server reads a `.env` from its working directory on its own.
         cwd=tempfile.gettempdir(),

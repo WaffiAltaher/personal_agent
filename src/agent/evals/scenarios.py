@@ -25,6 +25,7 @@ Tool names are the names bound to the graph (MCP tools carry their server prefix
 An injected failure is switched on once the tools are loaded, so it hits the run, not startup:
 - ms365: a `fixture_world.ms365.Failure` mode; `times` limits it to the next N tool calls.
 - informer: a `fixture_world.informer_api.Failure` mode, on every request (no `times`).
+- handover: the MS365 stand-in's send failure switch (`transient`), on every upload (no `times`).
 """
 
 import json
@@ -56,6 +57,8 @@ class FailureInjection(_Strict):
     @model_validator(mode="after")
     def _known_mode(self):
         if self.server == "handover":
+            if self.mode != "transient":
+                raise ValueError(f"unknown handover failure mode {self.mode!r}; one of ['transient']")
             if self.times is not None:
                 raise ValueError("a hand-over failure applies to every upload attempt; it takes no 'times'")
             return self

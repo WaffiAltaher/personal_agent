@@ -41,6 +41,20 @@ class ScriptedChatModel(GenericFakeChatModel):
         return ChatResult(generations=[ChatGeneration(message=message)])
 
 
+def sent_upload(file_name: str, content: bytes, *, sender: str | None = None, to: str | None = None) -> dict:
+    """One Purchase invoice e-mail as `fixture_world.ms365.sent_messages` reads it back, from the
+    Fixture world's Invoice mailbox to its Informer incoming address unless told otherwise."""
+    from fixture_world import informer as fixture_informer
+
+    return {
+        "sender": sender or fixture_informer.INVOICE_MAILBOX,
+        "to": [to or fixture_informer.INCOMING_ADDRESS], "cc": [], "bcc": [],
+        "subject": f"Purchase invoice: {file_name}", "body": "Sent by ITtopia's personal agent.",
+        "attachments": [{"name": file_name, "content_type": "application/pdf", "content": content}],
+        "save_to_sent_items": True,
+    }
+
+
 # The real Claude Code CLI spends the owner's subscription: outside `live` tests, a claude_code:
 # model or login check that a test didn't point at the stand-in fails with "not found" instead.
 NO_REAL_CLAUDE = "/nonexistent/the-real-claude-is-not-called-in-tests"

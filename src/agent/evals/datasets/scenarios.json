@@ -131,11 +131,11 @@
       "workflow": "upload",
       "input": "Upload fail-me.pdf from Downloads as a Purchase invoice.",
       "approval": "approve",
-      "inject_failure": {"server": "handover", "mode": "hand-over unavailable"},
+      "inject_failure": {"server": "handover", "mode": "transient"},
       "required_tools": ["informer_check_purchase_invoice", "informer_upload_purchase_invoice"],
       "ordering": [{"before": "informer_check_purchase_invoice", "after": "informer_upload_purchase_invoice"}],
       "forbidden_tools": ["create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
-      "expected_facts": ["hand-over unavailable"],
+      "expected_facts": ["503", "unavailable"],
       "expected_outcome": {"upload_count": 0, "require_failure_reported": true}
     },
     {

@@ -119,7 +119,7 @@ class RunResult(BaseModel):
     outcome: OutcomeScore
     answer_facts: FactsScore
     passed: bool  # trajectory and, when declared, outcome
-    upload_log_path: str | None = None  # Fixture-world hand-over log for this run; None outside eval workdirs
+    upload_log_path: str | None = None  # the MS365 stand-in's sent log for this run; None outside eval workdirs
     efficiency: Efficiency | None = None
     generation: GenerationScores | None = None  # None: the eval ran without a judge
     trace_id: str | None = None  # the run's Langfuse trace; None: not traced

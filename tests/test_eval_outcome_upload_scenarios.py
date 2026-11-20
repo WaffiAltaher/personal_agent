@@ -1,5 +1,5 @@
 """
-Upload and mixed-batch eval scenarios: outcome grading from the Fixture world's upload log.
+Upload and mixed-batch eval scenarios: outcome grading from what the Fixture world's MS365 stand-in sent.
 
 Seam: eval harness on the Fixture world with a scripted model (no live LLM).
 """
@@ -12,7 +12,8 @@ from langchain_core.messages import AIMessage
 import agent.graph as graph_module
 from agent.evals.harness import run_eval
 from agent.evals.scenarios import DEFAULT_DATASET, Dataset, ExpectedOutcome, Scenario, load_dataset
-from agent.evals.outcome import run_passed
+from agent.evals.outcome import run_passed, score_outcome
+from conftest import sent_upload
 
 DATASET = load_dataset(DEFAULT_DATASET)
 MINIMAL_PDF = b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n"
@@ -128,10 +129,22 @@ async def test_scripted_run_with_right_tools_but_wrong_file_fails_on_outcome(scr
 
 def test_rejected_upload_scenario_fails_if_any_upload_was_recorded():
     scenario = next(s for s in _upload_scenarios() if s.id == "upload-purchase-rejected")
-    from agent.evals.outcome import score_outcome
 
-    score = score_outcome(scenario, [("supplier-march.pdf", MINIMAL_PDF)], final_answer="")
+    score = score_outcome(scenario, [sent_upload("supplier-march.pdf", MINIMAL_PDF)], final_answer="")
     assert not score.passed
+
+
+def test_approved_upload_grade_requires_the_configured_sender_and_recipient():
+    scenario = next(s for s in _upload_scenarios() if s.id == "upload-purchase-approved")
+    expected_bytes = {"supplier-march.pdf": MINIMAL_PDF}
+
+    def grade(message: dict) -> bool:
+        return score_outcome(scenario, [message], final_answer="", expected_bytes=expected_bytes).passed
+
+    assert grade(sent_upload("supplier-march.pdf", MINIMAL_PDF))
+    assert not grade(sent_upload("supplier-march.pdf", MINIMAL_PDF, to="someone@elsewhere.example"))
+    assert not grade(sent_upload("supplier-march.pdf", MINIMAL_PDF, sender="jendo@example.com"))
+    assert not grade(sent_upload("supplier-march.pdf", MINIMAL_PDF) | {"bcc": ["someone@elsewhere.example"]})
 
 
 @pytest.mark.asyncio
@@ -175,6 +188,32 @@ async def test_handover_failure_scenario_fails_when_the_answer_claims_success(sc
     )
     [run] = results.runs
     assert not run.outcome.passed
+
+
+@pytest.mark.asyncio
+async def test_handover_failure_scenario_sends_nothing_and_passes_when_the_answer_reports_it(
+    scripted_model, tmp_path,
+):
+    scenario = next(s for s in _upload_scenarios() if s.id == "upload-handover-failure")
+    pdf = tmp_path / "fail-me.pdf"
+    pdf.write_bytes(MINIMAL_PDF)
+    path = str(pdf)
+    script = [
+        _call("informer_check_purchase_invoice", {"path": path}, "check"),
+        _call("informer_upload_purchase_invoice", {"path": path}, "upload"),
+        _answer("I could not send fail-me.pdf: Microsoft 365 answered 503 Service Unavailable."),
+    ]
+    results = await run_eval(
+        Dataset(format_version=1, dataset_version="test", scenarios=[scenario]),
+        model_name="scripted",
+        model_factory=lambda s: scripted_model(script),
+        load_tools=_load_tools_with_downloads(tmp_path),
+    )
+    [run] = results.runs
+    [upload] = [c for c in run.tool_calls if c.name == "informer_upload_purchase_invoice"]
+    assert upload.status == "error"
+    assert run.outcome.upload_count == 0
+    assert run.outcome.passed, run.outcome.detail
 
 
 @pytest.mark.asyncio
