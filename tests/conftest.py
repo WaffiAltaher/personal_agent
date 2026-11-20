@@ -56,6 +56,26 @@ def no_real_claude_code(request, monkeypatch):
     monkeypatch.setattr(settings, "claude_code_binary", NO_REAL_CLAUDE)
 
 
+# Open file descriptors a test file may leave behind: room for one-time setup (an event loop's
+# kqueue, a library's first client), not for a leak per test. A leak per test ran the suite into
+# "Too many open files" under macOS's default `ulimit -n` of 256.
+FD_GROWTH_PER_FILE = 16
+
+
+def _open_fds() -> int:
+    return len(os.listdir("/dev/fd"))
+
+
+@pytest.fixture(autouse=True, scope="module")
+def no_file_descriptor_leak():
+    before = _open_fds()
+    yield
+    grown = _open_fds() - before
+    if grown > FD_GROWTH_PER_FILE:
+        pytest.fail(f"this test file left {grown} more file descriptors open than it found "
+                    f"(allowed: {FD_GROWTH_PER_FILE}): close what its tests open", pytrace=False)
+
+
 @pytest.fixture(autouse=True)
 def owner_types_nothing_more(monkeypatch):
     """A CLI session in a test ends at its first `> ` prompt (Ctrl-D) unless the test types
