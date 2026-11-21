@@ -323,8 +323,10 @@ fi
 pause
 
 # ── 6 ────────────────────────────────────────────────────────────────────────
-stage "Azure app: allow saving Drafts (Mail.ReadWrite)"
-say "Your own app registration needs one more delegated Graph permission. Sending stays impossible."
+stage "Azure app: allow saving Drafts and sending from the Invoice mailbox"
+say "Your own app registration needs two more delegated Graph permissions: Mail.ReadWrite to save"
+say "Drafts, and Mail.Send.Shared so the Invoice mailbox can send Purchase invoices to Informer."
+say "Mail.Send (sending as you) is never added."
 ask MS365_MCP_CLIENT_ID "Application (client) ID:"
 ask MS365_MCP_TENANT_ID "Directory (tenant) ID:"
 MS365_MCP_CLIENT_ID="${MS365_MCP_CLIENT_ID//\"/}"; MS365_MCP_TENANT_ID="${MS365_MCP_TENANT_ID//\"/}"
@@ -333,12 +335,16 @@ write_env MS365_MCP_TENANT_ID "$MS365_MCP_TENANT_ID"
 open_url "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/CallAnAPI/appId/$MS365_MCP_CLIENT_ID"
 step "API permissions → Add a permission → Microsoft Graph → Delegated permissions."
 step "Search 'Mail.ReadWrite' → tick it → Add permissions."
+step "Again: search 'Mail.Send.Shared' → tick it → Add permissions (without it every upload fails with a Graph 403)."
 step "Click 'Grant admin consent for <ITtopia>' → Yes. Do NOT add Mail.Send."
+step "Sending is limited to the Invoice mailbox by an Exchange mail-flow rule (Exchange admin center →"
+step "  Mail flow → Rules): mail from the Invoice mailbox to anyone but the Informer incoming address is rejected."
 step "Then Authentication (left menu) → 'Allow public client flows' must be Yes (device-code login)."
 pause "Done in the portal? Press Enter to list what the server will request"
 say "Graph permissions the agent's tool set needs:"
 ms365 --list-permissions || warn "couldn't list permissions (see above)"
 warn "Check: Mail.ReadWrite is listed; Mail.Send is NOT. Each listed one must be granted above."
+warn "Mail.Send.Shared is not in this list (the Informer server's own MS365 server uses it): check it is granted too."
 confirm "Does the list look right?" || SKIPPED+=("Azure permissions: re-check API permissions vs --list-permissions")
 pause
 
