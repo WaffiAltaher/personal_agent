@@ -11,9 +11,11 @@ from pathlib import Path
 
 import pytest
 
+from agent.tools.mcp_environment import SYSTEM_VARIABLES
 from agent.tools.ms365_mcp import LOGIN
 from fixture_world import informer as fixture_informer, ms365 as stand_in
 from informer_mcp.email_handover import LOGIN_ERRORS, email_handover, ms365_server_parameters, stdio_connection
+from informer_mcp.email_handover import SYSTEM_VARIABLES as MS365_SYSTEM_VARIABLES
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -226,3 +228,21 @@ def test_the_real_ms365_server_is_the_pinned_package_with_only_the_send_tool_out
         "MS365_MCP_EXPECTED_USERNAME": "jendo@example.com",
     }
     assert not [key for key in params.env if key.startswith("INFORMER_") or key == "ENABLED_TOOLS"]
+
+
+def test_the_real_ms365_server_gets_only_the_system_basics_and_its_own_settings(settings, monkeypatch):
+    # Run by hand, `python -m informer_mcp` has the whole shell environment.
+    monkeypatch.setenv("TAVILY_API_KEY", "tavily-key-decoy")
+    monkeypatch.setenv("SOME_OTHER_TOKEN", "decoy")
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    monkeypatch.setenv("HOME", "/Users/owner")
+
+    params = ms365_server_parameters(settings)
+
+    assert params.env["PATH"] == "/usr/bin:/bin"
+    assert params.env["HOME"] == "/Users/owner"
+    assert set(params.env) <= SYSTEM_VARIABLES | {"MS365_MCP_CLIENT_ID", "MS365_MCP_TENANT_ID"}
+
+
+def test_the_ms365_server_gets_the_same_system_basics_as_the_agents_mcp_servers():
+    assert MS365_SYSTEM_VARIABLES == SYSTEM_VARIABLES

@@ -30,6 +30,32 @@ LOGIN_ERRORS = (
     r"Microsoft Graph API error: 401\b",
 )
 
+# What Node and npx need to run, find their caches and reach the network, as in
+# agent.tools.mcp_environment.SYSTEM_VARIABLES (not imported, for the same reason as LOGIN_ERRORS).
+SYSTEM_VARIABLES = frozenset({
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",  # with USER, identifies the account to the macOS keychain
+    "SHELL",
+    "TERM",
+    "TMPDIR",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "NODE_OPTIONS",
+    "NODE_EXTRA_CA_CERTS",
+    "SSL_CERT_FILE",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
+    "all_proxy",
+})
+
 # Opens an initialised session to a freshly started MS365 server, and stops it on exit.
 Ms365Connection = Callable[[], AbstractAsyncContextManager[ClientSession]]
 
@@ -77,11 +103,10 @@ class EmailHandover:
 
 def ms365_server_parameters(settings: InformerSettings) -> StdioServerParameters:
     """The real MS365 server, through npx, with only the send tool enabled."""
-    # This process's environment is already the agent's allowlist (system basics and INFORMER_*);
-    # the server gets the basics and its own settings, never Informer's API key. ENABLED_TOOLS
-    # would override --enabled-tools, and MS365_MCP_USE_KEYTAR would move the token cache.
-    env = {key: value for key, value in os.environ.items()
-           if not key.startswith(("INFORMER_", "MS365_MCP_")) and key != "ENABLED_TOOLS"}
+    # Only the system basics and its own settings, never Informer's API key or, run by hand, the
+    # rest of the shell's environment. ENABLED_TOOLS would override --enabled-tools, and
+    # MS365_MCP_USE_KEYTAR would move the token cache.
+    env = {key: value for key, value in os.environ.items() if key in SYSTEM_VARIABLES}
     for name, value in (("MS365_MCP_CLIENT_ID", settings.ms365_client_id),
                         ("MS365_MCP_TENANT_ID", settings.ms365_tenant_id),
                         ("MS365_MCP_EXPECTED_USERNAME", settings.ms365_expected_username)):
