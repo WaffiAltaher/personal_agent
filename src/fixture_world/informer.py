@@ -22,7 +22,8 @@ The Purchase invoice upload log is a file, since each tool call is a new process
 FIXTURE_WORLD_INFORMER_UPLOAD_LOG names it (default: one stable file in the temp dir).
 FIXTURE_WORLD_INFORMER_DOWNLOADS_DIR names the folder PDFs may be uploaded from (default: ~/Downloads).
 Only FIXTURE_WORLD_* variables reach this process (see agent.tools.mcp_environment), so these
-are the names to use, not INFORMER_*.
+are the names to use, not INFORMER_*. The agent also passes INFORMER_MS365_PACKAGE, its one MS365
+pin, so a login error names the same command as against the real server.
 
 FIXTURE_WORLD_INFORMER_FAILURE=<mode> switches the fake into a failure mode for every request
 (`informer_api.Failure` values: unauthorized, quota_exhausted, throttled, server_error).
@@ -100,7 +101,7 @@ def main() -> None:
             stdio_connection(ms365_stand_in_parameters()),
             invoice_mailbox=INVOICE_MAILBOX,
             incoming_address=INCOMING_ADDRESS,
-            login_command=login_command("@softeria/ms-365-mcp-server"),
+            login_command=login_command(settings.ms365_package),
         )
         create_server(settings, handover=handover).run("stdio")
 

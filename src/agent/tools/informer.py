@@ -96,6 +96,7 @@ def informer_fixture_server() -> McpServer:
             "env": {
                 **fixture_environment(),
                 **inherited(["INFORMER_DOWNLOADS_DIR"]),
+                "INFORMER_MS365_PACKAGE": ms365_mcp.PACKAGE,  # for the login command it names
             },
         },
         read_allowlist=READ_TOOLS,

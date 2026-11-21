@@ -82,7 +82,7 @@ def test_each_server_receives_its_own_settings_and_nothing_else(clean_environmen
         "ms365 stand-in": {"FIXTURE_WORLD_TODAY"},
         "informer": {"INFORMER_API_KEY", "INFORMER_SECURITY_CODE", "INFORMER_PAGE_SIZE",
                      "INFORMER_MS365_PACKAGE", "INFORMER_MS365_CLIENT_ID", "INFORMER_MS365_TENANT_ID"},
-        "informer stand-in": {"FIXTURE_WORLD_TODAY"},
+        "informer stand-in": {"FIXTURE_WORLD_TODAY", "INFORMER_MS365_PACKAGE"},
     }
 
 

@@ -10,7 +10,7 @@ import json
 
 import pytest
 
-from agent.tools import load_all_tools
+from agent.tools import load_all_tools, ms365_mcp
 from fixture_world import informer as fixture_informer, ms365 as fixture_ms365
 
 PDF = b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n"
@@ -62,6 +62,21 @@ async def test_an_upload_is_seen_by_a_later_check_in_another_process(fixture_wor
     checked = _payload(await by_name["informer_check_purchase_invoice"].ainvoke({"path": str(copy)}))
 
     assert checked["already_uploaded_on"] == "2026-10-07"
+
+
+@pytest.mark.asyncio
+async def test_a_login_error_names_the_same_pinned_login_command_as_the_real_server(
+    fixture_world_downloads, monkeypatch,
+):
+    monkeypatch.setenv(fixture_ms365.FAILURE_ENV, "logged-out")
+    pdf = fixture_world_downloads / "march.pdf"
+    pdf.write_bytes(PDF)
+    tools, _ = await load_all_tools(fixtures=True)
+    upload = next(t for t in tools if t.name == "informer_upload_purchase_invoice")
+
+    result = await upload.ainvoke({"path": str(pdf)})
+
+    assert ms365_mcp.LOGIN.command in str(result)
 
 
 def test_the_ms365_stand_in_gets_only_the_fixture_world_variables_it_reads(monkeypatch, tmp_path):
