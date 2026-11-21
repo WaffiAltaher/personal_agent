@@ -12,8 +12,8 @@ from pathlib import Path
 import pytest
 
 from agent.tools.ms365_mcp import LOGIN
-from fixture_world import ms365 as stand_in
-from informer_mcp.email_handover import LOGIN_ERRORS, email_handover, ms365_server_parameters
+from fixture_world import informer as fixture_informer, ms365 as stand_in
+from informer_mcp.email_handover import LOGIN_ERRORS, email_handover, ms365_server_parameters, stdio_connection
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -148,6 +148,29 @@ async def test_a_transient_error_is_the_uploads_error_sent_at_most_once_and_logs
     assert re.search(r"Microsoft Graph API error: (429|503)\b", text)
     assert "--login" not in text
     assert ms365.starts == 1
+    assert ms365.sent() == []
+    assert not settings.purchase_upload_log.exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode,cause", [
+    (stand_in.Failure.DOWN, "ms365 stand-in: switched down (Failure.DOWN)"),  # exits at start, as on a username mismatch
+    (stand_in.Failure.CRASH, "The MS365 server stopped"),  # dies mid-call, saying nothing
+])
+async def test_a_server_that_fails_to_start_or_crashes_is_the_uploads_error_with_its_cause(
+    connect, settings, ms365, downloads, call_tool, monkeypatch, mode, cause,
+):
+    monkeypatch.setenv(stand_in.FAILURE_ENV, mode)
+    pdf = downloads / "factuur.pdf"
+    pdf.write_bytes(PDF)
+    ms365_over_stdio = stdio_connection(fixture_informer.ms365_stand_in_parameters())
+
+    async with connect(settings, handover=email_handover(settings, ms365_over_stdio)) as session:
+        is_error, text = await call_tool(session, "upload_purchase_invoice", path=str(pdf))
+
+    assert is_error
+    assert cause in text
+    assert "TaskGroup" not in text
     assert ms365.sent() == []
     assert not settings.purchase_upload_log.exists()
 

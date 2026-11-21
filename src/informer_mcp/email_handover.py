@@ -60,11 +60,15 @@ class EmailHandover:
             }],
         }
         arguments = {"userId": self.invoice_mailbox, "body": {"Message": message, "SaveToSentItems": True}}
-        async with self.ms365() as session:
-            result = await session.call_tool(SEND_TOOL, arguments)
-        if not result.isError:  # Graph's 202
-            return
-        text = "\n".join(b.text for b in result.content if isinstance(b, TextContent))
+        try:
+            async with self.ms365() as session:
+                result = await session.call_tool(SEND_TOOL, arguments)
+        except Ms365ServerStopped as stopped:
+            text = str(stopped)
+        else:
+            if not result.isError:  # Graph's 202
+                return
+            text = "\n".join(b.text for b in result.content if isinstance(b, TextContent))
         if any(re.search(pattern, text) for pattern in LOGIN_ERRORS):
             text += (f"\nNot logged in to Microsoft 365. Log in with `{self.login_command}`, "
                      "then upload the invoice again.")
@@ -92,14 +96,31 @@ def ms365_server_parameters(settings: InformerSettings) -> StdioServerParameters
     )
 
 
+class Ms365ServerStopped(RuntimeError):
+    """The MS365 server failed to start or died, with what it wrote to stderr as the cause."""
+
+
 def stdio_connection(params: StdioServerParameters) -> Ms365Connection:
     """Starts the server in `params` for each session, over stdio."""
 
     @asynccontextmanager
     async def session():
-        async with stdio_client(params) as (read, write), ClientSession(read, write) as client:
-            await client.initialize()
-            yield client
+        # The server writes why it stopped (e.g. a MS365_MCP_EXPECTED_USERNAME mismatch) to stderr;
+        # the MCP client sees only a closed connection.
+        with tempfile.TemporaryFile("w+") as errlog:
+            try:
+                async with stdio_client(params, errlog=errlog) as (read, write), \
+                        ClientSession(read, write) as client:
+                    await client.initialize()
+                    yield client
+            except Exception as error:
+                cause = error
+                while isinstance(cause, BaseExceptionGroup):
+                    cause = cause.exceptions[0]
+                errlog.seek(0)
+                stderr = errlog.read().strip()
+                raise Ms365ServerStopped(
+                    f"The MS365 server stopped: {cause}" + (f"\n{stderr}" if stderr else "")) from error
 
     return session
 
