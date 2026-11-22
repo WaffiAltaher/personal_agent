@@ -181,6 +181,24 @@ def test_the_informer_server_gets_the_ms365_pin_and_ids_for_its_email_transport(
     }
 
 
+def test_the_informer_server_gets_no_ms365_setting_from_the_shell_that_the_agent_lacks(clean_environment):
+    # Only the agent's own login may enable uploads: a stray shell value must not stand in for one.
+    for key, value in {
+        "INFORMER_MS365_PACKAGE": "@someone/else@1.0.0",
+        "INFORMER_MS365_CLIENT_ID": "shell-client",
+        "INFORMER_MS365_TENANT_ID": "shell-tenant",
+        "INFORMER_MS365_EXPECTED_USERNAME": "shell@example.com",
+    }.items():
+        clean_environment.setenv(key, value)
+    settings = Settings(_env_file=None, informer_api_key="informer-key", informer_security_code="informer-code")
+
+    env = informer_server(settings).connection["env"]
+
+    assert {key: env[key] for key in env if key.startswith("INFORMER_MS365_")} == {
+        "INFORMER_MS365_PACKAGE": "@softeria/ms-365-mcp-server@0.159.1",
+    }
+
+
 @pytest.mark.asyncio
 async def test_without_informer_credentials_the_agent_starts_with_a_notice():
     settings = Settings(_env_file=None, informer_api_key=None, informer_security_code=None)

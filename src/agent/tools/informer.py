@@ -73,7 +73,8 @@ def informer_server(settings: Settings = default_settings) -> McpServer:
             "transport": "stdio",
             "env": {
                 **system_environment(),
-                **inherited(_informer_setting_names()),
+                # Its MS365 settings come only from the agent's own login (_ms365_settings), never the shell.
+                **inherited(n for n in _informer_setting_names() if not n.startswith("INFORMER_MS365_")),
                 "INFORMER_API_KEY": settings.informer_api_key,
                 "INFORMER_SECURITY_CODE": settings.informer_security_code,
                 **_ms365_settings(settings),
