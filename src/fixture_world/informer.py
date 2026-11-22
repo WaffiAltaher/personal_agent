@@ -39,7 +39,7 @@ from mcp import StdioServerParameters
 from fixture_world import clock, ms365
 from fixture_world.informer_api import FakeInformerApi, Failure
 from informer_mcp.config import InformerSettings
-from informer_mcp.email_handover import SERVER_ARGS, EmailHandover, login_command, stdio_connection
+from informer_mcp.email_handover import SERVER_ARGS, SYSTEM_VARIABLES, EmailHandover, login_command, stdio_connection
 from informer_mcp.server import create_server
 
 
@@ -67,9 +67,7 @@ def ms365_stand_in_parameters() -> StdioServerParameters:
     """The MS365 stand-in, started as the real server is (the same arguments, outside the repo)."""
     # This process sees the system basics and FIXTURE_WORLD_* (and INFORMER_DOWNLOADS_DIR); the
     # stand-in gets the basics and only the Fixture world variables it reads.
-    env = {key: value for key, value in os.environ.items()
-           if not key.startswith(("FIXTURE_WORLD_", "INFORMER_"))}
-    env |= {name: os.environ[name] for name in STAND_IN_VARIABLES if name in os.environ}
+    env = {name: os.environ[name] for name in (*SYSTEM_VARIABLES, *STAND_IN_VARIABLES) if name in os.environ}
     return StdioServerParameters(
         command=sys.executable,
         args=["-m", "fixture_world.ms365", *SERVER_ARGS],
@@ -101,7 +99,8 @@ def main() -> None:
             stdio_connection(ms365_stand_in_parameters()),
             invoice_mailbox=INVOICE_MAILBOX,
             incoming_address=INCOMING_ADDRESS,
-            login_command=login_command(settings.ms365_package),
+            # The agent passes its pin; run by hand without it, the hint can't name the package.
+            login_command=login_command(settings.ms365_package or "<the agent's MS365 package>"),
         )
         create_server(settings, handover=handover).run("stdio")
 

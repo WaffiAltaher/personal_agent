@@ -7,8 +7,12 @@ Loaded over real MCP (stdio) exactly as `--fixtures` loads the tools.
 """
 
 import json
+import os
+import sys
 
 import pytest
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
 
 from agent.tools import load_all_tools, ms365_mcp
 from fixture_world import informer as fixture_informer, ms365 as fixture_ms365
@@ -93,6 +97,36 @@ def test_the_ms365_stand_in_gets_only_the_fixture_world_variables_it_reads(monke
     assert params.env[fixture_ms365.SEND_FAILURE_ENV] == "transient"
     for name in (fixture_informer.UPLOAD_LOG_ENV, fixture_informer.DOWNLOADS_ENV, "INFORMER_DOWNLOADS_DIR"):
         assert name not in params.env
+
+
+def test_the_ms365_stand_in_gets_only_the_system_basics_from_the_shell(monkeypatch):
+    # Run by hand from a shell, nothing else in it reaches the stand-in.
+    monkeypatch.setenv("AGENT_DECOY_SECRET", "made-up-decoy")
+    monkeypatch.setenv("ENABLED_TOOLS", ".*")
+
+    env = fixture_informer.ms365_stand_in_parameters().env
+
+    assert "AGENT_DECOY_SECRET" not in env
+    assert "ENABLED_TOOLS" not in env
+    assert env["PATH"] == os.environ["PATH"]
+
+
+@pytest.mark.asyncio
+async def test_run_without_the_agents_pin_a_login_error_names_no_none_package(fixture_world_downloads, monkeypatch):
+    monkeypatch.setenv(fixture_ms365.FAILURE_ENV, "logged-out")
+    monkeypatch.delenv("INFORMER_MS365_PACKAGE", raising=False)
+    pdf = fixture_world_downloads / "march.pdf"
+    pdf.write_bytes(PDF)
+    env = {key: value for key, value in os.environ.items() if key != "INFORMER_MS365_PACKAGE"}
+    params = StdioServerParameters(command=sys.executable, args=["-m", "fixture_world.informer"], env=env)
+
+    async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
+        await session.initialize()
+        result = await session.call_tool("upload_purchase_invoice", {"path": str(pdf)})
+
+    text = "".join(block.text for block in result.content)
+    assert "Not logged in to Microsoft 365" in text
+    assert "npx -y None" not in text
 
 
 def test_without_a_configured_path_the_log_is_one_stable_file(monkeypatch):
