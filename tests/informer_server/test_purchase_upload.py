@@ -1,5 +1,6 @@
 # tests/informer_server/test_purchase_upload.py
-"""Purchase invoice check and upload tools (ADR-012): path safety, PDF validation, hand-over."""
+"""Purchase invoice check and upload tools (ADR-012): path safety, PDF validation, hand-over.
+The hand-over is the e-mail transport (ADR-019), with the MS365 stand-in as its MS365 server."""
 
 from datetime import date
 from pathlib import Path
@@ -7,7 +8,8 @@ from pathlib import Path
 import pytest
 
 from agent.tools.informer import READ_TOOLS
-from fixture_world.purchase_handover import RecordingHandover
+from fixture_world.ms365 import SEND_FAILURE_ENV
+from informer_mcp.email_handover import email_handover
 
 MINIMAL_PDF = b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n"
 NOT_PDF = b"not a pdf file\n"
@@ -26,12 +28,17 @@ def settings_with_downloads(informer_settings, downloads, tmp_path):
         "downloads_dir": downloads,
         "purchase_upload_log": tmp_path / "state" / "purchase-uploads.jsonl",
         "today": date(2026, 10, 7),
+        "incoming_address": "adm-91x2@scan.informer.example",
+        "invoice_mailbox": "inkoop-scan@bedrijf.example",
+        "ms365_package": "@softeria/ms-365-mcp-server@0.159.1",
+        "ms365_client_id": "client-id",
+        "ms365_tenant_id": "tenant-id",
     })
 
 
 @pytest.fixture
-def handover():
-    return RecordingHandover()
+def handover(settings_with_downloads, ms365):
+    return email_handover(settings_with_downloads, ms365.connect)
 
 
 def write_pdf(folder: Path, name: str, content: bytes = MINIMAL_PDF) -> Path:
@@ -127,7 +134,7 @@ async def test_check_refuses_invalid_paths(
 ])
 @pytest.mark.asyncio
 async def test_upload_refuses_invalid_paths_and_hands_nothing_over(
-    connect, settings_with_downloads, handover, downloads, call_tool, path_factory, tmp_path,
+    connect, settings_with_downloads, handover, ms365, downloads, call_tool, path_factory, tmp_path,
 ):
     path = _invalid_path(path_factory, downloads, tmp_path)
 
@@ -135,12 +142,12 @@ async def test_upload_refuses_invalid_paths_and_hands_nothing_over(
         is_error, _text = await call_tool(session, "upload_purchase_invoice", path=str(path))
 
     assert is_error
-    assert handover.uploads == []
+    assert ms365.uploads() == []
 
 
 @pytest.mark.asyncio
 async def test_upload_hands_over_exactly_one_matching_file(
-    connect, settings_with_downloads, handover, downloads, call_tool,
+    connect, settings_with_downloads, handover, ms365, downloads, call_tool,
 ):
     pdf_path = write_pdf(downloads, "supplier-march.pdf")
 
@@ -148,24 +155,24 @@ async def test_upload_hands_over_exactly_one_matching_file(
         is_error, payload = await call_tool(session, "upload_purchase_invoice", path=str(pdf_path))
 
     assert not is_error
-    assert handover.uploads == [("supplier-march.pdf", MINIMAL_PDF)]
+    assert ms365.uploads() == [("supplier-march.pdf", MINIMAL_PDF)]
     assert payload.get("file_name") == "supplier-march.pdf"
 
 
 @pytest.mark.asyncio
 async def test_handover_failure_is_reported_and_attempted_once(
-    connect, settings_with_downloads, downloads, call_tool,
+    connect, settings_with_downloads, handover, ms365, downloads, call_tool, monkeypatch,
 ):
-    handover = RecordingHandover(fail_with="hand-over unavailable")
+    monkeypatch.setenv(SEND_FAILURE_ENV, "transient")
     pdf_path = write_pdf(downloads, "fail-me.pdf")
 
     async with connect(settings_with_downloads, handover=handover) as session:
         is_error, text = await call_tool(session, "upload_purchase_invoice", path=str(pdf_path))
 
     assert is_error
-    assert "hand-over unavailable" in text
-    assert handover.attempts == 1
-    assert handover.uploads == []
+    assert "503 Service Unavailable" in text
+    assert ms365.starts == 1
+    assert ms365.uploads() == []
 
 
 def test_upload_is_not_on_read_allowlist_check_is():
@@ -194,7 +201,7 @@ async def test_check_reports_the_date_of_an_earlier_upload_under_any_name(
 
 @pytest.mark.asyncio
 async def test_repeat_upload_is_refused_with_the_earlier_date_and_hands_nothing_over(
-    connect, settings_with_downloads, handover, downloads, call_tool,
+    connect, settings_with_downloads, handover, ms365, downloads, call_tool,
 ):
     first = write_pdf(downloads, "march.pdf")
     again = write_pdf(downloads, "march (1).pdf")
@@ -206,12 +213,12 @@ async def test_repeat_upload_is_refused_with_the_earlier_date_and_hands_nothing_
     assert is_error
     assert "already uploaded on 2026-10-07" in text
     assert "allow_duplicate" in text
-    assert handover.uploads == [("march.pdf", MINIMAL_PDF)]
+    assert ms365.uploads() == [("march.pdf", MINIMAL_PDF)]
 
 
 @pytest.mark.asyncio
 async def test_allow_duplicate_hands_the_repeat_over(
-    connect, settings_with_downloads, handover, downloads, call_tool,
+    connect, settings_with_downloads, handover, ms365, downloads, call_tool,
 ):
     first = write_pdf(downloads, "march.pdf")
     again = write_pdf(downloads, "march (1).pdf")
@@ -223,27 +230,27 @@ async def test_allow_duplicate_hands_the_repeat_over(
         )
 
     assert not is_error
-    assert handover.uploads == [("march.pdf", MINIMAL_PDF), ("march (1).pdf", MINIMAL_PDF)]
+    assert ms365.uploads() == [("march.pdf", MINIMAL_PDF), ("march (1).pdf", MINIMAL_PDF)]
 
 
 @pytest.mark.asyncio
 async def test_a_failed_upload_is_not_logged_as_uploaded(
-    connect, settings_with_downloads, downloads, call_tool,
+    connect, settings_with_downloads, handover, ms365, downloads, call_tool, monkeypatch,
 ):
-    failing = RecordingHandover(fail_with="hand-over unavailable")
-    working = RecordingHandover()
     pdf_path = write_pdf(downloads, "retry-me.pdf")
 
-    async with connect(settings_with_downloads, handover=failing) as session:
+    monkeypatch.setenv(SEND_FAILURE_ENV, "transient")
+    async with connect(settings_with_downloads, handover=handover) as session:
         failed, _ = await call_tool(session, "upload_purchase_invoice", path=str(pdf_path))
         _, checked = await call_tool(session, "check_purchase_invoice", path=str(pdf_path))
-    async with connect(settings_with_downloads, handover=working) as session:
+    monkeypatch.delenv(SEND_FAILURE_ENV)
+    async with connect(settings_with_downloads, handover=handover) as session:
         retried, _ = await call_tool(session, "upload_purchase_invoice", path=str(pdf_path))
 
     assert failed
     assert "already_uploaded_on" not in checked
     assert not retried  # not refused as a duplicate
-    assert working.uploads == [("retry-me.pdf", MINIMAL_PDF)]
+    assert ms365.uploads() == [("retry-me.pdf", MINIMAL_PDF)]
 
 
 @pytest.mark.asyncio
@@ -264,7 +271,7 @@ async def test_a_refused_upload_is_not_logged_as_uploaded(
 
 @pytest.mark.asyncio
 async def test_different_contents_are_neither_reported_nor_refused(
-    connect, settings_with_downloads, handover, downloads, call_tool,
+    connect, settings_with_downloads, handover, ms365, downloads, call_tool,
 ):
     first = write_pdf(downloads, "march.pdf")
     other = write_pdf(downloads, "april.pdf", MINIMAL_PDF + b"%different\n")
@@ -276,16 +283,16 @@ async def test_different_contents_are_neither_reported_nor_refused(
 
     assert "already_uploaded_on" not in checked and "warning" not in checked
     assert not is_error
-    assert [name for name, _ in handover.uploads] == ["march.pdf", "april.pdf"]
+    assert [name for name, _ in ms365.uploads()] == ["march.pdf", "april.pdf"]
 
 
 @pytest.mark.asyncio
 async def test_the_upload_log_outlives_the_server_process(
-    connect, settings_with_downloads, downloads, call_tool,
+    connect, settings_with_downloads, ms365, downloads, call_tool,
 ):
     """The agent starts a new server per tool call, each with a new hand-over object."""
     pdf_path = write_pdf(downloads, "march.pdf")
-    first, second = RecordingHandover(), RecordingHandover()
+    first, second = (email_handover(settings_with_downloads, ms365.connect) for _ in range(2))
 
     async with connect(settings_with_downloads, handover=first) as session:
         await call_tool(session, "upload_purchase_invoice", path=str(pdf_path))
@@ -293,7 +300,7 @@ async def test_the_upload_log_outlives_the_server_process(
         is_error, text = await call_tool(session, "upload_purchase_invoice", path=str(pdf_path))
 
     assert is_error and "already uploaded on" in text
-    assert second.uploads == []
+    assert ms365.uploads() == [("march.pdf", MINIMAL_PDF)]  # only the first
 
 
 @pytest.mark.asyncio
@@ -312,7 +319,7 @@ async def test_tool_descriptions_tell_the_model_to_ask_the_owner_before_reupload
 @pytest.mark.parametrize("tool", ["check_purchase_invoice", "upload_purchase_invoice"])
 @pytest.mark.asyncio
 async def test_over_cap_file_is_refused_without_being_read(
-    connect, settings_with_downloads, handover, downloads, call_tool, monkeypatch, tool,
+    connect, settings_with_downloads, handover, ms365, downloads, call_tool, monkeypatch, tool,
 ):
     cap = 100  # not the 2 MB default
     settings = settings_with_downloads.model_copy(update={"purchase_upload_max_bytes": cap})
@@ -327,7 +334,7 @@ async def test_over_cap_file_is_refused_without_being_read(
 
     assert is_error
     assert "size cap" in text
-    assert handover.uploads == []
+    assert ms365.uploads() == []
 
 
 @pytest.mark.asyncio

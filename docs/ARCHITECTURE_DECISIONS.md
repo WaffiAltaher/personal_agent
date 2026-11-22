@@ -271,6 +271,8 @@ Record of technical decisions made during the Personal Data Agent project. Each 
 
 Two plain tools were chosen over a hidden check that the Approval step calls before showing a Write action: that would be a private protocol between our graph and our server, which a replacement server would never offer, and it would fail quietly back to raw arguments. The cost is one extra model step, and an Approval that shows raw arguments; the server enforces every check at upload time either way.
 
+**Amendment (2026-11-20):** The real hand-over transport is an e-mail from the Invoice mailbox to the Informer incoming address, sent by the Informer server through its own copy of the MS365 server (ADR-019).
+
 ---
 
 ## ADR-013: Shrink the model's view of the context, never the state
@@ -411,6 +413,34 @@ Two plain tools were chosen over a hidden check that the Approval step calls bef
 - Node and a front-end build join the toolchain. FastAPI serves the built app, so normal use is still one command.
 - The password is the only thing standing between the network and the owner's data, so the app must not be exposed beyond localhost until Sign in with Google replaces the password.
 - Amended 2026-11-19: a browser may leave `Origin` off a same-origin `EventSource` GET, so an event stream (known by its route, not its `Accept` header) with no `Origin` is accepted when `Sec-Fetch-Site: same-origin`, which no other web page can make the browser send. A foreign `Origin` is still refused, and state-changing requests always need `Origin`.
+
+---
+
+## ADR-019: The Informer server e-mails Purchase invoices from the Invoice mailbox through its own MS365 server
+**Date:** 2026-11-20
+**Status:** Accepted (completes ADR-012's hand-over transport)
+
+**Context:** `upload_purchase_invoice` hands a checked PDF to a hand-over transport, and only the Fixture world has one (ADR-012). Informer reads Purchase invoices e-mailed to its incoming address (Scan & Herken: PDF only, 2 MB per attachment). Two rules pull apart: all Informer behaviour stays behind the Informer server (ADR-012), and the MS365 server owns the only Microsoft login (ADR-005, ADR-015). The owner's Microsoft login turned out to carry `Mail.Send` already: on 2026-11-20 the pinned server's `send-mail`, started outside the agent, sent a test message as the owner (Graph 202), although the agent never enables that tool. A token carries every permission granted to the app, not only the scopes the server asks for, so `--enabled-tools` limits what the server offers, not what its code can do.
+
+**Decision:**
+- The real transport sends one e-mail per Purchase invoice from the **Invoice mailbox** (an ITtopia shared mailbox) to the **Informer incoming address**. The server fixes the sender, the recipient, the subject (the file name) and a one-line body; the model passes only the path. The message is saved to the Invoice mailbox's Sent Items.
+- The Informer server sends it through its own copy of the pinned MS365 server, started on the first upload (`--org-mode`, only `send-shared-mailbox-mail` enabled). It shares the owner's one login through the server's token cache. Reads never start it.
+- The owner's login carries `Mail.Send.Shared` and not `Mail.Send`, and the owner has Send As on the Invoice mailbox. An Exchange mail-flow rule rejects mail from the Invoice mailbox to anyone but the Informer incoming address.
+- An upload counts as done when Graph accepts the message (202). Its fingerprint is logged then. A later bounce shows only in the Invoice mailbox.
+- Both addresses are Informer server settings, kept in `.env` and never committed (the incoming address works like a write key to the books). The upload tools are registered only when both are set. The agent passes the MS365 package pin, client ID and tenant ID to the Informer server as settings, so there is one pin.
+
+**Reasoning:**
+- **An agent-side wrapper over `send-mail`** (as ADR-015 does for attachments) would move Informer behaviour out of the Informer server. **A login of the Informer server's own** would break ADR-005. **The agent passing the file from one server to the other** would be a private protocol between servers, which ADR-012 rejected.
+- **The Invoice mailbox and the mail-flow rule** put the recipient lock in Exchange, outside both our code and the third-party server's. Removing `Mail.Send` is meant to stop the token from sending as the owner at all.
+- **A lazy start** keeps financial questions independent of Microsoft, and only runs that upload pay for npx.
+- **202 as done:** our checks already reject what Informer would refuse (non-PDF, over 2 MB). Waiting for bounces would need read access to the Invoice mailbox and bounce parsing.
+
+**Consequences:**
+- The Informer server's environment now includes the MS365 client ID, tenant ID, expected username and package pin. These are identifiers, not secrets; the token stays in the keychain.
+- Not yet verified: that `Mail.Send.Shared` without `Mail.Send` refuses `/me/sendMail`. A probe after revoking the grant and logging in again settles it. If it still sends, the mail-flow rule and the exact pin are the only limits on sending.
+- The `src/agent/tools/ms365_mcp.py` docstring's "no Mail.Send" describes the scopes requested, not the token. It must be corrected.
+- The Informer server now depends on `send-shared-mailbox-mail`'s argument shape at the pinned version. Review it when bumping the pin.
+- Graph accepts inline attachments only under about 3 MB, and a 2 MB PDF is about 2.7 MB in base64. Raising the size cap needs an upload session.
 
 ---
 

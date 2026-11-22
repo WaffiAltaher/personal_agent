@@ -1,5 +1,5 @@
 """
-Attachment eval scenarios: outcome grading from the agent folder and the Fixture world's upload log.
+Attachment eval scenarios: outcome grading from the agent folder and what the Fixture world's MS365 stand-in sent.
 
 Seam: eval harness on the Fixture world with a scripted model (no live LLM).
 """
@@ -17,7 +17,7 @@ from agent.config import settings
 from agent.evals.harness import run_eval
 from agent.evals.outcome import score_outcome
 from agent.evals.scenarios import DEFAULT_DATASET, Dataset, Scenario, load_dataset
-from conftest import ScriptedChatModel
+from conftest import ScriptedChatModel, sent_upload
 
 DATASET = load_dataset(DEFAULT_DATASET)
 
@@ -203,12 +203,12 @@ def test_outlook_to_informer_chain_fails_on_wrong_upload_bytes_or_one_approval()
     scenario = _scenario(CHAIN_SCENARIO)
     saved = {f"outlook/{OUTLOOK_PDF}": OUTLOOK_PDF_BYTES}
     expected = {OUTLOOK_PDF: OUTLOOK_PDF_BYTES}
-    good = score_outcome(scenario, [(OUTLOOK_PDF, OUTLOOK_PDF_BYTES)], final_answer="",
+    good = score_outcome(scenario, [sent_upload(OUTLOOK_PDF, OUTLOOK_PDF_BYTES)], final_answer="",
                          expected_bytes=expected, saved=saved, approvals=2)
     assert good.passed, good.detail
-    assert not score_outcome(scenario, [(OUTLOOK_PDF, b"%PDF-1.4\n")], final_answer="",
+    assert not score_outcome(scenario, [sent_upload(OUTLOOK_PDF, b"%PDF-1.4\n")], final_answer="",
                              expected_bytes=expected, saved=saved, approvals=2).passed
-    assert not score_outcome(scenario, [(OUTLOOK_PDF, OUTLOOK_PDF_BYTES)], final_answer="",
+    assert not score_outcome(scenario, [sent_upload(OUTLOOK_PDF, OUTLOOK_PDF_BYTES)], final_answer="",
                              expected_bytes=expected, saved=saved, approvals=1).passed
 
 

@@ -144,11 +144,11 @@ def register_purchase_upload_tools(
 
     @mcp.tool()
     async def upload_purchase_invoice(path: str, allow_duplicate: bool = False) -> dict:
-        """Upload a Purchase invoice PDF for the accountant to book. Re-runs every check,
-        then sends only the file (no invoice details). Needs owner Approval.
-        Contents already uploaded before (under any name) are refused with the earlier date.
-        Ask the owner before re-uploading: set `allow_duplicate` to true only when the owner
-        has said they want it uploaded again; never set it on your own."""
+        """Send a Purchase invoice PDF to Informer by e-mail, for the accountant to book. Re-runs
+        every check, then sends only the file (no invoice details). Needs owner Approval.
+        Contents sent before (under any name) are refused with the earlier date.
+        Ask the owner before sending it again: set `allow_duplicate` to true only when the owner
+        has said they want it sent again; never set it on your own."""
         validated = validate_purchase_invoice_path(path, settings)
         if not allow_duplicate and (earlier := earlier_upload_date(settings, validated.content)):
             raise ValueError(
@@ -164,5 +164,5 @@ def register_purchase_upload_tools(
             "file_name": validated.file_name,
             "folder": validated.folder,
             "size": validated.size,
-            "message": f"Uploaded {validated.file_name} for booking.",
+            "message": f"Sent {validated.file_name} to Informer for the accountant to book.",
         }

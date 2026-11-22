@@ -17,9 +17,17 @@ Drafts: `create-draft-email` and `create-reply-draft` record every call, and the
 created, as a JSON line in the file named by FIXTURE_WORLD_MS365_DRAFTS (each tool call runs
 in a fresh process, so the record lives outside it); read it back with `recorded_drafts()`
 and `recorded_draft_calls()`. FIXTURE_WORLD_MS365_DRAFT_FAILURE=transient makes the draft
-tools fail with a Graph 503 instead, creating nothing. The other write tools the real server
-offers (send, delete, move, update, calendar, rules, folders, permissions) are served too, but
-not emulated, so that the agent's refusal to bind them is testable.
+tools fail with a Graph 503 instead, creating nothing.
+
+Send: `send-shared-mailbox-mail`, which the agent never binds and only the Informer server's
+e-mail transport calls (ADR-019), takes the real tool's arguments (`userId`, and `body` with
+`Message` and `SaveToSentItems`) and records every accepted call as a JSON line in the file named
+by FIXTURE_WORLD_MS365_SENT; read the messages back with `sent_messages()`. The failure modes
+below apply to it and record nothing; FIXTURE_WORLD_MS365_SEND_FAILURE=transient fails only the
+send, with a Graph 503.
+
+The other write tools the real server offers (send-mail, delete, move, update, calendar, rules,
+folders, permissions) are served too, but not emulated, so that the agent's refusal to bind them is testable.
 
 Attachments: `list-mail-attachments` serves the seeded attachments (`data/ms365/attachments.json`),
 and `download-bytes-to-file` writes a seeded attachment's bytes to a local file, refusing a
@@ -268,6 +276,57 @@ def _record_draft_call(tool: str, arguments: dict, draft: dict | None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a") as log:
         log.write(json.dumps({"tool": tool, "arguments": arguments, "draft": draft}) + "\n")
+
+
+SENT_ENV = "FIXTURE_WORLD_MS365_SENT"  # JSON Lines file `send-shared-mailbox-mail` records into
+SEND_FAILURE_ENV = "FIXTURE_WORLD_MS365_SEND_FAILURE"  # "transient": `send-shared-mailbox-mail` answers Graph 503
+DEFAULT_SENT_PATH = Path(tempfile.gettempdir()) / "fixture_world_ms365_sent.jsonl"
+
+
+def sent_path() -> Path:
+    return Path(os.environ.get(SENT_ENV) or DEFAULT_SENT_PATH)
+
+
+def recorded_send_calls(path: Path | str | None = None) -> list[dict]:
+    """Every send call that reached the stand-in: {tool, arguments}."""
+    path = Path(path) if path else sent_path()
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
+def _addresses(recipients: list[dict] | None) -> list[str]:
+    return [r["emailAddress"]["address"] for r in recipients or []]
+
+
+def sent_messages(path: Path | str | None = None) -> list[dict]:
+    """The messages the stand-in sent, oldest first: sender, to, cc, bcc, subject, body, attachments
+    (name, content type, decoded bytes) and whether Graph saves it to Sent Items."""
+    messages = []
+    for call in recorded_send_calls(path):
+        graph_body = call["arguments"]["body"]
+        message = graph_body["Message"]
+        messages.append({
+            "sender": call["arguments"]["userId"],
+            "to": _addresses(message.get("toRecipients")),
+            "cc": _addresses(message.get("ccRecipients")),
+            "bcc": _addresses(message.get("bccRecipients")),
+            "subject": message.get("subject"),
+            "body": (message.get("body") or {}).get("content"),
+            "attachments": [
+                {"name": a["name"], "content_type": a["contentType"], "content": base64.b64decode(a["contentBytes"])}
+                for a in message.get("attachments") or []
+            ],
+            "save_to_sent_items": graph_body.get("SaveToSentItems", True),  # Graph's default
+        })
+    return messages
+
+
+def _record_send_call(arguments: dict) -> None:
+    path = sent_path()
+    with _exclusive(path):
+        with path.open("a") as log:
+            log.write(json.dumps({"tool": "send-shared-mailbox-mail", "arguments": arguments}) + "\n")
 
 
 def _graph_api_error(status: int, reason: str, code: str, message: str) -> CallToolResult:
@@ -588,6 +647,28 @@ def create_server(world: Ms365World | None = None) -> FastMCP:
             })
 
         return draft_call("create-reply-draft", {"messageId": messageId, "body": body}, create)
+
+    # --- Send (a Write action the agent never binds; the Informer server's e-mail transport calls it) ---
+
+    @graph_tool("send-shared-mailbox-mail",
+                "Send the message specified in the request body using either JSON or MIME format. When using "
+                "JSON format, you can include a file attachment in the same sendMail action call. When using "
+                "MIME format: This method saves the message in the Sent Items folder. Alternatively, create a "
+                "draft message to send later.", read_only=False)
+    def send_shared_mailbox_mail(userId: str, body: dict, includeHeaders: bool = False,
+                                 excludeResponse: bool = False, confirm: bool = False) -> CallToolResult:
+        if os.environ.get(SEND_FAILURE_ENV) == "transient":
+            return _graph_api_error(503, "Service Unavailable", "ServiceUnavailable",
+                                    "The service is temporarily unavailable. Please retry later.")
+        content_type = ((body.get("Message") or {}).get("body") or {}).get("contentType")
+        if content_type not in (None, "text", "html"):  # the pinned server's schema: lowercase only
+            return _server_error(f"MCP error -32602: Input validation error: Invalid arguments for tool "
+                                 f"send-shared-mailbox-mail: body.Message.body.contentType: Invalid option: "
+                                 f'expected one of "text"|"html", received "{content_type}"')
+        if not body.get("Message"):
+            return _graph_api_error(400, "Bad Request", "ErrorInvalidRequest", "The request is missing a Message.")
+        _record_send_call({"userId": userId, "body": body})
+        return _ok({"message": "OK!"})
 
     # --- the real server's other writes: present, never emulated ---
 

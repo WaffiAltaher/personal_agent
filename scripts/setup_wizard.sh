@@ -189,7 +189,7 @@ finish() {
 # and the real model comparison (ticket 18).
 # Run from anywhere: ./scripts/setup_wizard.sh. Values go to .env only (no CI here).
 
-TOTAL_STAGES=10
+TOTAL_STAGES=11
 
 cd "$(dirname "$0")/.."
 
@@ -303,8 +303,30 @@ else warn "Informer rejected the request"; SKIPPED+=("Informer test failed: re-r
 pause
 
 # ── 5 ────────────────────────────────────────────────────────────────────────
-stage "Azure app: allow saving Drafts (Mail.ReadWrite)"
-say "Your own app registration needs one more delegated Graph permission. Sending stays impossible."
+stage "Informer: e-mail upload of Purchase invoices (optional)"
+say "Uploads need two addresses: the Informer incoming address and the Invoice mailbox it is sent from."
+say "Without both, the agent has no upload tools. Skip this to keep it that way."
+warn "The incoming address works like a write key to the books: never share it or commit it."
+if confirm "Set up the Informer e-mail upload?"; then
+  open_url "https://app.informer.eu/settings/email/"
+  step "E-mail settings → copy the address Informer reads Purchase invoices from (the incoming address)."
+  ask_secret INFORMER_INCOMING_ADDRESS "Paste the Informer incoming address:"
+  ask INFORMER_INVOICE_MAILBOX "Invoice mailbox address (the ITtopia shared mailbox the e-mails are sent from):"
+  if [[ -n "$INFORMER_INCOMING_ADDRESS" && -n "$INFORMER_INVOICE_MAILBOX" ]]; then
+    write_env INFORMER_INCOMING_ADDRESS "$INFORMER_INCOMING_ADDRESS"
+    write_env INFORMER_INVOICE_MAILBOX "$INFORMER_INVOICE_MAILBOX"
+  else
+    warn "an address was empty, so neither was saved"
+    SKIPPED+=("Informer e-mail upload: re-run stage 5 with both addresses")
+  fi
+fi
+pause
+
+# ── 6 ────────────────────────────────────────────────────────────────────────
+stage "Azure app: allow saving Drafts and sending from the Invoice mailbox"
+say "Your own app registration needs two more delegated Graph permissions: Mail.ReadWrite to save"
+say "Drafts, and Mail.Send.Shared so the Invoice mailbox can send Purchase invoices to Informer."
+say "Mail.Send (sending as you) is never added."
 ask MS365_MCP_CLIENT_ID "Application (client) ID:"
 ask MS365_MCP_TENANT_ID "Directory (tenant) ID:"
 MS365_MCP_CLIENT_ID="${MS365_MCP_CLIENT_ID//\"/}"; MS365_MCP_TENANT_ID="${MS365_MCP_TENANT_ID//\"/}"
@@ -313,35 +335,39 @@ write_env MS365_MCP_TENANT_ID "$MS365_MCP_TENANT_ID"
 open_url "https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/CallAnAPI/appId/$MS365_MCP_CLIENT_ID"
 step "API permissions → Add a permission → Microsoft Graph → Delegated permissions."
 step "Search 'Mail.ReadWrite' → tick it → Add permissions."
+step "Again: search 'Mail.Send.Shared' → tick it → Add permissions (without it every upload fails with a Graph 403)."
 step "Click 'Grant admin consent for <ITtopia>' → Yes. Do NOT add Mail.Send."
+step "Sending is limited to the Invoice mailbox by an Exchange mail-flow rule (Exchange admin center →"
+step "  Mail flow → Rules): mail from the Invoice mailbox to anyone but the Informer incoming address is rejected."
 step "Then Authentication (left menu) → 'Allow public client flows' must be Yes (device-code login)."
 pause "Done in the portal? Press Enter to list what the server will request"
 say "Graph permissions the agent's tool set needs:"
 ms365 --list-permissions || warn "couldn't list permissions (see above)"
 warn "Check: Mail.ReadWrite is listed; Mail.Send is NOT. Each listed one must be granted above."
+warn "Mail.Send.Shared is not in this list (the Informer server's own MS365 server uses it): check it is granted too."
 confirm "Does the list look right?" || SKIPPED+=("Azure permissions: re-check API permissions vs --list-permissions")
 pause
 
-# ── 6 ────────────────────────────────────────────────────────────────────────
+# ── 7 ────────────────────────────────────────────────────────────────────────
 stage "Microsoft 365: one-time login"
 say "Logging in with the pinned server version and the agent's tool list."
 step "It prints a URL and a code: open the URL, enter the code, sign in with the ITtopia account."
 step "When macOS asks for keychain access for node, choose 'Always Allow'."
 pause "Press Enter to start the login"
 if ms365 --login; then step "login finished"
-else warn "login failed (see above)"; SKIPPED+=("MS365 login: re-run stage 6"); fi
+else warn "login failed (see above)"; SKIPPED+=("MS365 login: re-run stage 7"); fi
 say "Verifying the cached login…"
 ms365 --verify-login || { warn "verify-login failed"; SKIPPED+=("MS365 verify-login failed"); }
 pause
 
-# ── 7 ────────────────────────────────────────────────────────────────────────
+# ── 8 ────────────────────────────────────────────────────────────────────────
 stage "Microsoft 365: expected account"
 say "The server refuses to start if the cached login is any other account."
 ask MS365_MCP_EXPECTED_USERNAME "ITtopia mailbox address (the account you just logged in with):"
 write_env MS365_MCP_EXPECTED_USERNAME "$MS365_MCP_EXPECTED_USERNAME"
 pause
 
-# ── 8 ────────────────────────────────────────────────────────────────────────
+# ── 9 ────────────────────────────────────────────────────────────────────────
 stage "Langfuse: local tracing"
 say "Starting local Langfuse (first start can take a minute)…"
 docker compose -f langfuse/docker-compose.yml up -d
@@ -360,7 +386,7 @@ write_env LANGFUSE_SECRET_KEY "$LANGFUSE_SECRET_KEY"
 write_env LANGFUSE_BASE_URL "${LANGFUSE_BASE_URL:-http://localhost:3000}"
 pause
 
-# ── 9 ────────────────────────────────────────────────────────────────────────
+# ── 10 ───────────────────────────────────────────────────────────────────────
 stage "Connection check"
 say "Loading every tool exactly as the agent does. No model call, no Drafts."
 uv run python - <<'PY' || { warn "tool loading crashed (see above)"; SKIPPED+=("connection check crashed"); }
@@ -379,7 +405,7 @@ PY
 note "Next: ticket 16 (live read-only check), then ticket 17 (manual live path testing), then ticket 18 (real model comparison)."
 pause
 
-# ── 10 ───────────────────────────────────────────────────────────────────────
+# ── 11 ──────────────────────────────────────────────────────────────────────
 stage "Web interface: password"
 say "The web interface (python -m agent.web) asks for one password; only its argon2id hash is kept, in .env."
 say "Setting a new password ends every browser session. Type it twice; it isn't shown."

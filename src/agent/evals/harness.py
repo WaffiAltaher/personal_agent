@@ -40,9 +40,8 @@ from agent.evals.generation import GenerationScorer, RagasScorer, generation_mea
 from agent.evals.records import EvalResults, InterruptRecord, RunResult, ToolCallRecord
 from agent.evals.report import render_report
 from agent.evals.scenarios import Dataset, Scenario
-from agent.evals.outcome import read_agent_folder, read_upload_log, run_passed, score_outcome
+from agent.evals.outcome import read_agent_folder, run_passed, score_outcome
 from agent.evals.trajectory import score_facts, score_trajectory, summarise
-from fixture_world.purchase_handover import HANDOVER_FAIL_ENV, UPLOAD_LOG_ENV
 from agent.conversation import run_conversation
 from agent.graph import build_graph, is_step_limit_answer
 from agent.tracing import TraceAttributes
@@ -220,14 +219,14 @@ async def run_scenario(
     a crash or the step limit is recorded in the result's status. With a `scorer`, the final
     answer also gets generation metrics (RAGAS); with a `tracer`, the run is one tagged trace."""
     failure = scenario.inject_failure
-    recorded_uploads: list[tuple[str, bytes]] = []
+    sent: list[dict] = []
     upload_log_path_str: str | None = None
     expected_bytes: dict[str, bytes] | None = None
     saved: dict[str, bytes] = {}
     with tempfile.TemporaryDirectory(prefix="eval-") as workdir:
         work = Path(workdir)
         drafts_path = work / "drafts.jsonl"
-        upload_log_path = work / "purchase-uploads.jsonl"
+        sent_path = work / "sent.jsonl"
         downloads_path = work / "Downloads"
         _seed_eval_downloads(downloads_path)
         agent_folder = downloads_path / "personal_agent"
@@ -237,19 +236,16 @@ async def run_scenario(
             fixture_ms365.DRAFTS_ENV: str(drafts_path),
             fixture_informer.UPLOAD_LOG_ENV: str(Path(workdir) / "informer-uploads.jsonl"),  # no uploads carry over between runs
             fixture_ms365.DRAFT_FAILURE_ENV: None,
+            fixture_ms365.SENT_ENV: str(sent_path),
             fixture_ms365.FAILURE_ENV: None,
             **switch.env,
             # The Informer stand-in reads its failure mode at each tool call's process start.
             fixture_informer.FAILURE_ENV: failure.mode if failure and failure.server == "informer" else None,
-            UPLOAD_LOG_ENV: str(upload_log_path),
             fixture_informer.DOWNLOADS_ENV: str(downloads_path),  # the server process only sees FIXTURE_WORLD_* vars
             "INFORMER_DOWNLOADS_DIR": str(downloads_path),
             FILES_ROOT_ENV: str(downloads_path),  # the file tools see only the run's Downloads folder
-            HANDOVER_FAIL_ENV: (
-                failure.mode
-                if failure and failure.server == "handover"
-                else os.environ.get(HANDOVER_FAIL_ENV)
-            ),
+            # The MS365 stand-in the Informer server sends through reads it at each upload.
+            fixture_ms365.SEND_FAILURE_ENV: failure.mode if failure and failure.server == "handover" else None,
         }
         with (_isolated_eval_episodic(work), fixtures_semantic_memory(), _environment(env),
               _agent_folder(agent_folder)):
@@ -297,8 +293,8 @@ async def run_scenario(
             # The checkpointed state holds the messages so far, also after a crash.
             messages = (await graph.aget_state(config)).values.get("messages", [])
             drafts = fixture_ms365.recorded_drafts(drafts_path)
-            recorded_uploads = read_upload_log(upload_log_path)
-            upload_log_path_str = str(upload_log_path)
+            sent = fixture_ms365.sent_messages(sent_path)
+            upload_log_path_str = str(sent_path)
             saved = read_agent_folder(agent_folder)
             if scenario.expected_outcome and scenario.expected_outcome.upload_file:
                 upload_name = scenario.expected_outcome.upload_file
@@ -318,7 +314,7 @@ async def run_scenario(
     trajectory = score_trajectory(scenario, tool_calls, completed=status == "completed" and bool(final_answer))
     outcome = score_outcome(
         scenario,
-        recorded_uploads,
+        sent,
         final_answer=final_answer,
         expected_bytes=expected_bytes,
         saved=saved,

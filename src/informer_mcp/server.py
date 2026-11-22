@@ -8,6 +8,7 @@ from mcp.types import ToolAnnotations
 
 from informer_mcp.client import InformerClient, RateLimiter
 from informer_mcp.config import InformerSettings
+from informer_mcp.email_handover import email_handover, ms365_server_parameters, stdio_connection
 from informer_mcp.financial import (
     is_vat_year_closed,
     revenue_amount,
@@ -247,4 +248,6 @@ def create_server(
 
 def main() -> None:
     """Run the server over stdio, configured from INFORMER_* environment variables."""
-    create_server(InformerSettings()).run("stdio")
+    settings = InformerSettings()
+    ms365 = stdio_connection(ms365_server_parameters(settings))
+    create_server(settings, handover=email_handover(settings, ms365)).run("stdio")

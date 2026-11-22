@@ -80,8 +80,9 @@ def test_each_server_receives_its_own_settings_and_nothing_else(clean_environmen
     assert own == {
         "ms365": {"MS365_MCP_CLIENT_ID", "MS365_MCP_TENANT_ID"},
         "ms365 stand-in": {"FIXTURE_WORLD_TODAY"},
-        "informer": {"INFORMER_API_KEY", "INFORMER_SECURITY_CODE", "INFORMER_PAGE_SIZE"},
-        "informer stand-in": {"FIXTURE_WORLD_TODAY"},
+        "informer": {"INFORMER_API_KEY", "INFORMER_SECURITY_CODE", "INFORMER_PAGE_SIZE",
+                     "INFORMER_MS365_PACKAGE", "INFORMER_MS365_CLIENT_ID", "INFORMER_MS365_TENANT_ID"},
+        "informer stand-in": {"FIXTURE_WORLD_TODAY", "INFORMER_MS365_PACKAGE"},
     }
 
 
@@ -165,6 +166,37 @@ def test_expected_ms365_username_is_optional(monkeypatch):
     settings = Settings(_env_file=None, ms365_mcp_client_id="client", ms365_mcp_tenant_id="tenant")
 
     assert "MS365_MCP_EXPECTED_USERNAME" not in ms365_server(settings).connection["env"]
+
+
+def test_the_informer_server_gets_the_ms365_pin_and_ids_for_its_email_transport(clean_environment):
+    settings = _real_settings().model_copy(update={"ms365_mcp_expected_username": "jendo@example.com"})
+
+    env = informer_server(settings).connection["env"]
+
+    assert {key: env[key] for key in env if key.startswith("INFORMER_MS365_")} == {
+        "INFORMER_MS365_PACKAGE": "@softeria/ms-365-mcp-server@0.159.1",
+        "INFORMER_MS365_CLIENT_ID": "client",
+        "INFORMER_MS365_TENANT_ID": "tenant",
+        "INFORMER_MS365_EXPECTED_USERNAME": "jendo@example.com",
+    }
+
+
+def test_the_informer_server_gets_no_ms365_setting_from_the_shell_that_the_agent_lacks(clean_environment):
+    # Only the agent's own login may enable uploads: a stray shell value must not stand in for one.
+    for key, value in {
+        "INFORMER_MS365_PACKAGE": "@someone/else@1.0.0",
+        "INFORMER_MS365_CLIENT_ID": "shell-client",
+        "INFORMER_MS365_TENANT_ID": "shell-tenant",
+        "INFORMER_MS365_EXPECTED_USERNAME": "shell@example.com",
+    }.items():
+        clean_environment.setenv(key, value)
+    settings = Settings(_env_file=None, informer_api_key="informer-key", informer_security_code="informer-code")
+
+    env = informer_server(settings).connection["env"]
+
+    assert {key: env[key] for key in env if key.startswith("INFORMER_MS365_")} == {
+        "INFORMER_MS365_PACKAGE": "@softeria/ms-365-mcp-server@0.159.1",
+    }
 
 
 @pytest.mark.asyncio
