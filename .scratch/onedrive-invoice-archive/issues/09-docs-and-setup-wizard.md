@@ -6,12 +6,14 @@
 
 **Blocked by:** 05, 06
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `CLAUDE.md` describes the archive tools, and the PDF text tool
-- [ ] The wizard's Azure stage lists `Files.ReadWrite` (delegated), and its tests cover it
-- [ ] The full suite passes (`uv run pytest -m "not live and not browser"`)
+- [x] `CLAUDE.md` describes the archive tools, and the PDF text tool
+- [x] The wizard's Azure stage lists `Files.ReadWrite` (delegated), and its tests cover it
+- [x] The full suite passes (`uv run pytest -m "not live and not browser"`)
 
 Spec: `../spec.md` (Route and login). ADR-020.
 
 ## Comments
+
+- 2026-11-24: Done. `CLAUDE.md`: Microsoft 365 reaches the OneDrive Invoice archive; the tools paragraph names `read_pdf_text` and the three archive tools over the never-bound drive tools (ADR-020); the config paragraph says the agent also reads `INFORMER_DOWNLOADS_DIR`. The wizard's Azure app stage adds delegated `Files.ReadWrite` (not `.All`) and checks it in `--list-permissions`; no re-login step, as the owner decided. `ms365_mcp.py`'s docstring names the scopes the server requests with `ENABLED_TOOLS` (read from the pinned 0.159.1 `endpoints.json`). Test: `test_the_azure_stage_adds_files_readwrite_for_the_invoice_archive` in `tests/test_setup_wizard.py`.
