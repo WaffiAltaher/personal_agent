@@ -13,13 +13,15 @@ Released versions are not edited: `RELEASED` in `tests/test_released_prompt_vers
 
 **Blocked by:** 04, 05, 06
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `v7` starts with `v6` and adds only the rules above (a test, as for `v6`)
-- [ ] `v7` is the default and is in `RELEASED`; no earlier version's hash changes
-- [ ] A scripted-model graph test: two Write actions in one turn give one Approval listing both, and both run
-- [ ] The full suite passes (`uv run pytest -m "not live and not browser"`)
+- [x] `v7` starts with `v6` and adds only the rules above (a test, as for `v6`)
+- [x] `v7` is the default and is in `RELEASED`; no earlier version's hash changes
+- [x] A scripted-model graph test: two Write actions in one turn give one Approval listing both, and both run
+- [x] The full suite passes (`uv run pytest -m "not live and not browser"`)
 
 Spec: `../spec.md` (Prompt; Process). ADR-020.
 
 ## Comments
+
+- 2026-11-24: Built. `PROMPT_V7` in `src/agent/prompts.py` is `v6` plus a "Purchase invoices:" section (the glossary terms mapped to the tools; invoice date from `read_pdf_text`, else ask; the Processed check before an Upload to OneDrive, Target path unchanged; "Process instead?" when the other upload is missing; a Process is both uploads in one turn, a failure offers the remaining step; the status line, with the listing's OneDrive status said to match names only). Default in `config.py`; `RELEASED` gains its sha256. Tests: `tests/test_agent_prompts.py` (v7 default, 7 versions, v7 starts with v6 and adds the rules), `tests/test_process_purchase_invoice.py` (scripted model over `load_all_tools(fixtures=True)`: one Approval listing both uploads, both run: one sent message, one archived file). Full suite green.

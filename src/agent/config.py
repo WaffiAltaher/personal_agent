@@ -78,7 +78,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
     )
 
-    prompt_version: str = "v6"  # see agent/prompts.py; tagged on each Langfuse trace
+    prompt_version: str = "v7"  # see agent/prompts.py; tagged on each Langfuse trace
     # Optional: without them the agent starts without MS365 tools, with a notice.
     ms365_mcp_client_id: str | None = None
     ms365_mcp_tenant_id: str | None = None

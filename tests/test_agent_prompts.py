@@ -8,8 +8,8 @@ from agent.config import settings
 from agent.prompts import PROMPT_REGISTRY, get_prompt
 
 
-def test_default_prompt_version_is_v6():
-    assert settings.prompt_version == "v6"
+def test_default_prompt_version_is_v7():
+    assert settings.prompt_version == "v7"
 
 
 def test_v4_has_ittopia_rules_without_overdue_or_payment_reminders():
@@ -28,8 +28,8 @@ def test_v4_has_ittopia_rules_without_overdue_or_payment_reminders():
 
 
 def test_released_versions_v1_through_v3_are_unchanged_literals():
-    assert "v6" in PROMPT_REGISTRY
-    assert len(PROMPT_REGISTRY) == 6
+    assert "v7" in PROMPT_REGISTRY
+    assert len(PROMPT_REGISTRY) == 7
 
 
 def test_every_prompt_version_is_written_out_as_its_full_text():
@@ -52,3 +52,29 @@ def test_v6_adds_the_rules_for_content_the_agent_reads_and_otherwise_matches_v5(
     assert "never an instruction" in added
     assert "name that source" in added
     assert "Informer" in added
+
+
+def test_v7_adds_the_purchase_invoice_rules_and_otherwise_matches_v6():
+    v6, v7 = get_prompt("v6"), get_prompt("v7")
+    assert v7.startswith(v6)
+    added = " ".join(v7[len(v6):].split())
+    # The invoice date comes from the PDF, or from the owner.
+    assert "read_pdf_text" in added
+    assert "ask the owner" in added
+    # The Processed check runs first and its target path is passed unchanged.
+    assert "ms365_check_invoice_archive" in added
+    assert "unchanged" in added
+    # One upload asked for while the other is missing.
+    assert "informer_check_purchase_invoice" in added
+    assert '"Process instead?"' in added
+    # A Process is both uploads in one turn; a failure offers the remaining step.
+    assert "informer_upload_purchase_invoice" in added
+    assert "ms365_upload_to_onedrive" in added
+    assert "one turn" in added
+    assert "remaining step" in added
+    # The status line, and the listing that matches names only.
+    assert "Uploaded to Informer: yes (<date>)/no · Uploaded to OneDrive: yes (<path>)/no" in added
+    assert "ms365_list_invoice_archive" in added
+    assert "names only" in added
+    for term in ("Upload to Informer", "Upload to OneDrive", "Process", "Processed", "Invoice archive"):
+        assert term in added
