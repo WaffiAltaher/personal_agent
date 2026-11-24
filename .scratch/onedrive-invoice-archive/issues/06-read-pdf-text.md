@@ -6,15 +6,17 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] A seeded text PDF returns text containing its invoice date
-- [ ] A PDF with no text layer returns the "no text layer, ask the owner for the invoice date" answer, not an error
-- [ ] A non-PDF and a missing file give `Error:` lines
-- [ ] The stand-in refuses a path outside the files root as not found
-- [ ] The tool is classified read
-- [ ] The full suite passes (`uv run pytest -m "not live and not browser"`)
+- [x] A seeded text PDF returns text containing its invoice date
+- [x] A PDF with no text layer returns the "no text layer, ask the owner for the invoice date" answer, not an error
+- [x] A non-PDF and a missing file give `Error:` lines
+- [x] The stand-in refuses a path outside the files root as not found
+- [x] The tool is classified read
+- [x] The full suite passes (`uv run pytest -m "not live and not browser"`)
 
 Spec: `../spec.md` (Reading the invoice date). ADR-020.
 
 ## Comments
+
+- Built `read_pdf_text` in `src/agent/tools/pdf_text.py` (pypdf 7.1.1): text of the first 3 pages, capped at 20,000 characters (files up to 25 MB, the Upload to OneDrive limit); `Error:` for missing, non-PDF (no `%PDF-` magic), password-protected or damaged files; the `NO_TEXT_LAYER` answer for a scan. `read_tool(...)` in `LOCAL_TOOLS`; the eval stand-in `fixture_read_pdf_text` is in `EVAL_FILE_STAND_INS`. `src/fixture_world/pdfs.py` builds one-page PDFs (`text_pdf(lines)`, `no_text_pdf()`); the eval Downloads gain `kpn-factuur-123456.pdf` (printed `Factuurdatum: 14-10-2026`) and `scan-factuur.pdf` (no text layer). Tests: `tests/test_read_pdf_text.py`.

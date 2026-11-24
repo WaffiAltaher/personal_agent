@@ -55,7 +55,9 @@ from agent.tools.filesystem import (
     list_directory,
     read_file,
 )
+from agent.tools.pdf_text import fixture_read_pdf_text, read_pdf_text
 from fixture_world import clock, informer as fixture_informer, ms365 as fixture_ms365
+from fixture_world.pdfs import no_text_pdf, text_pdf
 
 # Backstop only: the graph's model-call counter enforces settings.max_iterations.
 RECURSION_LIMIT = max(settings.max_iterations * 5 + 10, 40)
@@ -64,6 +66,12 @@ EVAL_EPISODIC_SEED = Path(__file__).parent / "fixtures" / "episodic_seed.json"
 EVAL_DOWNLOAD_PDFS: dict[str, bytes] = {
     "supplier-march.pdf": b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n",
     "fail-me.pdf": b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n",
+    # A Purchase invoice with its invoice date printed in its text layer, and a scan with none.
+    "kpn-factuur-123456.pdf": text_pdf([
+        "KPN B.V.", "Factuur", "Factuurnummer: 123456", "Factuurdatum: 14-10-2026",
+        "Totaal te betalen: EUR 48,40",
+    ]),
+    "scan-factuur.pdf": no_text_pdf(),
 }
 
 
@@ -96,7 +104,11 @@ def _isolated_eval_episodic(workdir: Path) -> Iterator[None]:
 
 # The real file tools read the owner's disk even in Fixture-world mode; an eval binds stand-ins
 # confined to the run's Downloads folder under the same names instead.
-EVAL_FILE_STAND_INS = {read_file.name: fixture_read_file, list_directory.name: fixture_list_directory}
+EVAL_FILE_STAND_INS = {
+    read_file.name: fixture_read_file,
+    list_directory.name: fixture_list_directory,
+    read_pdf_text.name: fixture_read_pdf_text,
+}
 
 ModelFactory = Callable[[Scenario], BaseChatModel]
 ToolLoader = Callable[[], Awaitable[tuple[list[BaseTool], list[str]]]]
