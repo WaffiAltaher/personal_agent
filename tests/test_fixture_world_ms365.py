@@ -152,8 +152,9 @@ async def test_model_sees_ms365_read_tools_the_two_draft_tools_and_the_agents_ow
     """The stand-in also serves send, delete, move, update, calendar, rule, folder and permission
     writes, the account tools, and download-bytes-to-file (a local-file write the real server
     annotates readOnlyHint): none of them is bound, whatever its annotations say. The agent's
-    own ms365_save_attachment is bound in place of download-bytes-to-file, and its reads
-    ms365_list_invoice_archive and ms365_check_invoice_archive in place of the drive tools."""
+    own ms365_save_attachment is bound in place of download-bytes-to-file, its reads
+    ms365_list_invoice_archive and ms365_check_invoice_archive and its Write action
+    ms365_upload_to_onedrive in place of the drive tools, none of which is bound."""
     tools = await fixture_tools()
 
     assert sorted(t.name for t in tools if t.name.startswith("ms365_")) == [
@@ -170,9 +171,11 @@ async def test_model_sees_ms365_read_tools_the_two_draft_tools_and_the_agents_ow
         "ms365_list-outlook-contacts",
         "ms365_list_invoice_archive",
         "ms365_save_attachment",
+        "ms365_upload_to_onedrive",
     ]
     writes = sorted(t.name for t in tools if t.name.startswith("ms365_") and not is_read(t))
-    assert writes == ["ms365_create-draft-email", "ms365_create-reply-draft", "ms365_save_attachment"]
+    assert writes == ["ms365_create-draft-email", "ms365_create-reply-draft", "ms365_save_attachment",
+                      "ms365_upload_to_onedrive"]
 
 
 _SEEDED_PDF = "/me/messages/AAMkAGZpeHR1cmUAMESSAGE01/attachments/AAMkAGZpeHR1cmUAATTACH01/$value"

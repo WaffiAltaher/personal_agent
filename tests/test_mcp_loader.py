@@ -269,7 +269,7 @@ def test_the_drive_tools_are_enabled_but_never_exposed_or_read_classified():
     from agent.tools.ms365_mcp import ENABLED_TOOLS, enabled_tools_pattern
 
     pattern = re.compile(enabled_tools_pattern(), re.IGNORECASE)
-    for drive_tool in ("list-drives", "list-folder-files"):
+    for drive_tool in ("list-drives", "list-folder-files", "create-onedrive-folder", "create-upload-session"):
         assert drive_tool in ENABLED_TOOLS and pattern.search(drive_tool)
         assert drive_tool not in EXPOSED_TOOLS and drive_tool not in READ_TOOLS
     assert not pattern.search("upload-file-content")
