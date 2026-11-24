@@ -444,6 +444,42 @@ Two plain tools were chosen over a hidden check that the Approval step calls bef
 
 ---
 
+## ADR-020: Purchase invoices are Uploaded to OneDrive through agent-side tools over the Invoice archive only
+**Date:** 2026-11-24
+**Status:** Accepted (extends ADR-015's wrapper pattern)
+
+**Context:** The owner Processes a Purchase invoice once it is paid: they Upload it to Informer and Upload it to OneDrive, into the Invoice archive (`Documents/ittopia/admin/<year>/<Month in English>/` in their ITtopia OneDrive). Today only the Informer half exists (ADR-019), and "is it Processed?" means opening OneDrive by hand. Two routes reach OneDrive. Microsoft's Work IQ OneDrive MCP server needs Microsoft 365 Copilot and Agent 365 licences, admin enablement and its own hosted login, and has a 5 MB file limit. The already-pinned `@softeria/ms-365-mcp-server@0.159.1` has drive tools (`list-drives`, `list-folder-files`, `get-drive-item`, `create-onedrive-folder`, `create-upload-session`, …) that the agent doesn't enable yet; enabling them adds only the delegated `Files.ReadWrite` scope, which the Azure app already grants. Those tools reach the whole OneDrive by drive and item id, `upload-file-content` overwrites without warning, and `create-upload-session` returns a pre-authenticated `uploadUrl` but never PUTs the bytes. The Approval prompt shows a Write action's raw arguments (ADR-012, ADR-015), which for these tools would be a drive id and an item id.
+
+**Decision:**
+- The Softeria server, with the same Azure app and keychain login (ADR-005). Its drive tools are enabled but never bound: the model sees only three agent-side tools fixed to the Invoice archive:
+  - a read that lists a year's or a month's folder;
+  - a read, the Processed check, that looks for a local PDF's contents in the month folder of its invoice date, comparing OneDrive's `quickXorHash` with one computed locally, never by name and never by downloading;
+  - a Write action, Upload to OneDrive, that takes a local PDF, its invoice date and the target path the Processed check reported. It creates a missing year or month folder, keeps the file name exactly as received, and never overwrites: the same contents already in the month folder is a no-op; a different file under the same name is uploaded with OneDrive's own rename (`conflictBehavior: rename`). The bytes go through an upload session: agent code PUTs them to the `uploadUrl`, without an `Authorization` header, so the model never handles bytes and the agent holds no Microsoft token.
+- The month folder is the year and month of the invoice date printed on the invoice. A new read tool extracts a local PDF's text; the model reads the date from it and passes it on; the tool computes the folder. A PDF with no text (a scan) makes the agent ask the owner for the date.
+- A Process is two Write actions, `informer_upload_purchase_invoice` and the Upload to OneDrive, proposed together under one Approval and run concurrently. No order is enforced between them. If one fails, the agent reports it and offers the remaining step on its own.
+
+**Reasoning:**
+- **Work IQ** would add licences, a second login and admin work for one folder, and its 5 MB limit is lower than an upload session's. The Softeria server already holds the login and only needs one more scope.
+- **Exposing the server's drive tools behind Approval** would let the model, or an injected instruction, read or write anywhere in the owner's OneDrive, and leave the owner to read item ids in every prompt. Wrappers fixed to `Documents/ittopia/admin` make the scope a property of the code, as ADR-015 does for local saves.
+- **The target path as a required argument**, checked again at upload time, puts the full path (`Documents/ittopia/admin/2026/October/kpn-factuur-123456.pdf`, or OneDrive's renamed name on a clash) into the generic Approval prompt without a per-tool display hook in the graph. It follows ADR-015's `file_name`.
+- **The invoice date, not the payment or upload date,** because that is how the accountant and the owner look an invoice up. The tool computes the folder so that the model can't misspell a month.
+- **Content, not name, decides Processed** with a file in hand, because suppliers reuse names like `Factuur.pdf`. Without a file, only names are available, and the answer says so.
+- **No order between the two uploads:** each is idempotent against its own record (Informer's upload log, the archive's contents), and the owner Processes only paid invoices, so a half-done Process is finished by the remaining step, not undone. An enforced order would turn one Approval into two.
+- **An upload session, not `upload-file-content`,** because that tool overwrites and would put the file's bytes, base64, in the model's tool call.
+
+**Consequences:**
+- The MS365 server's enabled tools grow by the drive tools above, so it requests `Files.ReadWrite`. The app granted it before the owner's current login, and the probe of 2026-11-24 reached OneDrive with that login: no new login. The loader must keep those tools unbound by name; a test pins this.
+- A wrapper can now be a read: `ToolWrapper` gains a classification instead of every wrapper being a Write action. It defaults to Write action, so classification still fails closed (ADR-010).
+- The agent calls a pre-authenticated Microsoft URL itself for the PUT. That is not a login of its own (ADR-005), but the `uploadUrl` is a bearer capability: it never reaches the model, the logs or a trace. A server tool called from inside a wrapper inherits the run's callbacks and is traced with its output, so the wrapper calls `create-upload-session` outside them.
+- A new path into Graph's driveItem addressing: there is no id-only way to create a new file through an upload session, so the agent depends on the pinned server passing `{parentId}:/{name}:` as a `driveItemId` (it percent-encodes the colons and slashes). Folders are walked and created level by level by id, so only the upload depends on it. The probe of 2026-11-24 found Graph accepts it.
+- The agent computes `quickXorHash` itself, the only hash OneDrive for Business guarantees.
+- Every server tool call starts the server (one session per call), so one upload costs several server starts (the probe measured about 1.3 s per start and 0.1–0.7 s per call). A Process is slower than an Upload to Informer alone.
+- A PDF text extraction library joins the dependencies.
+- The wrappers depend on the drive tools' argument shapes and on `create-upload-session`'s contract at the pinned version. Review them when bumping the pin.
+- A new prompt version makes every answer about a Purchase invoice end with its status (Uploaded to Informer, Uploaded to OneDrive) and asks "Process instead?" before a single upload when the other one is missing.
+
+---
+
 <!-- Template for new decisions:
 
 ## ADR-XXX: [Title]
