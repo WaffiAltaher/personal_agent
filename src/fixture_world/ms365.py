@@ -33,6 +33,13 @@ Attachments: `list-mail-attachments` serves the seeded attachments (`data/ms365/
 and `download-bytes-to-file` writes a seeded attachment's bytes to a local file, refusing a
 relative path and an existing file as the real server does.
 
+Drive: `list-drives` and `list-folder-files` serve one `business` drive, a directory named by
+FIXTURE_WORLD_MS365_DRIVE (default under the temp directory), seeded from `data/ms365/drive/`
+(a `Documents/ittopia/admin/2026/<Month>/` Invoice archive) when the directory doesn't exist yet.
+Items are addressed by id, as the real server addresses them (`driveId`, `driveItemId`, `root` for
+the root); an item's id is derived from its path, so it is the same in every process. The agent
+binds neither tool: its Invoice archive wrappers call them (ADR-020).
+
 Run over stdio with `python -m fixture_world.ms365`.
 
 The server can be switched into a failure mode (down, logged out, tool error, transient
@@ -42,16 +49,18 @@ error, throttled (429), crash) from outside its process; see "failure injection"
 import base64
 import fcntl
 import functools
+import hashlib
 import json
 import os
 import re
+import shutil
 import sys
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from enum import StrEnum
-from importlib.resources import files
+from importlib.resources import as_file, files
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -329,6 +338,72 @@ def _record_send_call(arguments: dict) -> None:
             log.write(json.dumps({"tool": "send-shared-mailbox-mail", "arguments": arguments}) + "\n")
 
 
+DRIVE_ENV = "FIXTURE_WORLD_MS365_DRIVE"  # the drive's directory; seeded from data/ms365/drive/ if missing
+DEFAULT_DRIVE_PATH = Path(tempfile.gettempdir()) / "fixture_world_ms365_drive"
+DRIVE_ID = "b!FixtureWorldBusinessDrive"
+DRIVE_PAGE_SIZE = 200  # Graph's default page size for a driveItem's children
+
+
+def drive_path() -> Path:
+    """The drive's directory, seeded from the Fixture world the first time it is used."""
+    path = Path(os.environ.get(DRIVE_ENV) or DEFAULT_DRIVE_PATH)
+    with _exclusive(path):
+        if not path.exists():
+            with as_file(files("fixture_world") / "data" / "ms365" / "drive") as seed:
+                shutil.copytree(seed, path)
+    return path
+
+
+def _item_id(relative: Path) -> str:
+    """A stable driveItem id for a path below the drive's root."""
+    return "01FIXTURE" + hashlib.sha1(relative.as_posix().encode()).hexdigest()[:24].upper()
+
+
+def _drive_items(root: Path) -> dict[str, Path]:
+    """Every item of the drive by id, `root` included (also under its alias "root")."""
+    items = {"root": root, _item_id(Path(".")): root}
+    for path in root.rglob("*"):
+        if not any(part.startswith(".") for part in path.relative_to(root).parts):  # lock files, .DS_Store
+            items[_item_id(path.relative_to(root))] = path
+    return items
+
+
+def _visible_children(folder: Path) -> list[Path]:
+    return sorted(p for p in folder.iterdir() if not p.name.startswith("."))
+
+
+def _drive_item(root: Path, path: Path) -> dict:
+    """A driveItem as Graph lists it: a folder facet for a folder, a file facet for a file."""
+    relative = path.relative_to(root)
+    stamp = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    parent = relative.parent
+    item = {
+        "id": _item_id(relative),
+        "name": path.name,
+        "createdDateTime": stamp,
+        "lastModifiedDateTime": stamp,
+        "webUrl": f"https://fixture-my.sharepoint.com/personal/jendo/Documents/{relative.as_posix()}",
+        "parentReference": {"driveType": "business", "driveId": DRIVE_ID, "id": _item_id(parent),
+                            "path": "/drive/root:" + ("" if parent == Path(".") else f"/{parent.as_posix()}")},
+    }
+    if path.is_dir():
+        children = _visible_children(path)
+        item["size"] = sum(p.stat().st_size for p in path.rglob("*") if p.is_file() and not p.name.startswith("."))
+        item["folder"] = {"childCount": len(children)}
+    else:
+        item["size"] = path.stat().st_size
+        item["file"] = {"mimeType": "application/pdf" if path.suffix.lower() == ".pdf" else "application/octet-stream"}
+    return item
+
+
+def _odata_list(value: str | list[str] | None) -> str | None:
+    """`select`, `orderby` and `expand` as a comma-separated string (the real server takes either)."""
+    return ",".join(value) if isinstance(value, list) else value
+
+
+_ITEM_NOT_FOUND = ("itemNotFound", "The resource could not be found.")
+
+
 def _graph_api_error(status: int, reason: str, code: str, message: str) -> CallToolResult:
     """A Graph HTTP failure as the real server reports it: the status in the text and in `_meta`."""
     graph_body = json.dumps({"error": {"code": code, "message": message}})
@@ -594,6 +669,44 @@ def create_server(world: Ms365World | None = None) -> FastMCP:
     @graph_tool("get-outlook-contact", "Retrieve the properties and relationships of a contact object.")
     def get_outlook_contact(contactId: str, select: str | None = None) -> CallToolResult:
         return _get(world.contacts, contactId, select)
+
+    # --- drive (the agent binds neither: its Invoice archive wrappers call them, ADR-020) ---
+
+    @graph_tool("list-drives",
+                "Retrieve the list of Drive resources available for a target User, Group, or Site.")
+    def list_drives(top: int | None = None, skip: int | None = None, search: str | None = None,
+                    filter: str | None = None, count: bool | None = None,
+                    orderby: str | list[str] | None = None, select: str | list[str] | None = None,
+                    expand: str | list[str] | None = None, fetchAllPages: bool | None = None,
+                    skiptoken: str | None = None, includeHeaders: bool | None = None,
+                    excludeResponse: bool | None = None) -> CallToolResult:
+        drive = {"id": DRIVE_ID, "driveType": "business", "name": "Documenten", "description": "",
+                 "owner": {"user": {"displayName": OWNER["displayName"], "email": OWNER["userPrincipalName"]}},
+                 "webUrl": "https://fixture-my.sharepoint.com/personal/jendo/Documents"}
+        return _list([drive], filter=filter, search=search, orderby=_odata_list(orderby),
+                     select=_odata_list(select), top=top, skip=skip)
+
+    @graph_tool("list-folder-files",
+                "Return a collection of DriveItems in the children relationship of a DriveItem. DriveItems "
+                "with a non-null folder or package facet can have one or more child DriveItems.")
+    def list_folder_files(driveId: str, driveItemId: str, top: int | None = None, skip: int | None = None,
+                          search: str | None = None, filter: str | None = None, count: bool | None = None,
+                          orderby: str | list[str] | None = None, select: str | list[str] | None = None,
+                          expand: str | list[str] | None = None, fetchAllPages: bool | None = None,
+                          skiptoken: str | None = None, includeHeaders: bool | None = None,
+                          excludeResponse: bool | None = None) -> CallToolResult:
+        root = drive_path()
+        folder = _drive_items(root).get(driveItemId) if driveId == DRIVE_ID else None
+        if folder is None:
+            return _graph_api_error(404, "Not Found", *_ITEM_NOT_FOUND)
+        children = [_drive_item(root, p) for p in _visible_children(folder)] if folder.is_dir() else []
+        try:
+            found = _order(_search(_filter(children, filter), search), _odata_list(orderby))
+        except BadRequest as exc:
+            return _graph_error("BadRequest", str(exc))
+        if not fetchAllPages:
+            found = found[skip or 0:(skip or 0) + (top or DRIVE_PAGE_SIZE)]
+        return _ok({"value": _select(found, _odata_list(select))})
 
     # --- Drafts (Write actions; the real server annotates POST tools readOnlyHint false) ---
 

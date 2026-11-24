@@ -223,3 +223,53 @@ async def test_configured_informer_server_reaches_informer_with_the_credentials(
     assert notices == []
     text = result if isinstance(result, str) else "".join(block["text"] for block in result)
     assert [r["name"] for r in json.loads(text)["relations"]] == ["Noordzee Advies"]
+
+
+def _echo_wrapper(**classification):
+    """A wrapper over the stand-in's verify-login that just echoes, classified as given (or not at all)."""
+    from langchain_core.tools import StructuredTool
+
+    from agent.tools.mcp_loader import ToolWrapper
+
+    def build(name, tools):
+        return StructuredTool.from_function(func=lambda: "echo", name=name, description="Echo.")
+
+    return ToolWrapper(name="echo", replaces="verify-login", build=build, **classification)
+
+
+@pytest.mark.asyncio
+async def test_a_wrapper_with_no_classification_is_bound_as_a_write_action():
+    from dataclasses import replace
+
+    from agent.tools.classification import is_read
+
+    tools, notices = await load_mcp_tools([replace(ms365_fixture_server(), wrappers=(_echo_wrapper(),))])
+
+    assert notices == []
+    [echo] = [t for t in tools if t.name == "ms365_echo"]
+    assert not is_read(echo)
+
+
+@pytest.mark.asyncio
+async def test_a_read_wrapper_is_bound_as_a_read():
+    from dataclasses import replace
+
+    from agent.tools.classification import READ, is_read
+
+    tools, notices = await load_mcp_tools([replace(ms365_fixture_server(),
+                                                   wrappers=(_echo_wrapper(classification=READ),))])
+
+    assert notices == []
+    [echo] = [t for t in tools if t.name == "ms365_echo"]
+    assert is_read(echo)
+
+
+def test_the_drive_tools_are_enabled_but_never_exposed_or_read_classified():
+    # Only the Invoice archive wrappers call them (ADR-020); upload-file-content overwrites, so it never is.
+    from agent.tools.ms365_mcp import ENABLED_TOOLS, enabled_tools_pattern
+
+    pattern = re.compile(enabled_tools_pattern(), re.IGNORECASE)
+    for drive_tool in ("list-drives", "list-folder-files"):
+        assert drive_tool in ENABLED_TOOLS and pattern.search(drive_tool)
+        assert drive_tool not in EXPOSED_TOOLS and drive_tool not in READ_TOOLS
+    assert not pattern.search("upload-file-content")

@@ -13,7 +13,8 @@ carry every permission granted to the app, ADR-019) and by the loader, by name, 
 annotations the server sets.
 
 The loader also binds `ms365_save_attachment`, the agent's own Write action over the server's
-`download-bytes-to-file` (ADR-015), in place of that raw tool.
+`download-bytes-to-file` (ADR-015), in place of that raw tool, and `ms365_list_invoice_archive`,
+the agent's own read over the drive tools, fixed to the Invoice archive (ADR-020).
 """
 
 import sys
@@ -23,6 +24,7 @@ from agent.config import Settings, settings as default_settings
 from agent.tools.mcp_environment import fixture_environment, system_environment
 from agent.tools.mcp_loader import LoginCheck, McpServer
 from agent.tools.ms365_attachments import DOWNLOAD_TOOL, SAVE_ATTACHMENT
+from agent.tools.ms365_invoice_archive import LIST_DRIVES_TOOL, LIST_FOLDER_TOOL, LIST_INVOICE_ARCHIVE
 
 NAME = "ms365"
 PACKAGE = "@softeria/ms-365-mcp-server@0.159.1"  # exact pin; review the release diff before bumping (ADR-005)
@@ -75,8 +77,10 @@ DRAFT_TOOLS = frozenset({"create-draft-email", "create-reply-draft"})
 EXPOSED_TOOLS = READ_TOOLS | DRAFT_TOOLS
 
 # What the server enables: the exposed tools, plus download-bytes-to-file, which only the
-# agent's own ms365_save_attachment calls (it is a GET: no new Graph scope). Never bound.
-ENABLED_TOOLS = EXPOSED_TOOLS | {DOWNLOAD_TOOL}
+# agent's own ms365_save_attachment calls (it is a GET: no new Graph scope), and the drive tools
+# the Invoice archive wrappers call (they add Files.ReadWrite, ADR-020). Never bound.
+DRIVE_TOOLS = frozenset({LIST_DRIVES_TOOL, LIST_FOLDER_TOOL})
+ENABLED_TOOLS = EXPOSED_TOOLS | {DOWNLOAD_TOOL} | DRIVE_TOOLS
 
 # Login and account management (login, logout, verify-login, list-/select-/remove-account)
 # are not in EXPOSED_TOOLS, so they stay out of the model's reach. The real server serves
@@ -110,7 +114,10 @@ _TOOL_POLICY = dict(
     read_allowlist=READ_TOOLS,
     login=LOGIN,
     transient_errors=TRANSIENT_ERRORS,
-    wrappers=(SAVE_ATTACHMENT,),  # bound in place of download-bytes-to-file
+    wrappers=(
+        SAVE_ATTACHMENT,  # bound in place of download-bytes-to-file
+        LIST_INVOICE_ARCHIVE,  # a read, bound in place of list-folder-files
+    ),
 )
 
 
