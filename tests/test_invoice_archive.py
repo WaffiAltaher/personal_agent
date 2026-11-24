@@ -114,6 +114,20 @@ async def test_folders_carry_a_folder_facet_and_select_trims_the_fields(drive):
 
 
 @pytest.mark.asyncio
+async def test_each_listed_file_carries_onedrives_quick_xor_hash(drive):
+    drive_id, october = await _walk("Documents", "ittopia", "admin", "2026", "October")
+    probe_pdf = (b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj 2 0 obj<</Type/Pages/Kids[]/Count 0>>endobj\n"
+                 b"trailer<</Root 1 0 R>>\n%%EOF\n")
+    (drive / "Documents" / "ittopia" / "admin" / "2026" / "October" / "probe.pdf").write_bytes(probe_pdf)
+
+    files = {f["name"]: f for f in await _children(drive_id, october, select="name,size,file")}
+
+    # The value the real OneDrive reported for these bytes (ticket 02's probe).
+    assert files["probe.pdf"]["file"]["hashes"] == {"quickXorHash": "PQgwGNxkRuC1nY4pjMn9uFkXH8w="}
+    assert all(f["file"]["hashes"]["quickXorHash"] for f in files.values())
+
+
+@pytest.mark.asyncio
 async def test_an_unknown_item_is_graphs_404(drive):
     result = await _call_stand_in("list-folder-files", {"driveId": await _drive_id(), "driveItemId": "nope"})
 

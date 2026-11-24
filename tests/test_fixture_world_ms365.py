@@ -152,11 +152,12 @@ async def test_model_sees_ms365_read_tools_the_two_draft_tools_and_the_agents_ow
     """The stand-in also serves send, delete, move, update, calendar, rule, folder and permission
     writes, the account tools, and download-bytes-to-file (a local-file write the real server
     annotates readOnlyHint): none of them is bound, whatever its annotations say. The agent's
-    own ms365_save_attachment is bound in place of download-bytes-to-file, and its read
-    ms365_list_invoice_archive in place of the drive tools."""
+    own ms365_save_attachment is bound in place of download-bytes-to-file, and its reads
+    ms365_list_invoice_archive and ms365_check_invoice_archive in place of the drive tools."""
     tools = await fixture_tools()
 
     assert sorted(t.name for t in tools if t.name.startswith("ms365_")) == [
+        "ms365_check_invoice_archive",
         "ms365_create-draft-email",
         "ms365_create-reply-draft",
         "ms365_get-calendar-event",

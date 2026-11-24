@@ -372,6 +372,21 @@ def _visible_children(folder: Path) -> list[Path]:
     return sorted(p for p in folder.iterdir() if not p.name.startswith("."))
 
 
+def _quick_xor_hash(data: bytes) -> str:
+    """OneDrive's quickXorHash, byte by byte as Microsoft's reference code computes it (160-bit
+    block, each byte XORed in rotated left by 11 bits more than the last, the length XORed into
+    the last 8 bytes, base64). Written apart from the agent's own, which the stand-in never imports."""
+    width, block = 160, 0
+    for index, byte in enumerate(data):
+        shift = (index * 11) % width
+        rotated = byte << shift
+        block ^= (rotated | (rotated >> width)) & ((1 << width) - 1)
+    digest = bytearray(block.to_bytes(width // 8, "little"))
+    for i, length_byte in enumerate(len(data).to_bytes(8, "little")):
+        digest[12 + i] ^= length_byte
+    return base64.b64encode(bytes(digest)).decode("ascii")
+
+
 def _drive_item(root: Path, path: Path) -> dict:
     """A driveItem as Graph lists it: a folder facet for a folder, a file facet for a file."""
     relative = path.relative_to(root)
@@ -392,7 +407,8 @@ def _drive_item(root: Path, path: Path) -> dict:
         item["folder"] = {"childCount": len(children)}
     else:
         item["size"] = path.stat().st_size
-        item["file"] = {"mimeType": "application/pdf" if path.suffix.lower() == ".pdf" else "application/octet-stream"}
+        item["file"] = {"mimeType": "application/pdf" if path.suffix.lower() == ".pdf" else "application/octet-stream",
+                        "hashes": {"quickXorHash": _quick_xor_hash(path.read_bytes())}}  # only this hash, as on OneDrive for Business
     return item
 
 

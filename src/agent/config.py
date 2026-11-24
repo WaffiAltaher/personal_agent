@@ -91,6 +91,9 @@ class Settings(BaseSettings):
     # `.env` is shared: the Informer server reads them itself, and the agent never uses them.
     informer_incoming_address: str | None = None
     informer_invoice_mailbox: str | None = None
+    # The Downloads folder the Informer server confines Purchase invoice paths to (unset: ~/Downloads).
+    # The Invoice archive tools apply the same folder (ADR-020), so a file one can take, so can the other.
+    informer_downloads_dir: str | None = None
     # Web interface (python -m agent.web, ADR-018). The owner's password as an argon2id hash, set
     # with `python -m agent.web.set_password`; the server refuses to start without it.
     web_password_hash: str | None = None

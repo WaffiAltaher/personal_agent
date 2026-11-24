@@ -6,6 +6,12 @@ Agent-side tools over the MS365 server's drive tools, which are enabled but neve
 model reaches only the Invoice archive and never a drive or item id:
 - `ms365_list_invoice_archive(year, month=None)` (read): the names and sizes in a month's folder,
   or a year's month folders and their file names. It matches names only.
+- `ms365_check_invoice_archive(path, invoice_date)` (read, the Processed check): whether a local
+  PDF's contents are in the month folder of its invoice date, comparing OneDrive's `quickXorHash`
+  with one computed locally (never downloading), and if not, the target path an Upload to OneDrive
+  would use, with OneDrive's rename when a different file has the name. The local file rules
+  (`read_local_pdf`: a `.pdf` with the PDF magic, inside the Downloads folder the Informer server
+  checks, at most 25 MB) are applied before any server call.
 
 Locating the archive: the drive is the single `business` drive from `list-drives`; folders are
 found level by level by id with `list-folder-files`, starting at `root`, names matched
@@ -17,15 +23,21 @@ the graph retries the read.
 """
 
 import json
+import re
 import uuid
 from collections.abc import Mapping
+from dataclasses import dataclass
+from datetime import date
+from pathlib import Path
 
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel, Field
 
+from agent.config import settings
 from agent.tools.classification import READ
 from agent.tools.mcp_loader import ToolWrapper, TransientMcpError
+from agent.tools.quickxorhash import quick_xor_hash
 
 LIST_DRIVES_TOOL = "list-drives"
 LIST_FOLDER_TOOL = "list-folder-files"
@@ -206,5 +218,179 @@ LIST_INVOICE_ARCHIVE = ToolWrapper(
     name="list_invoice_archive",
     replaces=LIST_FOLDER_TOOL,
     build=build_list_invoice_archive,
+    classification=READ,
+)
+
+
+# --- the Processed check ----------------------------------------------------------------------
+
+MAX_FILE_BYTES = 25 * 1024 * 1024  # one PUT range (Graph allows 60 MiB per request)
+PDF_MAGIC = b"%PDF-"
+_ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+@dataclass(frozen=True)
+class LocalPdf:
+    """A local Purchase invoice that passed the local file rules."""
+
+    path: Path
+    name: str
+    content: bytes
+
+
+def downloads_root() -> Path:
+    """The Downloads folder the Informer server checks: INFORMER_DOWNLOADS_DIR (also from `.env`), or ~/Downloads."""
+    return Path(settings.informer_downloads_dir or Path.home() / "Downloads").expanduser().resolve()
+
+
+def read_local_pdf(path: str) -> LocalPdf:
+    """The file at `path` (relative to Downloads unless absolute) if it is a `.pdf` with the PDF magic,
+    inside Downloads, and at most 25 MB; otherwise ArchiveError. Never calls a server."""
+    if not path or not path.strip():
+        raise ArchiveError("a path is required.")
+    downloads = downloads_root()
+    raw = Path(path).expanduser()
+    if not raw.is_absolute():
+        raw = downloads / raw
+    try:
+        resolved = raw.resolve(strict=True)
+    except FileNotFoundError:
+        raise ArchiveError(f"file not found: {path}") from None
+    if not resolved.is_file():
+        raise ArchiveError(f"not a file: {path}")
+    if not resolved.is_relative_to(downloads):
+        raise ArchiveError(f"the file must be inside the Downloads folder ({downloads}), not elsewhere.")
+    if resolved.suffix.lower() != ".pdf":
+        raise ArchiveError("only PDF files (.pdf) can be filed in the Invoice archive.")
+    if resolved.stat().st_size > MAX_FILE_BYTES:  # refuse by size before reading the file
+        raise ArchiveError("the file is over the 25 MB limit.")
+    content = resolved.read_bytes()
+    if len(content) > MAX_FILE_BYTES:  # it grew between the stat and the read
+        raise ArchiveError("the file is over the 25 MB limit.")
+    if not content.startswith(PDF_MAGIC):
+        raise ArchiveError("the file's contents are not a PDF.")
+    return LocalPdf(path=resolved, name=resolved.name, content=content)
+
+
+def month_of(invoice_date: str) -> tuple[int, str]:
+    """(year, English month name) of a `YYYY-MM-DD` invoice date; otherwise ArchiveError."""
+    try:
+        if not _ISO_DATE.fullmatch(invoice_date):
+            raise ValueError
+        parsed = date.fromisoformat(invoice_date)
+    except ValueError:
+        raise ArchiveError(f"invoice_date must be a date written YYYY-MM-DD, not {invoice_date!r}.") from None
+    return parsed.year, MONTHS[parsed.month - 1]
+
+
+def renamed(name: str, taken: set[str]) -> str:
+    """`name`, or the name OneDrive's rename gives it when taken (`<stem> 1<ext>`, `<stem> 2<ext>`, …).
+    `taken` holds casefolded names: OneDrive matches names case-insensitively."""
+    if name.casefold() not in taken:
+        return name
+    stem, suffix = Path(name).stem, Path(name).suffix
+    number = 1
+    while f"{stem} {number}{suffix}".casefold() in taken:
+        number += 1
+    return f"{stem} {number}{suffix}"
+
+
+@dataclass(frozen=True)
+class ArchiveCheck:
+    """Where a local PDF stands against the month folder of its invoice date."""
+
+    month_path: str  # Documents/ittopia/admin/<year>/<Month>
+    admin_id: str
+    year_id: str | None  # None: the year folder is missing
+    month_id: str | None  # None: the month folder is missing
+    archived_as: str | None  # the archive path of the same contents, if they are there (Processed)
+    target_path: str  # where an Upload to OneDrive would put the file
+    renamed: bool  # a different file has the name, so OneDrive's rename gives the target its name
+
+
+async def check_archive(tools: Mapping[str, BaseTool], pdf: LocalPdf, invoice_date: str) -> ArchiveCheck:
+    """Compare `pdf`'s quickXorHash with each file's in the invoice date's month folder (never downloading)."""
+    year, month = month_of(invoice_date)
+    archive = InvoiceArchive(tools)
+    admin = await archive.admin_folder()
+    year_path = f"{ARCHIVE_PATH}/{year}"
+    month_path = f"{year_path}/{month}"
+    year_id = await archive.subfolder(admin, str(year), ARCHIVE_PATH)
+    month_id = await archive.subfolder(year_id, month, year_path) if year_id else None
+    items = await archive.children(month_id, month_path) if month_id else []
+    digest = quick_xor_hash(pdf.content)
+    archived_as = next((f"{month_path}/{f['name']}" for f in _files(items)
+                        if f["file"].get("hashes", {}).get("quickXorHash") == digest), None)
+    name = renamed(pdf.name, {i.get("name", "").casefold() for i in items})
+    return ArchiveCheck(month_path=month_path, admin_id=admin, year_id=year_id, month_id=month_id,
+                        archived_as=archived_as, target_path=f"{month_path}/{name}", renamed=name != pdf.name)
+
+
+def _check_answer(pdf: LocalPdf, check: ArchiveCheck) -> str:
+    if check.archived_as:
+        return (f"Processed: these contents are already in the Invoice archive as {check.archived_as} "
+                f"(Uploaded to OneDrive).")
+    lines = [f"Not Processed: these contents are not in {check.month_path}.",
+             f"Target path: {check.target_path}"]
+    if check.renamed:
+        lines.append(f"A different file is already named {pdf.name} there, so OneDrive will rename this one "
+                     f"as above (the upload's result gives the final name).")
+    return "\n".join(lines)
+
+
+class CheckInvoiceArchiveInput(BaseModel):
+    path: str = Field(description="The local PDF, inside the Downloads folder (absolute, or relative to Downloads).")
+    invoice_date: str = Field(description="The invoice date printed on the invoice, YYYY-MM-DD.")
+
+
+CHECK_DESCRIPTION = """
+The Processed check: is this local Purchase invoice PDF already in the
+Invoice archive in the owner's OneDrive? It compares the file's contents
+(OneDrive's quickXorHash) with each file in the archive folder of the
+invoice date's year and month (Documents/ittopia/admin/<year>/<Month>/),
+never by name, so a renamed copy is found and a different file with the
+same name is not mistaken for it.
+
+invoice_date is the date printed on the invoice (read it with
+read_pdf_text), YYYY-MM-DD. The file must be a PDF inside the Downloads
+folder, at most 25 MB.
+
+Answers either "Processed: ..." with the archive path of the matching
+file, or "Not Processed: ..." with the "Target path:" an Upload to
+OneDrive would use (pass it unchanged to the upload). When a different
+file already has the name, the target path carries OneDrive's rename and
+a line says so. On failure returns a string beginning with "Error:".
+""".strip()
+
+
+def build_check_invoice_archive(name: str, tools: Mapping[str, BaseTool]) -> BaseTool:
+    """The model-facing Processed check, over the server's list-drives and list-folder-files."""
+
+    async def check_invoice_archive(path: str, invoice_date: str) -> str:
+        try:
+            pdf = read_local_pdf(path)
+            month_of(invoice_date)  # refuse a bad date before calling the server
+            if LIST_DRIVES_TOOL not in tools:
+                return f"Error: the MS365 server has no {LIST_DRIVES_TOOL} tool."
+            return _check_answer(pdf, await check_archive(tools, pdf, invoice_date))
+        except TransientMcpError:
+            raise  # the graph retries a read
+        except ArchiveError as e:
+            return f"Error: {e}"
+        except Exception as e:
+            return f"Error: {type(e).__name__}: {e}"
+
+    return StructuredTool.from_function(
+        coroutine=check_invoice_archive,
+        name=name,
+        description=CHECK_DESCRIPTION,
+        args_schema=CheckInvoiceArchiveInput,
+    )
+
+
+CHECK_INVOICE_ARCHIVE = ToolWrapper(
+    name="check_invoice_archive",
+    replaces=LIST_FOLDER_TOOL,
+    build=build_check_invoice_archive,
     classification=READ,
 )

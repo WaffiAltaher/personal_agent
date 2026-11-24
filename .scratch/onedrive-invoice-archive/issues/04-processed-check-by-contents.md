@@ -8,16 +8,18 @@
 
 **Blocked by:** 02, 03
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `quickXorHash` matches the vectors ticket 02 recorded
-- [ ] Same contents under another name in the month folder: Processed, naming that file
-- [ ] A different file under the same name: not Processed, with the renamed target path and the line saying OneDrive will rename it
-- [ ] A seeded invoice checked with the wrong month: not Processed (contents are looked up only in the invoice date's month)
-- [ ] A path outside Downloads, a non-PDF, or a file over 25 MB is refused with an `Error:` line, without calling the server
-- [ ] The tool is classified read
-- [ ] The full suite passes (`uv run pytest -m "not live and not browser"`)
+- [x] `quickXorHash` matches the vectors ticket 02 recorded
+- [x] Same contents under another name in the month folder: Processed, naming that file
+- [x] A different file under the same name: not Processed, with the renamed target path and the line saying OneDrive will rename it
+- [x] A seeded invoice checked with the wrong month: not Processed (contents are looked up only in the invoice date's month)
+- [x] A path outside Downloads, a non-PDF, or a file over 25 MB is refused with an `Error:` line, without calling the server
+- [x] The tool is classified read
+- [x] The full suite passes (`uv run pytest -m "not live and not browser"`)
 
 Spec: `../spec.md` (The Invoice archive tools). ADR-020.
 
 ## Comments
+
+- 2026-11-24: Built. `src/agent/tools/quickxorhash.py` `quick_xor_hash(data)` (bytes at the same position mod 160 XORed first, so 25 MB hashes in about 50 ms); the stand-in's `_drive_item` lists `file.hashes.quickXorHash` with its own byte-by-byte copy (the stand-in never imports agent code). New `Settings.informer_downloads_dir` (`INFORMER_DOWNLOADS_DIR`, `.env` counts). In `ms365_invoice_archive.py`, for ticket 05 to reuse: `read_local_pdf(path) -> LocalPdf` (relative paths resolve against Downloads, as the Informer server's do; raises `ArchiveError`), `month_of(invoice_date)`, `renamed(name, taken)`, and `check_archive(tools, pdf, invoice_date) -> ArchiveCheck` (`month_path`, `admin_id`, `year_id`, `month_id`, `archived_as`, `target_path`, `renamed`). `CHECK_INVOICE_ARCHIVE` is a second read wrapper replacing `list-folder-files`. Answers start `Processed:` or `Not Processed:` with a `Target path:` line. Tests: `tests/test_quickxorhash.py` (the probe's vectors and empty input), `tests/test_invoice_archive_check.py`, the hash in `tests/test_invoice_archive.py`. Full suite green.

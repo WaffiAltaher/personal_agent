@@ -13,8 +13,9 @@ carry every permission granted to the app, ADR-019) and by the loader, by name, 
 annotations the server sets.
 
 The loader also binds `ms365_save_attachment`, the agent's own Write action over the server's
-`download-bytes-to-file` (ADR-015), in place of that raw tool, and `ms365_list_invoice_archive`,
-the agent's own read over the drive tools, fixed to the Invoice archive (ADR-020).
+`download-bytes-to-file` (ADR-015), in place of that raw tool, and `ms365_list_invoice_archive`
+and `ms365_check_invoice_archive` (the Processed check), the agent's own reads over the drive
+tools, fixed to the Invoice archive (ADR-020).
 """
 
 import sys
@@ -24,7 +25,12 @@ from agent.config import Settings, settings as default_settings
 from agent.tools.mcp_environment import fixture_environment, system_environment
 from agent.tools.mcp_loader import LoginCheck, McpServer
 from agent.tools.ms365_attachments import DOWNLOAD_TOOL, SAVE_ATTACHMENT
-from agent.tools.ms365_invoice_archive import LIST_DRIVES_TOOL, LIST_FOLDER_TOOL, LIST_INVOICE_ARCHIVE
+from agent.tools.ms365_invoice_archive import (
+    CHECK_INVOICE_ARCHIVE,
+    LIST_DRIVES_TOOL,
+    LIST_FOLDER_TOOL,
+    LIST_INVOICE_ARCHIVE,
+)
 
 NAME = "ms365"
 PACKAGE = "@softeria/ms-365-mcp-server@0.159.1"  # exact pin; review the release diff before bumping (ADR-005)
@@ -117,6 +123,7 @@ _TOOL_POLICY = dict(
     wrappers=(
         SAVE_ATTACHMENT,  # bound in place of download-bytes-to-file
         LIST_INVOICE_ARCHIVE,  # a read, bound in place of list-folder-files
+        CHECK_INVOICE_ARCHIVE,  # a read (the Processed check), also in place of list-folder-files
     ),
 )
 
