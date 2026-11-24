@@ -12,6 +12,11 @@ scopes it requests to these tools, so it asks for no Mail.Send; the token it get
 carry every permission granted to the app, ADR-019) and by the loader, by name, whatever
 annotations the server sets.
 
+With ENABLED_TOOLS the server requests the delegated Mail.Read, Mail.ReadWrite (Drafts),
+Calendars.Read, Contacts.Read, MailboxSettings.Read and User.Read, and, for the drive tools,
+Files.ReadWrite (it collapses Files.Read into it, ADR-020). The Azure app grants each of them
+(the setup wizard's Azure app stage).
+
 The loader also binds `ms365_save_attachment`, the agent's own Write action over the server's
 `download-bytes-to-file` (ADR-015), in place of that raw tool, and `ms365_list_invoice_archive`
 and `ms365_check_invoice_archive` (the Processed check), the agent's own reads over the drive
