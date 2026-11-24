@@ -32,21 +32,21 @@ raised, so the graph retries the read.
 import json
 import logging
 import re
-import uuid
+import threading
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
 import httpx
-from langchain_core.messages import ToolMessage
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel, Field
 
 from agent.config import settings
 from agent.tools.classification import READ
 from agent.tools.mcp_loader import ToolWrapper, TransientMcpError
+from agent.tools.ms365_attachments import call_server_tool as _call
+from agent.tools.pdf_text import MAX_BYTES, PDF_MAGIC
 from agent.tools.quickxorhash import quick_xor_hash
 
 LIST_DRIVES_TOOL = "list-drives"
@@ -61,24 +61,6 @@ MONTHS = ("January", "February", "March", "April", "May", "June",
 
 class ArchiveError(Exception):
     """The archive can't be listed; its message is the tool's answer after "Error: "."""
-
-
-def _text(message: ToolMessage) -> str:
-    content = message.content
-    if isinstance(content, str):
-        return content
-    return "".join(block.get("text", "") if isinstance(block, dict) else str(block) for block in content)
-
-
-async def _call(tool: BaseTool, args: dict, config: RunnableConfig | None = None) -> tuple[bool, str]:
-    """Call a server tool; (succeeded, its text). It inherits the run's callbacks unless `config` says otherwise."""
-    message = await tool.ainvoke({
-        "type": "tool_call",
-        "id": f"call-{uuid.uuid4().hex}",
-        "name": tool.name,
-        "args": args,
-    }, config)
-    return message.status != "error", _text(message)
 
 
 async def _listed(tool: BaseTool, args: dict, what: str) -> list[dict]:
@@ -165,7 +147,9 @@ async def _list(tools: Mapping[str, BaseTool], year: int, month: int | None) -> 
         return "\n".join([*lines, NAMES_ONLY])
     month_name = MONTHS[month - 1]
     month_path = f"{year_path}/{month_name}"
-    month_id = year_id and await archive.subfolder(year_id, month_name, year_path)
+    month_id = None
+    if year_id is not None:
+        month_id = await archive.subfolder(year_id, month_name, year_path)
     if not month_id:
         return f"The Invoice archive holds nothing for {month_name} {year} (there is no folder {month_path})."
     found = _files(await archive.children(month_id, month_path))
@@ -234,8 +218,7 @@ LIST_INVOICE_ARCHIVE = ToolWrapper(
 
 # --- the Processed check ----------------------------------------------------------------------
 
-MAX_FILE_BYTES = 25 * 1024 * 1024  # one PUT range (Graph allows 60 MiB per request)
-PDF_MAGIC = b"%PDF-"
+MAX_FILE_BYTES = MAX_BYTES  # 25 MB, one PUT range (Graph allows 60 MiB per request)
 _ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
@@ -293,7 +276,7 @@ def month_of(invoice_date: str) -> tuple[int, str]:
     return parsed.year, MONTHS[parsed.month - 1]
 
 
-def renamed(name: str, taken: set[str]) -> str:
+def onedrive_name(name: str, taken: set[str]) -> str:
     """`name`, or the name OneDrive's rename gives it when taken (`<stem> 1<ext>`, `<stem> 2<ext>`, …).
     `taken` holds casefolded names: OneDrive matches names case-insensitively."""
     if name.casefold() not in taken:
@@ -332,7 +315,7 @@ async def check_archive(tools: Mapping[str, BaseTool], pdf: LocalPdf, invoice_da
     digest = quick_xor_hash(pdf.content)
     archived_as = next((f"{month_path}/{f['name']}" for f in _files(items)
                         if f["file"].get("hashes", {}).get("quickXorHash") == digest), None)
-    name = renamed(pdf.name, {i.get("name", "").casefold() for i in items})
+    name = onedrive_name(pdf.name, {i.get("name", "").casefold() for i in items})
     return ArchiveCheck(month_path=month_path, admin_id=admin, year_id=year_id, month_id=month_id,
                         archived_as=archived_as, target_path=f"{month_path}/{name}", renamed=name != pdf.name)
 
@@ -424,18 +407,42 @@ class UploadFailed(Exception):
 
 
 class _HideUrls(logging.Filter):
-    """Drops log records naming an uploadUrl in use (httpx logs every request's URL at INFO)."""
+    """Drops log records naming an uploadUrl in use (httpx logs every request's URL at INFO).
+    Uploads may run on several threads at once, so the set of URLs is guarded by a lock."""
 
     def __init__(self):
         super().__init__()
-        self.urls: set[str] = set()
+        self._urls: set[str] = set()
+        self._lock = threading.Lock()
+
+    def add(self, urls: set[str]) -> None:
+        with self._lock:
+            self._urls.update(urls)
+
+    def remove(self, urls: set[str]) -> None:
+        with self._lock:
+            self._urls.difference_update(urls)
+
+    def redact(self, text: str) -> str:
+        """`text` with every uploadUrl in use replaced by `<uploadUrl>`."""
+        with self._lock:
+            urls = sorted(self._urls, key=len, reverse=True)
+        for url in urls:
+            text = text.replace(url, "<uploadUrl>")
+        return text
 
     def filter(self, record: logging.LogRecord) -> bool:
-        return not self.urls or not any(url in record.getMessage() for url in self.urls)
+        with self._lock:
+            urls = tuple(self._urls)
+        return not urls or not any(url in record.getMessage() for url in urls)
 
 
 _HIDDEN = _HideUrls()
-logging.getLogger("httpx").addFilter(_HIDDEN)
+# A logger's filter sees only the records logged on that logger, not its children's: httpcore
+# logs on its child loggers, so each is named.
+for _logger in ("httpx", "httpcore", "httpcore.connection", "httpcore.http11", "httpcore.http2",
+                "httpcore.proxy", "httpcore.socks"):
+    logging.getLogger(_logger).addFilter(_HIDDEN)
 
 
 def _graph_error_text(response: httpx.Response) -> str:
@@ -453,7 +460,7 @@ async def httpx_put(upload_url: str, content: bytes, *, transport: httpx.AsyncBa
     best effort, and UploadFailed is raised without the URL, the httpx error or its cause."""
     size = len(content)
     hidden = {upload_url, str(httpx.URL(upload_url))}  # as given, and as httpx writes it in its log line
-    _HIDDEN.urls.update(hidden)
+    _HIDDEN.add(hidden)
     try:
         async with httpx.AsyncClient(transport=transport, timeout=UPLOAD_TIMEOUT) as client:
             try:
@@ -471,7 +478,7 @@ async def httpx_put(upload_url: str, content: bytes, *, transport: httpx.AsyncBa
             except httpx.HTTPError:
                 pass  # best effort: an unfinished session expires on its own
     finally:
-        _HIDDEN.urls.difference_update(hidden)
+        _HIDDEN.remove(hidden)
     raise UploadFailed(failure)
 
 
@@ -525,14 +532,17 @@ async def _upload(tools: Mapping[str, BaseTool], put: PutToSession, path: str, i
     upload_url = json.loads(text).get("uploadUrl")
     if not upload_url:
         return f"Error: OneDrive started no upload session for {pdf.name}; nothing was uploaded."
+    # Everything that touches the PUT seam or its answer is here, so no exception text from it
+    # reaches the result with the uploadUrl in it.
     try:
         item = await put(upload_url, pdf.content)
+        # The name OneDrive reports wins over the predicted one: an unfinished session also holds a name.
+        name = item.get("name") or pdf.name
+        size = item.get("size", len(pdf.content))
     except Exception as e:
-        detail = str(e).replace(upload_url, "<uploadUrl>") or type(e).__name__
+        detail = _HIDDEN.redact(str(e)).replace(upload_url, "<uploadUrl>") or type(e).__name__
         return f"Error: the upload of {pdf.name} to {check.month_path} failed: {detail}"
-    # The name OneDrive reports wins over the predicted one: an unfinished session also holds a name.
-    name = item.get("name") or pdf.name
-    lines = [f"Uploaded to OneDrive: {check.month_path}/{name} ({item.get('size', len(pdf.content))} bytes)."]
+    lines = [f"Uploaded to OneDrive: {check.month_path}/{name} ({size} bytes)."]
     if name != pdf.name:
         lines.append(f"OneDrive gave it this name because the name {pdf.name} is already taken there.")
     return "\n".join(lines)
@@ -586,7 +596,7 @@ def build_upload_to_onedrive(put: PutToSession) -> Callable[[str, Mapping[str, B
             except ArchiveError as e:
                 return f"Error: {e}"
             except Exception as e:
-                return f"Error: {type(e).__name__}: {e}"
+                return f"Error: {type(e).__name__}: {_HIDDEN.redact(str(e))}"
 
         return StructuredTool.from_function(
             coroutine=upload_to_onedrive,

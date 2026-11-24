@@ -57,6 +57,13 @@ def _ms365_settings(settings: Settings) -> dict[str, str]:
     return {name: value for name, value in values.items() if value}
 
 
+def _downloads_dir(settings: Settings) -> dict[str, str]:
+    """The Downloads folder the agent's Processed check uses (INFORMER_DOWNLOADS_DIR, also from the
+    agent's `.env`), so the server checks the same folder: the stand-in reads no `.env`, and the
+    agent's settings may not be the ones the real server would read itself."""
+    return {"INFORMER_DOWNLOADS_DIR": settings.informer_downloads_dir} if settings.informer_downloads_dir else {}
+
+
 def informer_server(settings: Settings = default_settings) -> McpServer:
     """The real server, over stdio, against Informer API v2 with ITtopia's API key."""
     if not (settings.informer_api_key and settings.informer_security_code):
@@ -78,6 +85,7 @@ def informer_server(settings: Settings = default_settings) -> McpServer:
                 "INFORMER_API_KEY": settings.informer_api_key,
                 "INFORMER_SECURITY_CODE": settings.informer_security_code,
                 **_ms365_settings(settings),
+                **_downloads_dir(settings),
             },
         },
         read_allowlist=READ_TOOLS,
@@ -85,7 +93,7 @@ def informer_server(settings: Settings = default_settings) -> McpServer:
     )
 
 
-def informer_fixture_server() -> McpServer:
+def informer_fixture_server(settings: Settings = default_settings) -> McpServer:
     """The same server against the Fixture world's fake Informer API (fixture_world.informer)."""
     return McpServer(
         name=NAME,
@@ -96,7 +104,7 @@ def informer_fixture_server() -> McpServer:
             # The Fixture world's own settings and the system basics: never the real Informer settings.
             "env": {
                 **fixture_environment(),
-                **inherited(["INFORMER_DOWNLOADS_DIR"]),
+                **_downloads_dir(settings),
                 "INFORMER_MS365_PACKAGE": ms365_mcp.PACKAGE,  # for the login command it names
             },
         },

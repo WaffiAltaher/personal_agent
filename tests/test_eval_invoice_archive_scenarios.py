@@ -82,8 +82,9 @@ def test_without_an_archive_expectation_added_files_are_not_graded():
     assert score_outcome(scenario, [], final_answer="", archived={f"{OCTOBER}/x.pdf": b"%PDF-"}).passed
 
 
-def test_a_drive_failure_is_transient_only_and_takes_no_times():
+def test_a_drive_failure_is_transient_or_upload_only_and_takes_no_times():
     assert FailureInjection(server="drive", mode="transient").server == "drive"
+    assert FailureInjection(server="drive", mode="upload").mode == "upload"
     with pytest.raises(ValueError):
         FailureInjection(server="drive", mode="auth")
     with pytest.raises(ValueError):
@@ -151,8 +152,8 @@ RIGHT_SCRIPTS = {
     ],
     "processed-list-by-month": [
         _calls(("ms365_list_invoice_archive", {"year": 2026, "month": 10})),
-        _answer(f"October 2026 holds CH-2026-1044.pdf.\nUploaded to Informer: no · Uploaded to OneDrive: "
-                f"yes ({OCTOBER}/CH-2026-1044.pdf), matched names only"),
+        _answer("The Invoice archive's October 2026 folder holds CH-2026-1044.pdf and kpn-factuur-123456.pdf. "
+                "I matched names only: the contents were not compared."),
     ],
     "onedrive-name-clash-same-contents": [
         _calls(("read_pdf_text", {"path": "Factuur.pdf"})),
@@ -176,7 +177,7 @@ RIGHT_SCRIPTS = {
         _calls(("informer_upload_purchase_invoice", {"path": HOSTING}),
                ("ms365_upload_to_onedrive", {"path": HOSTING, "invoice_date": "2026-10-05",
                                              "target_path": HOSTING_TARGET})),
-        _answer("The Upload to Informer went through; OneDrive answered 503 Service Unavailable. "
+        _answer("The Upload to Informer went through; OneDrive is temporarily unavailable (503). "
                 "Shall I do the Upload to OneDrive on its own later?\n"
                 "Uploaded to Informer: yes (2026-10-07) · Uploaded to OneDrive: no"),
     ],
@@ -206,7 +207,7 @@ async def test_each_archive_scenario_passes_a_scripted_model_that_does_the_right
 
 TOOL_FACTS = {  # scenario -> (tool, a line its output must hold): the seeded world backs the answer
     "processed-check-by-file": ("ms365_check_invoice_archive", f"Invoice archive as {OCTOBER}/kpn-factuur-123456.pdf"),
-    "processed-list-by-month": ("ms365_list_invoice_archive", "CH-2026-1044.pdf"),
+    "processed-list-by-month": ("ms365_list_invoice_archive", "kpn-factuur-123456.pdf"),
     "onedrive-name-clash-same-contents": ("ms365_check_invoice_archive",
                                           f"Invoice archive as {ADMIN}/2026/September/Factuur.pdf"),
     "onedrive-name-clash-different-contents": ("ms365_check_invoice_archive", KPN_RENAMED),
@@ -284,15 +285,34 @@ async def test_the_name_clash_approval_shows_the_renamed_target_and_the_seeded_f
 
 
 @pytest.mark.asyncio
-async def test_the_drive_failure_fails_only_the_drive_and_the_informer_upload_is_sent(scripted_model):
+async def test_the_drive_failure_fails_only_the_upload_to_onedrive_and_the_informer_upload_is_sent(scripted_model):
     run = await _run("process-drive-failure", RIGHT_SCRIPTS["process-drive-failure"], scripted_model)
 
-    status = {c.name: c.status for c in run.tool_calls}
-    assert status["ms365_check_invoice_archive"] == "error"
+    [check] = [c for c in run.tool_calls if c.name == "ms365_check_invoice_archive"]
+    assert check.status == "success" and check.output.startswith("Not Processed")
     assert run.outcome.upload_count == 1
-    upload = next(c for c in run.tool_calls if c.name == "ms365_upload_to_onedrive")
-    assert "503" in upload.output
+    [upload] = [c for c in run.tool_calls if c.name == "ms365_upload_to_onedrive"]
+    assert upload.output.startswith("Error:") and "503" in upload.output
     assert run.outcome.archived_files == []
+
+
+@pytest.mark.asyncio
+async def test_a_drive_failure_answer_that_doesnt_offer_the_upload_to_onedrive_on_its_own_fails(scripted_model):
+    script = [*RIGHT_SCRIPTS["process-drive-failure"][:-1],
+              _answer("The Upload to Informer went through; OneDrive is temporarily unavailable (503).\n"
+                      "Uploaded to Informer: yes (2026-10-07) · Uploaded to OneDrive: no")]
+    run = await _run("process-drive-failure", script, scripted_model)
+
+    assert not run.passed
+
+
+@pytest.mark.asyncio
+async def test_a_drive_failure_run_that_proposes_only_the_informer_upload_fails(scripted_model):
+    script = list(RIGHT_SCRIPTS["process-drive-failure"])
+    script[2] = _calls(("informer_upload_purchase_invoice", {"path": HOSTING}))
+    run = await _run("process-drive-failure", script, scripted_model)
+
+    assert not run.passed
 
 
 @pytest.mark.asyncio

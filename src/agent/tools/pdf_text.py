@@ -7,9 +7,9 @@ from langchain_core.tools import StructuredTool, tool
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
 
-from agent.tools.filesystem import _inside_files_root
+from agent.tools.filesystem import inside_files_root
 
-PDF_MAGIC = b"%PDF-"
+PDF_MAGIC = b"%PDF-"  # the first bytes of every PDF; the Invoice archive's file rules use it too
 MAX_PAGES = 3  # an invoice date is printed on the first page; the next ones only add context
 MAX_BYTES = 25 * 1024 * 1024  # the largest PDF an Upload to OneDrive takes
 MAX_CHARS = 20_000  # the text handed back, like read_file's cap on what enters the context
@@ -68,7 +68,7 @@ def read_pdf_text(path: str) -> str:
 # folder) like fixture_read_file: a path outside it is reported as not found.
 
 def _read_fixture_pdf_text(path: str) -> str:
-    resolved = _inside_files_root(path)
+    resolved = inside_files_root(path)
     if resolved is None:
         return f"Error: file not found: {Path(path).expanduser()}"
     return read_pdf_text.func(str(resolved))

@@ -27,7 +27,8 @@ An injected failure is switched on once the tools are loaded, so it hits the run
 - ms365: a `fixture_world.ms365.Failure` mode; `times` limits it to the next N tool calls.
 - informer: a `fixture_world.informer_api.Failure` mode, on every request (no `times`).
 - handover: the MS365 stand-in's send failure switch (`transient`), on every upload (no `times`).
-- drive: the MS365 stand-in's drive failure switch (`transient`), on every drive tool call (no `times`).
+- drive: the MS365 stand-in's drive failure switch (no `times`): `transient` on every drive tool
+  call, `upload` only on starting an upload session (the Processed check still answers).
 """
 
 import json
@@ -37,7 +38,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 from fixture_world.informer_api import Failure as InformerFailure
-from fixture_world.ms365 import Failure as Ms365Failure
+from fixture_world.ms365 import DRIVE_FAILURE_MODES, Failure as Ms365Failure
 
 FORMAT_VERSION = 1
 DEFAULT_DATASET = Path(__file__).parent / "datasets" / "scenarios.json"
@@ -59,8 +60,9 @@ class FailureInjection(_Strict):
     @model_validator(mode="after")
     def _known_mode(self):
         if self.server in ("handover", "drive"):
-            if self.mode != "transient":
-                raise ValueError(f"unknown {self.server} failure mode {self.mode!r}; one of ['transient']")
+            known = list(DRIVE_FAILURE_MODES) if self.server == "drive" else ["transient"]
+            if self.mode not in known:
+                raise ValueError(f"unknown {self.server} failure mode {self.mode!r}; one of {known}")
             if self.times is not None:
                 raise ValueError(f"a {self.server} failure applies to every attempt; it takes no 'times'")
             return self

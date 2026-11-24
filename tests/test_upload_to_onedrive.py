@@ -256,6 +256,24 @@ async def test_the_drive_failure_switch_fails_the_upload_and_nothing_else(drive_
     assert "Error" not in mail and "503" not in mail
 
 
+@pytest.fixture
+def upload_failing(monkeypatch):
+    monkeypatch.setenv(DRIVE_FAILURE_ENV, "upload")
+
+
+@pytest.mark.asyncio
+async def test_the_upload_failure_switch_fails_only_the_upload_session_so_the_processed_check_answers(
+        upload_failing, tools, downloads, drive):
+    path = _new_invoice(downloads, "hosting.pdf", "Hosting")
+
+    check = await tools["ms365_check_invoice_archive"].ainvoke({"path": str(path), "invoice_date": "2027-03-02"})
+    result = await _upload(tools, path, "2027-03-02", f"{ARCHIVE}/2027/March/hosting.pdf")
+
+    assert check.startswith("Not Processed")
+    assert result.startswith("Error:") and "503" in result
+    assert _added(drive) == {}
+
+
 @pytest.mark.asyncio
 async def test_a_failed_put_is_the_uploads_error_without_the_upload_url(drive, downloads):
     seen: list[str] = []
@@ -385,3 +403,41 @@ async def test_a_failed_put_deletes_the_session_and_never_names_the_upload_url(c
     assert "SECRET" not in str(failed.value)
     assert failed.value.__cause__ is None and failed.value.__context__ is None
     assert "SECRET" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_httpcores_log_lines_naming_the_upload_url_are_dropped(caplog):
+    _log_everything(caplog)
+
+    def put_answer(request: httpx.Request) -> httpx.Response:
+        # httpcore logs on child loggers (httpcore.http11, httpcore.connection, ...) at DEBUG.
+        logging.getLogger("httpcore.http11").debug("send_request_headers.started url=%s", request.url)
+        logging.getLogger("httpcore").debug("request to %s", request.url)
+        return httpx.Response(201, json={"id": "01NEW", "name": "hosting.pdf"})
+
+    await httpx_put(UPLOAD_URL, PDF, transport=_transport([], put_answer))
+
+    assert "SECRET" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_put_answer_failing_with_the_upload_url_is_the_uploads_error_without_it(drive, downloads):
+    seen: list[str] = []
+
+    class Item(dict):
+        def get(self, key, default=None):
+            raise RuntimeError(f"unexpected answer from {seen[0]}")
+
+    async def odd_put(upload_url: str, content: bytes) -> dict:
+        seen.append(upload_url)
+        return Item()
+
+    server = replace(ms365_fixture_server(), wrappers=(upload_to_onedrive(odd_put),))
+    [upload] = [t for t in await load_mcp_server(server) if t.name == "ms365_upload_to_onedrive"]
+    path = _new_invoice(downloads, "hosting.pdf", "Hosting")
+
+    result = await upload.ainvoke({"path": str(path), "invoice_date": "2027-03-02",
+                                   "target_path": f"{ARCHIVE}/2027/March/hosting.pdf"})
+
+    assert result.startswith("Error:")
+    assert seen and seen[0] not in result

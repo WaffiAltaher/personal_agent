@@ -44,8 +44,10 @@ addressed `{parentId}:/{file name}:` in the drive's hidden `.upload-sessions/` f
 with `name` is refused with 400, as Graph refused it in the probe); its `uploadUrl` is not a real
 URL, and `put_upload_session`, the Fixture world's PUT, completes it in the agent's process,
 applying `rename` under the drive's lock. Read the drive back with `archived_files()`.
-FIXTURE_WORLD_MS365_DRIVE_FAILURE=transient fails only the drive tools, with a Graph 503. The
-agent binds none of the drive tools: its Invoice archive wrappers call them (ADR-020).
+FIXTURE_WORLD_MS365_DRIVE_FAILURE=transient fails only the drive tools, with a Graph 503;
+FIXTURE_WORLD_MS365_DRIVE_FAILURE=upload fails only `create-upload-session`, so the Processed
+check still answers and only the Upload to OneDrive fails. The agent binds none of the drive
+tools: its Invoice archive wrappers call them (ADR-020).
 
 Run over stdio with `python -m fixture_world.ms365`.
 
@@ -436,11 +438,14 @@ def _graph_api_error(status: int, reason: str, code: str, message: str) -> CallT
                           _meta={"http_status": status, "error_code": code})
 
 
-DRIVE_FAILURE_ENV = "FIXTURE_WORLD_MS365_DRIVE_FAILURE"  # "transient": only the drive tools answer Graph 503
+# "transient": only the drive tools answer Graph 503; "upload": only create-upload-session does.
+DRIVE_FAILURE_ENV = "FIXTURE_WORLD_MS365_DRIVE_FAILURE"
+DRIVE_FAILURE_MODES = ("transient", "upload")
 
 
-def _drive_failure() -> CallToolResult | None:
-    if os.environ.get(DRIVE_FAILURE_ENV) == "transient":
+def _drive_failure(tool: str) -> CallToolResult | None:
+    mode = os.environ.get(DRIVE_FAILURE_ENV)
+    if mode == "transient" or (mode == "upload" and tool == "create-upload-session"):
         return _graph_api_error(503, "Service Unavailable", "serviceNotAvailable",
                                 "The service is temporarily unavailable. Please retry later.")
     return None
@@ -781,7 +786,7 @@ def create_server(world: Ms365World | None = None) -> FastMCP:
         def register(fn):
             @functools.wraps(fn)
             def tool(*args, **kwargs):
-                return _drive_failure() or fn(*args, **kwargs)
+                return _drive_failure(name) or fn(*args, **kwargs)
             return graph_tool(name, description, read_only)(tool)
         return register
 

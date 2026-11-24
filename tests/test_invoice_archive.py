@@ -161,8 +161,8 @@ async def _list_archive(tools, **args) -> str:
 @pytest.mark.asyncio
 async def test_the_archive_listing_is_bound_as_a_read_and_the_drive_tools_are_not(tools):
     assert is_read(tools["ms365_list_invoice_archive"])
-    assert "ms365_list-drives" not in tools
-    assert "ms365_list-folder-files" not in tools
+    for drive_tool in ("list-drives", "list-folder-files", "create-onedrive-folder", "create-upload-session"):
+        assert f"ms365_{drive_tool}" not in tools
     assert "names" in tools["ms365_list_invoice_archive"].description.lower()
 
 

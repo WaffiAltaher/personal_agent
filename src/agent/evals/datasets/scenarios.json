@@ -316,11 +316,11 @@
     {
       "id": "processed-list-by-month",
       "workflow": "invoice archive",
-      "input": "Is CloudHost's October 2026 invoice CH-2026-1044 already Processed?",
+      "input": "Which of my October 2026 Purchase invoices are already Processed?",
       "approval": "reject",
       "required_tools": ["ms365_list_invoice_archive"],
       "forbidden_tools": ["informer_upload_purchase_invoice", "ms365_upload_to_onedrive", "create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
-      "expected_facts": ["CH-2026-1044.pdf", "matched names only"],
+      "expected_facts": ["CH-2026-1044.pdf", "kpn-factuur-123456.pdf", "matched names only"],
       "require_facts": true,
       "expected_outcome": {"upload_count": 0, "archived_files": {}, "approvals": 0}
     },
@@ -365,11 +365,12 @@
       "workflow": "invoice archive",
       "input": "Process the Purchase invoice hosting-2026-10.pdf from my Downloads.",
       "approval": "approve",
-      "inject_failure": {"server": "drive", "mode": "transient"},
-      "required_tools": ["read_pdf_text", "informer_check_purchase_invoice", "informer_upload_purchase_invoice"],
-      "ordering": [{"before": "informer_check_purchase_invoice", "after": "informer_upload_purchase_invoice"}],
+      "inject_failure": {"server": "drive", "mode": "upload"},
+      "required_tools": ["read_pdf_text", "informer_check_purchase_invoice", "ms365_check_invoice_archive", "informer_upload_purchase_invoice", "ms365_upload_to_onedrive"],
+      "ordering": [{"before": "informer_check_purchase_invoice", "after": "informer_upload_purchase_invoice"}, {"before": "ms365_check_invoice_archive", "after": "ms365_upload_to_onedrive"}],
       "forbidden_tools": ["create_draft_email", "ms365_create-draft-email", "ms365_send-mail"],
-      "expected_facts": ["503", "unavailable"],
+      "expected_facts": ["unavailable", "Upload to OneDrive", "on its own"],
+      "require_facts": true,
       "expected_outcome": {"upload_count": 1, "upload_file": "hosting-2026-10.pdf", "archived_files": {}, "require_failure_reported": true}
     }
   ]

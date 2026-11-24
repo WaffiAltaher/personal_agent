@@ -279,7 +279,7 @@ async def run_scenario(
             fixture_ms365.DRAFTS_ENV: str(drafts_path),
             fixture_informer.UPLOAD_LOG_ENV: str(upload_log),
             fixture_ms365.DRIVE_ENV: str(drive_path),
-            fixture_ms365.DRIVE_FAILURE_ENV: "transient" if failure and failure.server == "drive" else None,
+            fixture_ms365.DRIVE_FAILURE_ENV: failure.mode if failure and failure.server == "drive" else None,
             fixture_ms365.DRAFT_FAILURE_ENV: None,
             fixture_ms365.SENT_ENV: str(sent_path),
             fixture_ms365.FAILURE_ENV: None,

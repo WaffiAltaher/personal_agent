@@ -43,7 +43,6 @@ from agent.tools.ms365_invoice_archive import (
     httpx_put,
     upload_to_onedrive,
 )
-from fixture_world.ms365 import put_upload_session
 
 NAME = "ms365"
 PACKAGE = "@softeria/ms-365-mcp-server@0.159.1"  # exact pin; review the release diff before bumping (ADR-005)
@@ -190,6 +189,8 @@ def enabled_tools_pattern() -> str:
 
 def ms365_fixture_server() -> McpServer:
     """The Fixture world's stand-in (fixture_world.ms365), over stdio like the real one."""
+    from fixture_world.ms365 import put_upload_session  # here, so production never imports the Fixture world
+
     return McpServer(
         name=NAME,
         connection={

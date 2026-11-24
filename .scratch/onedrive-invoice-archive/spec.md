@@ -18,7 +18,7 @@ Three agent-side tools on the MS365 server, fixed to the Invoice archive, over t
 - a read, the Processed check, that says whether a local PDF's contents are already in the month folder of its invoice date, and where an Upload to OneDrive would put it;
 - a Write action, Upload to OneDrive, that puts a local PDF in the month folder of its invoice date, creating a missing year or month folder, never overwriting, with the bytes sent by agent code through a Graph upload session.
 
-A local read tool extracts a PDF's text so that the model can read the invoice date. A Process is the Upload to Informer and the Upload to OneDrive proposed together under one Approval and run concurrently. A new prompt version asks "Process instead?" before a single upload when the other one is missing, and ends every answer about a Purchase invoice with its status. The owner logs in to Microsoft once more, because the enabled drive tools add the `Files.ReadWrite` scope the Azure app already grants.
+A local read tool extracts a PDF's text so that the model can read the invoice date. A Process is the Upload to Informer and the Upload to OneDrive proposed together under one Approval and run concurrently. A new prompt version asks "Process instead?" before a single upload when the other one is missing, and ends every answer about a Purchase invoice with its status.
 
 ## User Stories
 

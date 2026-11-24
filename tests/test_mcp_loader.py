@@ -8,6 +8,8 @@ that isn't configured or fails to start is reported in a notice, and the rest st
 import json
 import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -45,7 +47,7 @@ def _connections(settings: Settings) -> dict[str, dict]:
         "ms365": ms365_server(settings).connection,
         "ms365 stand-in": ms365_fixture_server().connection,
         "informer": informer_server(settings).connection,
-        "informer stand-in": informer_fixture_server().connection,
+        "informer stand-in": informer_fixture_server(settings).connection,
     }
 
 
@@ -273,3 +275,25 @@ def test_the_drive_tools_are_enabled_but_never_exposed_or_read_classified():
         assert drive_tool in ENABLED_TOOLS and pattern.search(drive_tool)
         assert drive_tool not in EXPOSED_TOOLS and drive_tool not in READ_TOOLS
     assert not pattern.search("upload-file-content")
+
+
+@pytest.mark.parametrize("builder", [informer_server, informer_fixture_server], ids=["informer", "informer stand-in"])
+def test_the_informer_server_checks_the_downloads_folder_the_agent_checks(clean_environment, builder):
+    # The agent's Processed check reads INFORMER_DOWNLOADS_DIR from its settings (also from `.env`);
+    # the stand-in reads no `.env`, and a shell value must not stand in for the agent's.
+    clean_environment.setenv("INFORMER_DOWNLOADS_DIR", "/from/the/shell")
+    settings = _real_settings().model_copy(update={"informer_downloads_dir": "/the/agents/downloads"})
+
+    env = builder(settings).connection["env"]
+
+    assert env["INFORMER_DOWNLOADS_DIR"] == "/the/agents/downloads"
+
+
+def test_importing_the_ms365_server_module_imports_no_ms365_stand_in():
+    script = "import sys, agent.tools.ms365_mcp; print('fixture_world.ms365' in sys.modules)"
+    env = {**os.environ, "GOOGLE_API_KEY": "x", "TAVILY_API_KEY": "x",
+           "LANGFUSE_PUBLIC_KEY": "x", "LANGFUSE_SECRET_KEY": "x"}
+
+    out = subprocess.run([sys.executable, "-c", script], env=env, capture_output=True, text=True, check=True)
+
+    assert out.stdout.strip() == "False"
