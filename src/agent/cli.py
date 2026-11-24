@@ -19,6 +19,7 @@ Use ``--fixtures`` for the seeded Fixture world (no Google login check).
 """
 
 import asyncio
+import faulthandler
 import signal
 import sys
 import uuid
@@ -430,6 +431,9 @@ async def main():
 
 
 if __name__ == "__main__":
+    # A native crash (segfault in a C extension) kills the process before any except or finally
+    # runs: print every thread's Python traceback to stderr instead of exiting silently.
+    faulthandler.enable()
     try:
         asyncio.run(main())
     except GraphRecursionError:

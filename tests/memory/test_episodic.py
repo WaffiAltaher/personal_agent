@@ -164,3 +164,28 @@ def test_runs_logged_before_conversations_had_ids_are_still_read(tmp_path):
     assert runs == {"Old question": None, "New question": "t-1",
                     "Untracked question": None, "Another untracked question": None}
     mem.close()
+
+
+def test_parallel_tool_calls_share_the_store_without_crashing(tmp_path):
+    """The graph runs a turn's tool calls in worker threads, so two episodic reads can hit the one
+    store at once. SQLite built THREADSAFE=2 (macOS) segfaults on a connection used by two threads
+    at a time. A subprocess, so a crash fails this test instead of killing the test run."""
+    import subprocess
+    import sys
+
+    script = f"""
+import threading
+from agent.memory.episodic import EpisodicMemory, RunRecord
+mem = EpisodicMemory({str(tmp_path / "test.db")!r})
+for i in range(20):
+    mem.log_run(RunRecord(user_input=f"ITtopia question {{i}}", final_output="answer"))
+def search():
+    for _ in range(500): mem.search_runs("ITtopia", 5)
+def recent():
+    for _ in range(500): mem.get_recent_runs(10)
+threads = [threading.Thread(target=f) for f in (search, recent, search, recent)]
+[t.start() for t in threads]
+[t.join() for t in threads]
+"""
+    done = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=120)
+    assert done.returncode == 0, f"exit {done.returncode}: {done.stderr[-2000:]}"

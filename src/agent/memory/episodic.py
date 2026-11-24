@@ -11,14 +11,27 @@ Past runs are searched with FTS5 (BM25 ranking) over user_input and final_output
 import json
 import re
 import sqlite3
+import threading
 import uuid
 from dataclasses import dataclass, field
+from functools import wraps
 from datetime import datetime, timezone
 from pathlib import Path
 
 from agent.config import settings
 
 _DATE_ONLY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _serialized(method):
+    """Run the method holding the store's lock. The graph runs a turn's tool calls in worker
+    threads, and SQLite built THREADSAFE=2 (macOS) segfaults on one connection used by two
+    threads at a time."""
+    @wraps(method)
+    def locked(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return locked
 
 
 @dataclass
@@ -70,6 +83,7 @@ class EpisodicMemory:
         path = Path(db_path or settings.sqlite_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(path), check_same_thread=False)
+        self._lock = threading.Lock()  # one thread at a time on the connection (see _serialized)
         self._conn.row_factory = sqlite3.Row
         self._create_table()
         self._migrate_schema()
@@ -138,6 +152,7 @@ class EpisodicMemory:
                 )
         self._conn.commit()
 
+    @_serialized
     def log_run(self, run: RunRecord) -> str:
         """Insert a new run record, replacing its Conversation's earlier entry. Returns the run_id.
 
@@ -173,6 +188,7 @@ class EpisodicMemory:
         self._conn.commit()
         return run.id
 
+    @_serialized
     def get_recent_runs(self, n: int = 10) -> list[RunRecord]:
         """Return the n most recent runs, newest first."""
         cursor = self._conn.execute(
@@ -180,6 +196,7 @@ class EpisodicMemory:
         )
         return [self._row_to_record(row) for row in cursor.fetchall()]
 
+    @_serialized
     def search_runs(
         self,
         terms: str,
@@ -232,5 +249,6 @@ class EpisodicMemory:
             thread_id=row["thread_id"] if "thread_id" in keys else None,
         )
 
+    @_serialized
     def close(self) -> None:
         self._conn.close()
