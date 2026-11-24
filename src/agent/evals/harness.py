@@ -2,7 +2,9 @@
 """Runs scenarios through the agent graph against the Fixture world and scores them.
 
 Each scenario run gets a fresh Fixture world: the clock pinned to the seeded date (which the
-model is told as "today" too), its own Drafts file, and the scenario's injected failure. The
+model is told as "today" too), its own Drafts file, its own drive (seeded like the stand-in's,
+EVAL_SEEDED_DRIVE), its own Informer upload log (seeded with the scenario's `informer_uploads`),
+and the scenario's injected failure. The
 tools are loaded as `--fixtures` loads them, the chat model is injected into the graph, and
 every approval prompt is answered with the scenario's approval policy through
 `run_conversation`, as the CLI does with the owner's answer.
@@ -23,6 +25,7 @@ import uuid
 from collections.abc import Awaitable, Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from datetime import datetime, timezone
+from importlib.resources import files
 from pathlib import Path
 
 import agent.memory as memory_module
@@ -58,11 +61,14 @@ from agent.tools.filesystem import (
 from agent.tools.pdf_text import fixture_read_pdf_text, read_pdf_text
 from fixture_world import clock, informer as fixture_informer, ms365 as fixture_ms365
 from fixture_world.pdfs import no_text_pdf, text_pdf
+from informer_mcp.purchase_upload import fingerprint
 
 # Backstop only: the graph's model-call counter enforces settings.max_iterations.
 RECURSION_LIMIT = max(settings.max_iterations * 5 + 10, 40)
 
 EVAL_EPISODIC_SEED = Path(__file__).parent / "fixtures" / "episodic_seed.json"
+EVAL_SEEDED_DRIVE = files("fixture_world") / "data" / "ms365" / "drive"  # each run's drive starts as this
+EVAL_ARCHIVE = "Documents/ittopia/admin"
 EVAL_DOWNLOAD_PDFS: dict[str, bytes] = {
     "supplier-march.pdf": b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n",
     "fail-me.pdf": b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n",
@@ -72,12 +78,23 @@ EVAL_DOWNLOAD_PDFS: dict[str, bytes] = {
         "Totaal te betalen: EUR 48,40",
     ]),
     "scan-factuur.pdf": no_text_pdf(),
+    # A Purchase invoice that is nowhere yet: not in the Invoice archive, not uploaded to Informer.
+    "hosting-2026-10.pdf": text_pdf([
+        "Hosting Noord B.V.", "Factuur", "Factuurnummer: HN-2026-10", "Factuurdatum: 05-10-2026",
+        "Totaal te betalen: EUR 60,50",
+    ]),
+    # Copies of invoices the stand-in's drive is seeded with: the same contents under another name,
+    # and under the same name. (kpn-factuur-123456.pdf above is deliberately a different file under
+    # a name the drive holds too: the name clash with different contents.)
+    "kpn-oktober.pdf": (EVAL_SEEDED_DRIVE / EVAL_ARCHIVE / "2026" / "October" / "kpn-factuur-123456.pdf").read_bytes(),
+    "Factuur.pdf": (EVAL_SEEDED_DRIVE / EVAL_ARCHIVE / "2026" / "September" / "Factuur.pdf").read_bytes(),
 }
 
 
 def _scenario_user_message(scenario: Scenario, downloads_path: Path) -> str:
-    """Include the eval Downloads path for every upload scenario, including reject and failure."""
-    if scenario.workflow == "upload":
+    """Include the eval Downloads path for every upload and invoice archive scenario, including
+    reject and failure."""
+    if scenario.workflow in ("upload", "invoice archive"):
         return f"{scenario.input}\n\n(Downloads folder: {downloads_path})"
     return scenario.input
 
@@ -162,14 +179,23 @@ def _environment(values: dict[str, str | None]) -> Iterator[None]:
 
 
 @contextmanager
-def _agent_folder(folder: Path) -> Iterator[None]:
-    """Point the agent folder setting at `folder` for the block, then restore it."""
-    saved = settings.agent_folder
-    settings.agent_folder = str(folder)
+def _agent_folder(folder: Path, downloads: Path) -> Iterator[None]:
+    """Point the agent folder setting at `folder`, and the Downloads folder the Invoice archive tools
+    accept at `downloads`, for the block, then restore them."""
+    saved = settings.agent_folder, settings.informer_downloads_dir
+    settings.agent_folder, settings.informer_downloads_dir = str(folder), str(downloads)
     try:
         yield
     finally:
-        settings.agent_folder = saved
+        settings.agent_folder, settings.informer_downloads_dir = saved
+
+
+def _seed_informer_uploads(log: Path, uploads: dict[str, str], downloads: Path) -> None:
+    """Write the Informer upload log as if each eval Downloads file had been uploaded on its date."""
+    with log.open("a") as f:
+        for name, uploaded_on in uploads.items():
+            f.write(json.dumps({"fingerprint": fingerprint((downloads / name).read_bytes()),
+                                "date": uploaded_on}) + "\n")
 
 
 def _text(content) -> str:
@@ -235,6 +261,8 @@ async def run_scenario(
     upload_log_path_str: str | None = None
     expected_bytes: dict[str, bytes] | None = None
     saved: dict[str, bytes] = {}
+    archived: dict[str, bytes] = {}
+    expected_archive: dict[str, bytes | None] | None = None
     with tempfile.TemporaryDirectory(prefix="eval-") as workdir:
         work = Path(workdir)
         drafts_path = work / "drafts.jsonl"
@@ -243,10 +271,15 @@ async def run_scenario(
         _seed_eval_downloads(downloads_path)
         agent_folder = downloads_path / "personal_agent"
         switch = fixture_ms365.FailureSwitch(Path(workdir) / "ms365-failure")
+        drive_path = work / "drive"  # seeded from EVAL_SEEDED_DRIVE on first use; nothing carries over
+        upload_log = work / "informer-uploads.jsonl"  # no uploads carry over between runs
+        _seed_informer_uploads(upload_log, scenario.informer_uploads, downloads_path)
         env = {
             clock.TODAY_ENV: clock.SEED_TODAY.isoformat(),
             fixture_ms365.DRAFTS_ENV: str(drafts_path),
-            fixture_informer.UPLOAD_LOG_ENV: str(Path(workdir) / "informer-uploads.jsonl"),  # no uploads carry over between runs
+            fixture_informer.UPLOAD_LOG_ENV: str(upload_log),
+            fixture_ms365.DRIVE_ENV: str(drive_path),
+            fixture_ms365.DRIVE_FAILURE_ENV: "transient" if failure and failure.server == "drive" else None,
             fixture_ms365.DRAFT_FAILURE_ENV: None,
             fixture_ms365.SENT_ENV: str(sent_path),
             fixture_ms365.FAILURE_ENV: None,
@@ -260,7 +293,8 @@ async def run_scenario(
             fixture_ms365.SEND_FAILURE_ENV: failure.mode if failure and failure.server == "handover" else None,
         }
         with (_isolated_eval_episodic(work), fixtures_semantic_memory(), _environment(env),
-              _agent_folder(agent_folder)):
+              _agent_folder(agent_folder, downloads_path)):
+            seeded = set(fixture_ms365.archived_files(fixture_ms365.drive_path()))  # drive_path() seeds it
             tools, notices = await load_tools()
             if failure and failure.server == "ms365":
                 switch.set(failure.mode, failure.times)  # after loading: it hits the run, not startup
@@ -308,6 +342,13 @@ async def run_scenario(
             sent = fixture_ms365.sent_messages(sent_path)
             upload_log_path_str = str(sent_path)
             saved = read_agent_folder(agent_folder)
+            archived = {path: data for path, data in fixture_ms365.archived_files(drive_path).items()
+                        if path not in seeded}
+            if scenario.expected_outcome and scenario.expected_outcome.archived_files:
+                expected_archive = {
+                    path: (downloads_path / name).read_bytes() if (downloads_path / name).is_file() else None
+                    for path, name in scenario.expected_outcome.archived_files.items()
+                }
             if scenario.expected_outcome and scenario.expected_outcome.upload_file:
                 upload_name = scenario.expected_outcome.upload_file
                 # A file the run saved into the agent folder is uploaded from there, wherever the
@@ -333,6 +374,8 @@ async def run_scenario(
         approvals=len(interrupts),
         tool_calls=tool_calls,
         outbound_tools=frozenset(t.name for t in tools if is_outbound_read(t)),
+        archived=archived,
+        expected_archive=expected_archive,
     )
     run = RunResult(
         scenario_id=scenario.id,
