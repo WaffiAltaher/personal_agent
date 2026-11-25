@@ -1,4 +1,5 @@
-"""tests/test_setup_wizard.py — the Informer e-mail step of `scripts/setup_wizard.sh` (ADR-019).
+"""tests/test_setup_wizard.py — the Informer e-mail step of `scripts/setup_wizard.sh` (ADR-019) and the Azure app
+stage's Files.ReadWrite (ADR-020).
 
 The seam is the script itself, run as the owner runs it: a scripted owner answers its prompts, the tools it
 calls (uv, npx, docker, curl, the browser opener, git) are stand-ins on PATH, and `ENV_FILE` is a temp file.
@@ -167,3 +168,13 @@ def test_the_stage_counter_matches_the_stages_shown(wizard):
     stages = [(int(i), int(n)) for i, n in re.findall(r"Stage (\d+)/(\d+)", result.output)]
     assert stages
     assert {total for _, total in stages} == {stages[-1][0]}
+
+
+def test_the_azure_stage_adds_files_readwrite_for_the_invoice_archive(wizard):
+    """A fresh setup grants the delegated Files.ReadWrite the drive tools request (ADR-020)."""
+    result = wizard(BASE_ANSWERS)
+
+    azure = result.output[result.output.index("Azure app") : result.output.index("one-time login")]
+    assert re.search(r"[Ss]earch 'Files\.ReadWrite' → tick it → Add permissions", azure)
+    assert re.search(r"Files\.ReadWrite are listed", azure)
+    assert re.search(r"not Files\.ReadWrite\.All", azure)

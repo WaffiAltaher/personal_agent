@@ -3,6 +3,7 @@ from langchain_core.tools import BaseTool
 
 from agent.tools.classification import action_class, classify_as, outbound_read, read_tool, write_action
 from agent.tools.filesystem import list_directory, read_file
+from agent.tools.pdf_text import read_pdf_text
 from agent.tools.gmail import (
     create_draft_email,
     fixture_create_draft_email,
@@ -30,6 +31,7 @@ from agent.tools.informer import informer_fixture_server, informer_server
 LOCAL_TOOLS = [
     read_tool(read_file),
     read_tool(list_directory),
+    read_tool(read_pdf_text),
     outbound_read(web_search),  # the query leaves the owner's accounts (ADR-017)
     read_tool(list_calendar_events),
     read_tool(get_calendar_event),

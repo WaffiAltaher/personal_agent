@@ -22,6 +22,7 @@ from agent.config import settings
 from agent.graph import build_graph
 from agent.model_binding import bind_agent_tools
 from agent.tools import load_all_tools
+from agent.tools.classification import pre_approval_check
 from agent.tools.classification import is_read
 from fixture_world.clock import SEED_TODAY
 from fixture_world.ms365 import load_seed
@@ -312,3 +313,10 @@ async def test_the_save_pauses_for_approval_and_a_reject_writes_nothing(tools, a
     [shown] = [m for m in result["messages"] if isinstance(m, ToolMessage) and m.tool_call_id == "save"]
     assert "rejected by the user" in shown.content
     assert not agent_folder.exists()
+
+
+@pytest.mark.asyncio
+async def test_the_bound_save_tool_keeps_its_pre_approval_check(tools):
+    check = pre_approval_check(tools["ms365_save_attachment"])
+    assert check is not None
+    assert check({"message_id": "same", "attachment_id": "same", "file_name": "a.pdf"})

@@ -135,7 +135,7 @@ def list_directory(path: str) -> str:
 FILES_ROOT_ENV = "FIXTURE_WORLD_FILES_ROOT"
 
 
-def _inside_files_root(path: str) -> Path | None:
+def inside_files_root(path: str) -> Path | None:
     """`path` resolved inside the files root, or None if it is outside it or no root is set."""
     root = os.environ.get(FILES_ROOT_ENV)
     if not root:
@@ -147,14 +147,14 @@ def _inside_files_root(path: str) -> Path | None:
 
 
 def _read_fixture_file(path: str) -> str:
-    resolved = _inside_files_root(path)
+    resolved = inside_files_root(path)
     if resolved is None:
         return f"Error: file not found: {Path(path).expanduser()}"
     return read_file.func(str(resolved))
 
 
 def _list_fixture_directory(path: str) -> str:
-    resolved = _inside_files_root(path)
+    resolved = inside_files_root(path)
     if resolved is None:
         return f"Error: path not found: {Path(path).expanduser()}"
     return list_directory.func(str(resolved))

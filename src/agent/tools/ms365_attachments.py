@@ -20,10 +20,12 @@ import uuid
 from collections.abc import Mapping
 
 from langchain_core.messages import ToolMessage
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel, Field
 
 from agent.tools import attachment_save
+from agent.tools.classification import with_pre_approval_check
 from agent.tools.mcp_loader import ToolWrapper
 
 OUTLOOK_FOLDER = "outlook"  # this mailbox's subfolder of the agent folder
@@ -72,14 +74,14 @@ def _text(message: ToolMessage) -> str:
     return "".join(block.get("text", "") if isinstance(block, dict) else str(block) for block in content)
 
 
-async def _call(tool: BaseTool, args: dict) -> tuple[bool, str]:
-    """Call a server tool; (succeeded, its text)."""
+async def call_server_tool(tool: BaseTool, args: dict, config: RunnableConfig | None = None) -> tuple[bool, str]:
+    """Call a server tool; (succeeded, its text). It inherits the run's callbacks unless `config` says otherwise."""
     message = await tool.ainvoke({
         "type": "tool_call",
         "id": f"call-{uuid.uuid4().hex}",
         "name": tool.name,
         "args": args,
-    })
+    }, config)
     return message.status != "error", _text(message)
 
 
@@ -101,7 +103,7 @@ async def _save(
     file_name: str,
     include_inline: bool,
 ) -> str:
-    listed_ok, listed = await _call(tools[LIST_TOOL], {"messageId": message_id})
+    listed_ok, listed = await call_server_tool(tools[LIST_TOOL], {"messageId": message_id})
     if not listed_ok:
         return f"Error: could not list the attachments of message {message_id}: {listed}"
     matches = [a for a in json.loads(listed).get("value", []) if a.get("id") == attachment_id]
@@ -118,7 +120,7 @@ async def _save(
         return refusal
     temporary = attachment_save.temporary_path(OUTLOOK_FOLDER)
     try:
-        downloaded, text = await _call(tools[DOWNLOAD_TOOL], {
+        downloaded, text = await call_server_tool(tools[DOWNLOAD_TOOL], {
             "target": f"/me/messages/{message_id}/attachments/{attachment_id}/$value",
             "outputPath": str(temporary),
         })
@@ -127,6 +129,20 @@ async def _save(
         return attachment_save.place_file(temporary, real_name, OUTLOOK_FOLDER)
     finally:
         temporary.unlink(missing_ok=True)  # place_file removes it too; this covers every other way out
+
+
+def same_message_and_attachment_id(args: dict) -> str | None:
+    """Refuse the attachment's ID passed as the message ID too, before the owner is asked.
+
+    An Outlook attachment ID starts with almost all of its message's ID, so the model can copy
+    the wrong one (it did on 2026-11-25, and the corrected call needed a second Approval).
+    """
+    if args.get("message_id") and args.get("message_id") == args.get("attachment_id"):
+        return (
+            "Error: message_id and attachment_id are the same value. message_id must be the "
+            "Outlook message's ID (the `id` from list-mail-messages or get-mail-message), not the attachment's."
+        )
+    return None
 
 
 def build_save_attachment(name: str, tools: Mapping[str, BaseTool]) -> BaseTool:
@@ -140,11 +156,14 @@ def build_save_attachment(name: str, tools: Mapping[str, BaseTool]) -> BaseTool:
         except Exception as e:
             return f"Error: {type(e).__name__}: {e}"
 
-    return StructuredTool.from_function(
-        coroutine=save_attachment,
-        name=name,
-        description=DESCRIPTION,
-        args_schema=SaveOutlookAttachmentInput,
+    return with_pre_approval_check(
+        StructuredTool.from_function(
+            coroutine=save_attachment,
+            name=name,
+            description=DESCRIPTION,
+            args_schema=SaveOutlookAttachmentInput,
+        ),
+        same_message_and_attachment_id,
     )
 
 

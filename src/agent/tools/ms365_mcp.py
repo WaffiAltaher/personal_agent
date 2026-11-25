@@ -12,8 +12,17 @@ scopes it requests to these tools, so it asks for no Mail.Send; the token it get
 carry every permission granted to the app, ADR-019) and by the loader, by name, whatever
 annotations the server sets.
 
+With ENABLED_TOOLS the server requests the delegated Mail.Read, Mail.ReadWrite (Drafts),
+Calendars.Read, Contacts.Read, MailboxSettings.Read and User.Read, and, for the drive tools,
+Files.ReadWrite (it collapses Files.Read into it, ADR-020). The Azure app grants each of them
+(the setup wizard's Azure app stage).
+
 The loader also binds `ms365_save_attachment`, the agent's own Write action over the server's
-`download-bytes-to-file` (ADR-015), in place of that raw tool.
+`download-bytes-to-file` (ADR-015), in place of that raw tool, and `ms365_list_invoice_archive`
+and `ms365_check_invoice_archive` (the Processed check), the agent's own reads over the drive
+tools, and `ms365_upload_to_onedrive`, its Write action over `create-upload-session`, all fixed to
+the Invoice archive (ADR-020). The upload's PUT of the bytes is agent code: httpx against
+OneDrive, the Fixture world's own against the stand-in.
 """
 
 import sys
@@ -23,6 +32,17 @@ from agent.config import Settings, settings as default_settings
 from agent.tools.mcp_environment import fixture_environment, system_environment
 from agent.tools.mcp_loader import LoginCheck, McpServer
 from agent.tools.ms365_attachments import DOWNLOAD_TOOL, SAVE_ATTACHMENT
+from agent.tools.ms365_invoice_archive import (
+    CHECK_INVOICE_ARCHIVE,
+    CREATE_FOLDER_TOOL,
+    LIST_DRIVES_TOOL,
+    LIST_FOLDER_TOOL,
+    LIST_INVOICE_ARCHIVE,
+    UPLOAD_SESSION_TOOL,
+    PutToSession,
+    httpx_put,
+    upload_to_onedrive,
+)
 
 NAME = "ms365"
 PACKAGE = "@softeria/ms-365-mcp-server@0.159.1"  # exact pin; review the release diff before bumping (ADR-005)
@@ -75,8 +95,11 @@ DRAFT_TOOLS = frozenset({"create-draft-email", "create-reply-draft"})
 EXPOSED_TOOLS = READ_TOOLS | DRAFT_TOOLS
 
 # What the server enables: the exposed tools, plus download-bytes-to-file, which only the
-# agent's own ms365_save_attachment calls (it is a GET: no new Graph scope). Never bound.
-ENABLED_TOOLS = EXPOSED_TOOLS | {DOWNLOAD_TOOL}
+# agent's own ms365_save_attachment calls (it is a GET: no new Graph scope), and the drive tools
+# the Invoice archive wrappers call (they add Files.ReadWrite, ADR-020). Never bound. Never
+# upload-file-content: it overwrites without warning and carries the bytes in the call.
+DRIVE_TOOLS = frozenset({LIST_DRIVES_TOOL, LIST_FOLDER_TOOL, CREATE_FOLDER_TOOL, UPLOAD_SESSION_TOOL})
+ENABLED_TOOLS = EXPOSED_TOOLS | {DOWNLOAD_TOOL} | DRIVE_TOOLS
 
 # Login and account management (login, logout, verify-login, list-/select-/remove-account)
 # are not in EXPOSED_TOOLS, so they stay out of the model's reach. The real server serves
@@ -103,15 +126,21 @@ TRANSIENT_ERRORS = (r"Microsoft Graph API error: (429|5\d\d)\b",)
 
 
 # Which tools the model sees and how they are classified, identical for the real server and the
-# stand-in. Reads are classified by name, not by readOnlyHint, so no annotation can turn a
-# Draft tool into an unapproved read.
-_TOOL_POLICY = dict(
-    exposed_tools=EXPOSED_TOOLS,
-    read_allowlist=READ_TOOLS,
-    login=LOGIN,
-    transient_errors=TRANSIENT_ERRORS,
-    wrappers=(SAVE_ATTACHMENT,),  # bound in place of download-bytes-to-file
-)
+# stand-in (only the upload's PUT differs). Reads are classified by name, not by readOnlyHint, so
+# no annotation can turn a Draft tool into an unapproved read.
+def _tool_policy(put: PutToSession) -> dict:
+    return dict(
+        exposed_tools=EXPOSED_TOOLS,
+        read_allowlist=READ_TOOLS,
+        login=LOGIN,
+        transient_errors=TRANSIENT_ERRORS,
+        wrappers=(
+            SAVE_ATTACHMENT,  # bound in place of download-bytes-to-file
+            LIST_INVOICE_ARCHIVE,  # a read, bound in place of list-folder-files
+            CHECK_INVOICE_ARCHIVE,  # a read (the Processed check), also in place of list-folder-files
+            upload_to_onedrive(put),  # a Write action, bound in place of create-upload-session
+        ),
+    )
 
 
 def ms365_server(settings: Settings = default_settings) -> McpServer:
@@ -149,7 +178,7 @@ def ms365_server(settings: Settings = default_settings) -> McpServer:
             "env": env,
             "cwd": WORKING_DIRECTORY,
         },
-        **_TOOL_POLICY,
+        **_tool_policy(httpx_put),
     )
 
 
@@ -160,6 +189,8 @@ def enabled_tools_pattern() -> str:
 
 def ms365_fixture_server() -> McpServer:
     """The Fixture world's stand-in (fixture_world.ms365), over stdio like the real one."""
+    from fixture_world.ms365 import put_upload_session  # here, so production never imports the Fixture world
+
     return McpServer(
         name=NAME,
         connection={
@@ -170,5 +201,5 @@ def ms365_fixture_server() -> McpServer:
             "env": fixture_environment(),
             "cwd": WORKING_DIRECTORY,  # as the real server: outside the repo
         },
-        **_TOOL_POLICY,
+        **_tool_policy(put_upload_session),  # its PUT completes the stand-in's upload session
     )

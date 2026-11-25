@@ -8,6 +8,8 @@ that isn't configured or fails to start is reported in a notice, and the rest st
 import json
 import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -45,7 +47,7 @@ def _connections(settings: Settings) -> dict[str, dict]:
         "ms365": ms365_server(settings).connection,
         "ms365 stand-in": ms365_fixture_server().connection,
         "informer": informer_server(settings).connection,
-        "informer stand-in": informer_fixture_server().connection,
+        "informer stand-in": informer_fixture_server(settings).connection,
     }
 
 
@@ -223,3 +225,75 @@ async def test_configured_informer_server_reaches_informer_with_the_credentials(
     assert notices == []
     text = result if isinstance(result, str) else "".join(block["text"] for block in result)
     assert [r["name"] for r in json.loads(text)["relations"]] == ["Noordzee Advies"]
+
+
+def _echo_wrapper(**classification):
+    """A wrapper over the stand-in's verify-login that just echoes, classified as given (or not at all)."""
+    from langchain_core.tools import StructuredTool
+
+    from agent.tools.mcp_loader import ToolWrapper
+
+    def build(name, tools):
+        return StructuredTool.from_function(func=lambda: "echo", name=name, description="Echo.")
+
+    return ToolWrapper(name="echo", replaces="verify-login", build=build, **classification)
+
+
+@pytest.mark.asyncio
+async def test_a_wrapper_with_no_classification_is_bound_as_a_write_action():
+    from dataclasses import replace
+
+    from agent.tools.classification import is_read
+
+    tools, notices = await load_mcp_tools([replace(ms365_fixture_server(), wrappers=(_echo_wrapper(),))])
+
+    assert notices == []
+    [echo] = [t for t in tools if t.name == "ms365_echo"]
+    assert not is_read(echo)
+
+
+@pytest.mark.asyncio
+async def test_a_read_wrapper_is_bound_as_a_read():
+    from dataclasses import replace
+
+    from agent.tools.classification import READ, is_read
+
+    tools, notices = await load_mcp_tools([replace(ms365_fixture_server(),
+                                                   wrappers=(_echo_wrapper(classification=READ),))])
+
+    assert notices == []
+    [echo] = [t for t in tools if t.name == "ms365_echo"]
+    assert is_read(echo)
+
+
+def test_the_drive_tools_are_enabled_but_never_exposed_or_read_classified():
+    # Only the Invoice archive wrappers call them (ADR-020); upload-file-content overwrites, so it never is.
+    from agent.tools.ms365_mcp import ENABLED_TOOLS, enabled_tools_pattern
+
+    pattern = re.compile(enabled_tools_pattern(), re.IGNORECASE)
+    for drive_tool in ("list-drives", "list-folder-files", "create-onedrive-folder", "create-upload-session"):
+        assert drive_tool in ENABLED_TOOLS and pattern.search(drive_tool)
+        assert drive_tool not in EXPOSED_TOOLS and drive_tool not in READ_TOOLS
+    assert not pattern.search("upload-file-content")
+
+
+@pytest.mark.parametrize("builder", [informer_server, informer_fixture_server], ids=["informer", "informer stand-in"])
+def test_the_informer_server_checks_the_downloads_folder_the_agent_checks(clean_environment, builder):
+    # The agent's Processed check reads INFORMER_DOWNLOADS_DIR from its settings (also from `.env`);
+    # the stand-in reads no `.env`, and a shell value must not stand in for the agent's.
+    clean_environment.setenv("INFORMER_DOWNLOADS_DIR", "/from/the/shell")
+    settings = _real_settings().model_copy(update={"informer_downloads_dir": "/the/agents/downloads"})
+
+    env = builder(settings).connection["env"]
+
+    assert env["INFORMER_DOWNLOADS_DIR"] == "/the/agents/downloads"
+
+
+def test_importing_the_ms365_server_module_imports_no_ms365_stand_in():
+    script = "import sys, agent.tools.ms365_mcp; print('fixture_world.ms365' in sys.modules)"
+    env = {**os.environ, "GOOGLE_API_KEY": "x", "TAVILY_API_KEY": "x",
+           "LANGFUSE_PUBLIC_KEY": "x", "LANGFUSE_SECRET_KEY": "x"}
+
+    out = subprocess.run([sys.executable, "-c", script], env=env, capture_output=True, text=True, check=True)
+
+    assert out.stdout.strip() == "False"

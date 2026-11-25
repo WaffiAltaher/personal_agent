@@ -33,6 +33,22 @@ Attachments: `list-mail-attachments` serves the seeded attachments (`data/ms365/
 and `download-bytes-to-file` writes a seeded attachment's bytes to a local file, refusing a
 relative path and an existing file as the real server does.
 
+Drive: `list-drives` and `list-folder-files` serve one `business` drive, a directory named by
+FIXTURE_WORLD_MS365_DRIVE (default under the temp directory), seeded from `data/ms365/drive/`
+(a `Documents/ittopia/admin/2026/<Month>/` Invoice archive) when the directory doesn't exist yet.
+Items are addressed by id, as the real server addresses them (`driveId`, `driveItemId`, `root` for
+the root); an item's id is derived from its path, so it is the same in every process.
+`create-onedrive-folder` creates one folder (`conflictBehavior` `fail` answers 409
+`nameAlreadyExists` on a taken name), and `create-upload-session` records a session for a new file
+addressed `{parentId}:/{file name}:` in the drive's hidden `.upload-sessions/` folder (an `item`
+with `name` is refused with 400, as Graph refused it in the probe); its `uploadUrl` is not a real
+URL, and `put_upload_session`, the Fixture world's PUT, completes it in the agent's process,
+applying `rename` under the drive's lock. Read the drive back with `archived_files()`.
+FIXTURE_WORLD_MS365_DRIVE_FAILURE=transient fails only the drive tools, with a Graph 503;
+FIXTURE_WORLD_MS365_DRIVE_FAILURE=upload fails only `create-upload-session`, so the Processed
+check still answers and only the Upload to OneDrive fails. The agent binds none of the drive
+tools: its Invoice archive wrappers call them (ADR-020).
+
 Run over stdio with `python -m fixture_world.ms365`.
 
 The server can be switched into a failure mode (down, logged out, tool error, transient
@@ -42,16 +58,19 @@ error, throttled (429), crash) from outside its process; see "failure injection"
 import base64
 import fcntl
 import functools
+import hashlib
 import json
 import os
 import re
+import shutil
 import sys
 import tempfile
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from enum import StrEnum
-from importlib.resources import files
+from importlib.resources import as_file, files
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -329,12 +348,177 @@ def _record_send_call(arguments: dict) -> None:
             log.write(json.dumps({"tool": "send-shared-mailbox-mail", "arguments": arguments}) + "\n")
 
 
+DRIVE_ENV = "FIXTURE_WORLD_MS365_DRIVE"  # the drive's directory; seeded from data/ms365/drive/ if missing
+DEFAULT_DRIVE_PATH = Path(tempfile.gettempdir()) / "fixture_world_ms365_drive"
+DRIVE_ID = "b!FixtureWorldBusinessDrive"
+DRIVE_PAGE_SIZE = 200  # Graph's default page size for a driveItem's children
+
+
+def drive_path() -> Path:
+    """The drive's directory, seeded from the Fixture world the first time it is used."""
+    path = Path(os.environ.get(DRIVE_ENV) or DEFAULT_DRIVE_PATH)
+    with _exclusive(path):
+        if not path.exists():
+            with as_file(files("fixture_world") / "data" / "ms365" / "drive") as seed:
+                shutil.copytree(seed, path)
+    return path
+
+
+def _item_id(relative: Path) -> str:
+    """A stable driveItem id for a path below the drive's root."""
+    return "01FIXTURE" + hashlib.sha1(relative.as_posix().encode()).hexdigest()[:24].upper()
+
+
+def _drive_items(root: Path) -> dict[str, Path]:
+    """Every item of the drive by id, `root` included (also under its alias "root")."""
+    items = {"root": root, _item_id(Path(".")): root}
+    for path in root.rglob("*"):
+        if not any(part.startswith(".") for part in path.relative_to(root).parts):  # lock files, .DS_Store
+            items[_item_id(path.relative_to(root))] = path
+    return items
+
+
+def _visible_children(folder: Path) -> list[Path]:
+    return sorted(p for p in folder.iterdir() if not p.name.startswith("."))
+
+
+def _quick_xor_hash(data: bytes) -> str:
+    """OneDrive's quickXorHash, byte by byte as Microsoft's reference code computes it (160-bit
+    block, each byte XORed in rotated left by 11 bits more than the last, the length XORed into
+    the last 8 bytes, base64). Written apart from the agent's own, which the stand-in never imports."""
+    width, block = 160, 0
+    for index, byte in enumerate(data):
+        shift = (index * 11) % width
+        rotated = byte << shift
+        block ^= (rotated | (rotated >> width)) & ((1 << width) - 1)
+    digest = bytearray(block.to_bytes(width // 8, "little"))
+    for i, length_byte in enumerate(len(data).to_bytes(8, "little")):
+        digest[12 + i] ^= length_byte
+    return base64.b64encode(bytes(digest)).decode("ascii")
+
+
+def _drive_item(root: Path, path: Path) -> dict:
+    """A driveItem as Graph lists it: a folder facet for a folder, a file facet for a file."""
+    relative = path.relative_to(root)
+    stamp = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    parent = relative.parent
+    item = {
+        "id": _item_id(relative),
+        "name": path.name,
+        "createdDateTime": stamp,
+        "lastModifiedDateTime": stamp,
+        "webUrl": f"https://fixture-my.sharepoint.com/personal/jendo/Documents/{relative.as_posix()}",
+        "parentReference": {"driveType": "business", "driveId": DRIVE_ID, "id": _item_id(parent),
+                            "path": "/drive/root:" + ("" if parent == Path(".") else f"/{parent.as_posix()}")},
+    }
+    if path.is_dir():
+        children = _visible_children(path)
+        item["size"] = sum(p.stat().st_size for p in path.rglob("*") if p.is_file() and not p.name.startswith("."))
+        item["folder"] = {"childCount": len(children)}
+    else:
+        item["size"] = path.stat().st_size
+        item["file"] = {"mimeType": "application/pdf" if path.suffix.lower() == ".pdf" else "application/octet-stream",
+                        "hashes": {"quickXorHash": _quick_xor_hash(path.read_bytes())}}  # only this hash, as on OneDrive for Business
+    return item
+
+
+def _odata_list(value: str | list[str] | None) -> str | None:
+    """`select`, `orderby` and `expand` as a comma-separated string (the real server takes either)."""
+    return ",".join(value) if isinstance(value, list) else value
+
+
+_ITEM_NOT_FOUND = ("itemNotFound", "The resource could not be found.")
+
+
 def _graph_api_error(status: int, reason: str, code: str, message: str) -> CallToolResult:
     """A Graph HTTP failure as the real server reports it: the status in the text and in `_meta`."""
     graph_body = json.dumps({"error": {"code": code, "message": message}})
     text = json.dumps({"error": f"Microsoft Graph API error: {status} {reason} - {graph_body}"})
     return CallToolResult(content=[TextContent(type="text", text=text)], isError=True,
                           _meta={"http_status": status, "error_code": code})
+
+
+# "transient": only the drive tools answer Graph 503; "upload": only create-upload-session does.
+DRIVE_FAILURE_ENV = "FIXTURE_WORLD_MS365_DRIVE_FAILURE"
+DRIVE_FAILURE_MODES = ("transient", "upload")
+
+
+def _drive_failure(tool: str) -> CallToolResult | None:
+    mode = os.environ.get(DRIVE_FAILURE_ENV)
+    if mode == "transient" or (mode == "upload" and tool == "create-upload-session"):
+        return _graph_api_error(503, "Service Unavailable", "serviceNotAvailable",
+                                "The service is temporarily unavailable. Please retry later.")
+    return None
+
+
+def _free_name(folder: Path, name: str) -> str:
+    """`name`, or OneDrive's rename of it when taken in `folder` (`<stem> 1<ext>`, `<stem> 2<ext>`, …),
+    names compared case-insensitively. Written apart from the agent's own prediction of it."""
+    taken = {p.name.casefold() for p in folder.iterdir()}
+    candidate, number = name, 0
+    while candidate.casefold() in taken:
+        number += 1
+        candidate = f"{Path(name).stem} {number}{Path(name).suffix}"
+    return candidate
+
+
+# Upload sessions: `create-upload-session` records one as a JSON file in the drive's hidden
+# `.upload-sessions/` folder and answers an `uploadUrl` naming that file. It is not a real URL: the
+# agent's PUT is a seam, and the Fixture world's (`put_upload_session`) completes the session.
+UPLOAD_SESSIONS = ".upload-sessions"
+UPLOAD_URL_SCHEME = "fixture-world-upload://"
+
+
+class UploadSessionError(Exception):
+    """The stand-in's PUT failed, worded as Graph's answer; it never names the uploadUrl."""
+
+
+def _new_upload_session(root: Path, folder: Path, name: str, conflict_behavior: str) -> dict:
+    sessions = root / UPLOAD_SESSIONS
+    sessions.mkdir(exist_ok=True)
+    session = sessions / f"{uuid.uuid4().hex}.json"
+    session.write_text(json.dumps({"folder": folder.relative_to(root).as_posix(), "name": name,
+                                   "conflictBehavior": conflict_behavior}))
+    expires = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return {"expirationDateTime": expires, "nextExpectedRanges": ["0-"],
+            "uploadUrl": f"{UPLOAD_URL_SCHEME}{session}"}
+
+
+async def put_upload_session(upload_url: str, content: bytes) -> dict:
+    """The Fixture world's PUT of the whole file to an upload session: writes the file in the session's
+    folder under its name, applying `conflictBehavior` (`rename` or `fail`) under the drive's lock,
+    and returns the created driveItem, as Graph answers the last range. Raises UploadSessionError."""
+    if not upload_url.startswith(UPLOAD_URL_SCHEME):
+        raise UploadSessionError("400 Bad Request: not an upload session of the Fixture world")
+    session = Path(upload_url.removeprefix(UPLOAD_URL_SCHEME))
+    root = session.parent.parent
+    with _exclusive(root):
+        if not session.is_file():
+            raise UploadSessionError("404 Not Found: itemNotFound (the upload session has expired or was deleted)")
+        if not content:
+            raise UploadSessionError("400 Bad Request: invalidRequest (an empty range)")
+        recorded = json.loads(session.read_text())
+        folder = root / recorded["folder"]
+        name = recorded["name"]
+        if any(p.name.casefold() == name.casefold() for p in folder.iterdir()):
+            if recorded["conflictBehavior"] != "rename":
+                session.unlink()
+                raise UploadSessionError("409 Conflict: nameAlreadyExists (Name already exists)")
+            name = _free_name(folder, name)
+        with open(folder / name, "xb") as f:
+            f.write(content)
+        session.unlink()
+        return _drive_item(root, folder / name)
+
+
+def archived_files(path: Path | str | None = None) -> dict[str, bytes]:
+    """Every file in the stand-in's drive (the Invoice archive and anything else), by its path below
+    the drive's root (`Documents/ittopia/admin/2026/October/<name>`), with its bytes."""
+    root = Path(path) if path is not None else drive_path()
+    if not root.exists():
+        return {}
+    return {p.relative_to(root).as_posix(): p.read_bytes() for p in sorted(root.rglob("*"))
+            if p.is_file() and not any(part.startswith(".") for part in p.relative_to(root).parts)}
 
 
 def _new_draft(fields: dict) -> dict:
@@ -594,6 +778,88 @@ def create_server(world: Ms365World | None = None) -> FastMCP:
     @graph_tool("get-outlook-contact", "Retrieve the properties and relationships of a contact object.")
     def get_outlook_contact(contactId: str, select: str | None = None) -> CallToolResult:
         return _get(world.contacts, contactId, select)
+
+    # --- drive (the agent binds none: its Invoice archive wrappers call them, ADR-020) ---
+
+    def drive_tool(name: str, description: str, read_only: bool = True):
+        """A Graph drive tool: it also fails, alone, when FIXTURE_WORLD_MS365_DRIVE_FAILURE says so."""
+        def register(fn):
+            @functools.wraps(fn)
+            def tool(*args, **kwargs):
+                return _drive_failure(name) or fn(*args, **kwargs)
+            return graph_tool(name, description, read_only)(tool)
+        return register
+
+    @drive_tool("list-drives",
+                "Retrieve the list of Drive resources available for a target User, Group, or Site.")
+    def list_drives(top: int | None = None, skip: int | None = None, search: str | None = None,
+                    filter: str | None = None, count: bool | None = None,
+                    orderby: str | list[str] | None = None, select: str | list[str] | None = None,
+                    expand: str | list[str] | None = None, fetchAllPages: bool | None = None,
+                    skiptoken: str | None = None, includeHeaders: bool | None = None,
+                    excludeResponse: bool | None = None) -> CallToolResult:
+        drive = {"id": DRIVE_ID, "driveType": "business", "name": "Documenten", "description": "",
+                 "owner": {"user": {"displayName": OWNER["displayName"], "email": OWNER["userPrincipalName"]}},
+                 "webUrl": "https://fixture-my.sharepoint.com/personal/jendo/Documents"}
+        return _list([drive], filter=filter, search=search, orderby=_odata_list(orderby),
+                     select=_odata_list(select), top=top, skip=skip)
+
+    @drive_tool("list-folder-files",
+                "Return a collection of DriveItems in the children relationship of a DriveItem. DriveItems "
+                "with a non-null folder or package facet can have one or more child DriveItems.")
+    def list_folder_files(driveId: str, driveItemId: str, top: int | None = None, skip: int | None = None,
+                          search: str | None = None, filter: str | None = None, count: bool | None = None,
+                          orderby: str | list[str] | None = None, select: str | list[str] | None = None,
+                          expand: str | list[str] | None = None, fetchAllPages: bool | None = None,
+                          skiptoken: str | None = None, includeHeaders: bool | None = None,
+                          excludeResponse: bool | None = None) -> CallToolResult:
+        root = drive_path()
+        folder = _drive_items(root).get(driveItemId) if driveId == DRIVE_ID else None
+        if folder is None:
+            return _graph_api_error(404, "Not Found", *_ITEM_NOT_FOUND)
+        children = [_drive_item(root, p) for p in _visible_children(folder)] if folder.is_dir() else []
+        try:
+            found = _order(_search(_filter(children, filter), search), _odata_list(orderby))
+        except BadRequest as exc:
+            return _graph_error("BadRequest", str(exc))
+        if not fetchAllPages:
+            found = found[skip or 0:(skip or 0) + (top or DRIVE_PAGE_SIZE)]
+        return _ok({"value": _select(found, _odata_list(select))})
+
+    @drive_tool("create-onedrive-folder", "Create a OneDrive folder.", read_only=False)
+    def create_onedrive_folder(driveId: str, driveItemId: str, body: dict, includeHeaders: bool | None = None,
+                               excludeResponse: bool | None = None, confirm: bool | None = None) -> CallToolResult:
+        root = drive_path()
+        with _exclusive(root):  # a read-then-write of the drive, shared by concurrent stand-in processes
+            parent = _drive_items(root).get(driveItemId) if driveId == DRIVE_ID else None
+            if parent is None or not parent.is_dir():
+                return _graph_api_error(404, "Not Found", *_ITEM_NOT_FOUND)
+            name = body.get("name")
+            if not name or "folder" not in body:
+                return _graph_api_error(400, "Bad Request", "invalidRequest", "The request is malformed or incorrect.")
+            if any(p.name.casefold() == name.casefold() for p in parent.iterdir()):
+                behavior = body.get("@microsoft.graph.conflictBehavior", "rename")
+                if behavior != "rename":  # replace is not emulated: the agent sends fail
+                    return _graph_api_error(409, "Conflict", "nameAlreadyExists", "Name already exists")
+                name = _free_name(parent, name)
+            (parent / name).mkdir()
+            return _ok(_drive_item(root, parent / name))
+
+    @drive_tool("create-upload-session", "Create an upload session.", read_only=False)
+    def create_upload_session(driveId: str, driveItemId: str, body: dict, includeHeaders: bool | None = None,
+                              excludeResponse: bool | None = None, confirm: bool | None = None) -> CallToolResult:
+        # A new file is addressed as `{parentId}:/{file name}:` (the real server percent-encodes it).
+        match = re.fullmatch(r"(?P<parent>[^:/]+):/(?P<name>[^/]+):", driveItemId)
+        root = drive_path()
+        with _exclusive(root):
+            parent = _drive_items(root).get(match["parent"]) if match and driveId == DRIVE_ID else None
+            if parent is None or not parent.is_dir():
+                return _graph_api_error(404, "Not Found", *_ITEM_NOT_FOUND)
+            item = body.get("item") or {}
+            if "name" in item:  # as Graph answered the probe (ticket 02)
+                return _graph_api_error(400, "Bad Request", "invalidRequest", "The request is malformed or incorrect.")
+            return _ok(_new_upload_session(root, parent, match["name"],
+                                           item.get("@microsoft.graph.conflictBehavior", "fail")))
 
     # --- Drafts (Write actions; the real server annotates POST tools readOnlyHint false) ---
 

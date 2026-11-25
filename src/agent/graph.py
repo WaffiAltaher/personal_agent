@@ -46,6 +46,7 @@ import asyncio
 import logging
 import operator
 import random
+from collections.abc import Callable, Mapping
 from contextlib import asynccontextmanager
 from datetime import date, datetime, time
 from pathlib import Path
@@ -74,7 +75,7 @@ from agent.memory.context_view import (
 )
 from agent.memory.run_log import build_run_record
 from agent.tools import LOCAL_TOOLS
-from agent.tools.classification import is_outbound_read, is_read
+from agent.tools.classification import is_outbound_read, is_read, pre_approval_check
 from agent.tools.mcp_loader import TransientMcpError
 from agent.tools.transient import is_transient
 from agent.prompts import get_prompt
@@ -388,10 +389,23 @@ def build_rejection_message(tool_call: dict, *, reason: str) -> ToolMessage:
     )
 
 
+CHECK_FAILED = "Nothing was run and the owner was not asked. Correct the arguments and propose it again."
+
+
+def build_check_failure_message(tool_call: dict, error: str) -> ToolMessage:
+    return ToolMessage(
+        content=f"{error} {CHECK_FAILED}",
+        tool_call_id=tool_call["id"],
+        name=tool_call["name"],
+        status="error",
+    )
+
+
 def human_review_node(
     state: AgentState,
     read_tool_names: frozenset[str],
     outbound_read_names: frozenset[str],
+    checks: Mapping[str, Callable[[dict], str | None]] | None = None,
 ) -> Command[Literal["tools", "agent"]]:
     """
     Human-in-the-loop gate between agent and tools.
@@ -402,6 +416,8 @@ def human_review_node(
       name) → calls interrupt() to pause the graph.
     - An Outbound read (names in outbound_read_names) is a read until the
       conversation holds the owner's data; after that it pauses too (ADR-017).
+    - A call whose pre-approval check (in `checks`, by tool name) refuses its
+      arguments is answered with that error and never put to the owner.
 
     The interrupt payload is displayed by the CLI (or any frontend).
     When the user responds, the graph resumes with their decision.
@@ -421,9 +437,20 @@ def human_review_node(
         state["messages"], read_tool_names, outbound_read_names
     )
 
+    # A call whose arguments can't be right is answered now: it never runs, so it needs no
+    # Approval. The checks are pure, so re-running this on resume gives the same answers.
+    check_failures = []
+    for tc in calls_needing_approval:
+        check = (checks or {}).get(tc["name"])
+        error = check(tc["args"]) if check else None
+        if error:
+            check_failures.append(build_check_failure_message(tc, error))
+    refused = {m.tool_call_id for m in check_failures}
+    calls_needing_approval = [tc for tc in calls_needing_approval if tc["id"] not in refused]
+
     if not calls_needing_approval:
         # Nothing here needs approval — proceed without interrupting
-        return Command(goto="tools")
+        return Command(goto="tools", update={"messages": check_failures}) if check_failures else Command(goto="tools")
 
     # Build a human-readable summary of what is about to happen
     action_summary = "\n".join(
@@ -445,7 +472,7 @@ def human_review_node(
     })
 
     if decision == "approve":
-        return Command(goto="tools")
+        return Command(goto="tools", update={"messages": check_failures}) if check_failures else Command(goto="tools")
 
     if isinstance(decision, dict) and decision.get("kind") == "reject_writes":
         reason = decision.get("reason") or OWNER_REJECTED
@@ -456,7 +483,7 @@ def human_review_node(
         build_rejection_message(tc, reason=reason)
         for tc in calls_needing_approval
     ]
-    return Command(goto="tools", update={"messages": rejection_messages})
+    return Command(goto="tools", update={"messages": check_failures + rejection_messages})
 
 
 # ---------------------------------------------------------------------------
@@ -547,6 +574,7 @@ def build_graph(
     # Classification is read once, from the tools actually bound to the graph.
     read_tool_names = frozenset(t.name for t in tools if is_read(t))
     outbound_read_names = frozenset(t.name for t in tools if is_outbound_read(t))
+    checks = {t.name: check for t in tools if (check := pre_approval_check(t))}
 
     # bind_tools serialises Pydantic schemas and docstrings into the JSON format
     # the model API expects, so the model knows what tools it can call and how.
@@ -705,7 +733,7 @@ def build_graph(
     graph.add_node("check_context_budget", make_check_context_budget(tools, today))
     graph.add_node("agent", agent_node)
     def human_review(state: AgentState) -> Command[Literal["tools", "agent"]]:
-        return human_review_node(state, read_tool_names, outbound_read_names)
+        return human_review_node(state, read_tool_names, outbound_read_names, checks)
 
     graph.add_node("human_review", human_review)
     # No node-level retry: retrying here would re-run every tool call in the
