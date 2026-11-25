@@ -18,7 +18,7 @@ owner's data, so a prompt injection can't carry that data out in a query.
 - MCP tools are classified by `classify_mcp_tools`, once per server, at load time.
 """
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 
 from langchain_core.tools import BaseTool
 
@@ -56,6 +56,25 @@ def action_class(tool: BaseTool | None) -> str:
     """The tool's class; anything not explicitly classified is a Write action. Fails closed."""
     declared = (tool.metadata or {}).get(ACTION_CLASS_KEY) if tool is not None else None
     return declared if declared in (READ, OUTBOUND_READ) else WRITE
+
+
+PRE_APPROVAL_CHECK_KEY = "pre_approval_check"
+
+
+def with_pre_approval_check(tool: BaseTool, check: Callable[[dict], str | None]) -> BaseTool:
+    """Give a Write action a check of its arguments, run before the owner is asked.
+
+    `check` takes the call's arguments and returns an error to send back to the model, or None.
+    It must be pure: the review node runs it again when the graph resumes. A call it refuses is
+    never run, so it needs no Approval; it never makes a call skip one.
+    """
+    tool.metadata = {**(tool.metadata or {}), PRE_APPROVAL_CHECK_KEY: check}
+    return tool
+
+
+def pre_approval_check(tool: BaseTool | None) -> Callable[[dict], str | None] | None:
+    """The tool's pre-approval check, if it has one."""
+    return (tool.metadata or {}).get(PRE_APPROVAL_CHECK_KEY) if tool is not None else None
 
 
 def classify_as(tool: BaseTool, action: str) -> BaseTool:

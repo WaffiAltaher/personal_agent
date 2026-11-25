@@ -25,6 +25,7 @@ from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel, Field
 
 from agent.tools import attachment_save
+from agent.tools.classification import with_pre_approval_check
 from agent.tools.mcp_loader import ToolWrapper
 
 OUTLOOK_FOLDER = "outlook"  # this mailbox's subfolder of the agent folder
@@ -130,6 +131,20 @@ async def _save(
         temporary.unlink(missing_ok=True)  # place_file removes it too; this covers every other way out
 
 
+def same_message_and_attachment_id(args: dict) -> str | None:
+    """Refuse the attachment's ID passed as the message ID too, before the owner is asked.
+
+    An Outlook attachment ID starts with almost all of its message's ID, so the model can copy
+    the wrong one (it did on 2026-11-25, and the corrected call needed a second Approval).
+    """
+    if args.get("message_id") and args.get("message_id") == args.get("attachment_id"):
+        return (
+            "Error: message_id and attachment_id are the same value. message_id must be the "
+            "Outlook message's ID (the `id` from list-mail-messages or get-mail-message), not the attachment's."
+        )
+    return None
+
+
 def build_save_attachment(name: str, tools: Mapping[str, BaseTool]) -> BaseTool:
     """The model-facing save tool, over the server's list-mail-attachments and download-bytes-to-file."""
 
@@ -141,11 +156,14 @@ def build_save_attachment(name: str, tools: Mapping[str, BaseTool]) -> BaseTool:
         except Exception as e:
             return f"Error: {type(e).__name__}: {e}"
 
-    return StructuredTool.from_function(
-        coroutine=save_attachment,
-        name=name,
-        description=DESCRIPTION,
-        args_schema=SaveOutlookAttachmentInput,
+    return with_pre_approval_check(
+        StructuredTool.from_function(
+            coroutine=save_attachment,
+            name=name,
+            description=DESCRIPTION,
+            args_schema=SaveOutlookAttachmentInput,
+        ),
+        same_message_and_attachment_id,
     )
 
 
