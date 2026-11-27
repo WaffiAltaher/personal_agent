@@ -153,3 +153,26 @@ async def test_check_is_skipped_in_fixtures_mode_or_without_a_claude_code_model(
     await run_cli.start(*args)
 
     assert run_cli.calls() == []
+
+
+def test_the_login_check_does_not_hand_claude_the_terminal(tmp_path):
+    """`claude auth status` puts a terminal on its stdin in raw mode and restores it on exit; two
+    overlapping checks leave it raw, so Ctrl-C no longer stops the agent. The check gets no terminal."""
+    seen = tmp_path / "stdin_is_tty"
+    binary = tmp_path / "claude"
+    binary.write_text(
+        f"#!{sys.executable}\nimport json, os, sys\n"
+        f"open({str(seen)!r}, 'w').write(str(os.isatty(0)))\n"
+        f"print(json.dumps({LOGGED_IN!r}))\n"
+    )
+    binary.chmod(0o755)
+    master, slave = os.openpty()
+    saved_stdin = os.dup(0)
+    try:
+        os.dup2(slave, 0)  # the agent runs in a terminal
+        claude_code_auth.check_claude_code_login(str(binary))
+    finally:
+        os.dup2(saved_stdin, 0)
+        for fd in (saved_stdin, master, slave):
+            os.close(fd)
+    assert seen.read_text() == "False"

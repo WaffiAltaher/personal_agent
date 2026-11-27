@@ -34,8 +34,10 @@ def check_claude_code_login(binary: str) -> None:
         ClaudeCodeLoginCheckTimeout: if the CLI does not answer within LOGIN_CHECK_TIMEOUT_S
     """
     try:
+        # No terminal on stdin: Claude Code puts one in raw mode and restores it on exit, and two
+        # overlapping checks leave it raw, so Ctrl-C no longer reaches the agent.
         status_call = subprocess.run(
-            [binary, "auth", "status"], capture_output=True, text=True, env=claude_code_env(),
+            [binary, "auth", "status"], stdin=subprocess.DEVNULL, capture_output=True, text=True, env=claude_code_env(),
             timeout=LOGIN_CHECK_TIMEOUT_S,
         )
     except FileNotFoundError:
